@@ -5,12 +5,12 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { adapterFor } from '../adapters/index.ts';
-import { buildReviewPrompt, buildWorkPrompt } from '../agents/prompt.ts';
-import { parseReport, type WorkReport } from '../agents/report.ts';
+import { buildDraftPrompt, buildReviewPrompt, buildWorkPrompt } from '../agents/prompt.ts';
+import { parseDrafts, parseReport, type TicketDraft, type WorkReport } from '../agents/report.ts';
 import { writeDecision } from '../approvals/file-queue.ts';
 import type { Actor } from '../core/ticket-machine.ts';
 import type { Employee, Evidence, FailureClass, Project, Ticket, TicketStatus } from '../core/types.ts';
-import { TERMINAL_STATUSES } from '../core/types.ts';
+import { DEFAULT_BUDGET, TERMINAL_STATUSES } from '../core/types.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
 import { locateExecutable } from '../runner/locate.ts';
 import { isSameProcessAlive, readExitRecord, startProcess, waitForExit } from '../runner/process.ts';
@@ -32,7 +32,7 @@ import {
   ticketBranch,
 } from '../workspace/workspace.ts';
 import { Company, DomainError } from './company.ts';
-import { newId, Records, sha256, type RunRecord } from './records.ts';
+import { newId, Records, sha256, type CeoRequest, type RunRecord } from './records.ts';
 
 const ORCH: Actor = { kind: 'orchestrator' };
 const CEO: Actor = { kind: 'ceo' };
@@ -206,6 +206,10 @@ export class Orchestrator {
     try {
       await this.pollToolApprovals();
       for (const t of this.company.tickets()) {
+        if (t.hold?.reason === 'waiting_dependency' && t.dependsOn.every((d) => this.company.requireTicket(d).status === 'done')) {
+          this.apply(t.id, { type: 'release_hold' }); // 선행 업무가 끝나면 오케스트레이터가 스스로 해제
+          continue;
+        }
         if (TERMINAL_STATUSES.includes(t.status) || t.hold || this.busy.has(t.id)) continue;
         try {
           await this.advance(t);
@@ -370,9 +374,9 @@ export class Orchestrator {
   }
 
   private async launch(p: {
-    ticket: Ticket;
+    ticket: Pick<Ticket, 'id' | 'round' | 'budget'>;
     employee: Employee;
-    kind: 'work' | 'review';
+    kind: 'work' | 'review' | 'analysis';
     cwd: string;
     prompt: string;
     nonce: string;
@@ -479,6 +483,7 @@ export class Orchestrator {
     run.exitCode = outcome?.exitCode ?? null;
 
     const fresh = run;
+    if (run.kind === 'analysis') return this.finishDrafts(run, parsed.finalText, outcome, stderr);
 
     const ticket = this.company.requireTicket(run.ticketId);
     const report = parseReport(parsed.finalText, { kind: run.kind === 'review' ? 'review' : 'work', nonce: run.nonce, requirementIds: ticket.requirements.map((r) => r.id) });
@@ -493,6 +498,7 @@ export class Orchestrator {
   }
 
   private async finishRun(run: RunRecord, failure: { failure: FailureClass; detail: string; orphan?: boolean } | null): Promise<void> {
+    if (run.kind === 'analysis') return this.finishDrafts(run, null, null, failure?.detail ?? '');
     run.endedAt = new Date().toISOString();
     run.status = failure ? (failure.orphan ? 'orphaned' : 'failed') : 'succeeded';
     run.failureClass = failure?.failure ?? null;
@@ -822,6 +828,113 @@ export class Orchestrator {
         this.records.setApprovalState(a.id, 'expired', 'orchestrator', { reason: '실행이 끝났습니다.' });
       }
     }
+  }
+
+  // ======================= 대표 요청 → 비서실장 초안 =======================
+
+  chiefOfStaff(): Employee | null {
+    return this.company.activeEmployees().find((e) => e.roles.includes('chief-of-staff')) ?? null;
+  }
+
+  /** 대표 요청을 비서실장에게 보낸다. 비서실장은 읽기 전용으로 저장소를 보고 티켓 초안만 낸다. */
+  async submitRequest(projectId: string, text: string): Promise<CeoRequest> {
+    const project = this.company.requireProject(projectId);
+    const chief = this.chiefOfStaff();
+    if (!chief) throw new DomainError('비서실장 역할의 활성 직원이 없습니다. 직원에게 비서실장 역할을 주거나 업무를 직접 만드세요.');
+    if (!text.trim()) throw new DomainError('요청 내용이 비어 있습니다.');
+    const req: CeoRequest = {
+      id: newId('Q'),
+      projectId,
+      text: text.trim(),
+      status: 'drafting',
+      employeeId: chief.id,
+      runId: null,
+      summary: '',
+      drafts: [],
+      questions: [],
+      error: null,
+      ticketIds: [],
+      createdAt: new Date().toISOString(),
+    };
+    this.records.saveRequest(req);
+    this.company.store.appendEvent('ceo', 'request.submitted', req.id, { text: req.text.slice(0, 300), chief: chief.id });
+    const paths = projectPaths(this.opts.dataDir, project.id);
+    const cwd = await this.withProjectLock(project.id, async () => {
+      const base = await syncMirror(project.originPath, paths, project.baseBranch);
+      this.records.setExpectedRef(project.id, `refs/heads/${project.baseBranch}`, base);
+      return ensureDetachedWorktree(paths, 'review', `_request-${req.id}`, base);
+    });
+    const nonce = randomBytes(6).toString('hex');
+    const prompt = buildDraftPrompt({ employee: chief, project, requestId: req.id, request: req.text, nonce, decisions: this.records.decisions(project.id, 'current'), language: this.opts.language });
+    await this.launch({ ticket: { id: req.id, round: 1, budget: DEFAULT_BUDGET }, employee: chief, kind: 'analysis', cwd, prompt, nonce, accessLevel: 'read-only', baseSha: null });
+    const run = this.records.runsForTicket(req.id).at(-1);
+    const saved = this.records.request(req.id)!;
+    if (run && saved.status === 'drafting') this.records.saveRequest({ ...saved, runId: run.id });
+    this.changed('request', req.id);
+    return this.records.request(req.id)!;
+  }
+
+  private async finishDrafts(run: RunRecord, finalText: string | null, outcome: { timedOut: boolean } | null, stderr: string): Promise<void> {
+    const req = this.records.request(run.ticketId);
+    const parsed = outcome?.timedOut ? ({ ok: false, reason: 'timeout', detail: '시간 초과' } as const) : parseDrafts(finalText, run.nonce);
+    run.endedAt = new Date().toISOString();
+    run.status = parsed.ok ? 'succeeded' : 'failed';
+    run.reportError = parsed.ok ? null : `${parsed.detail}${stderr ? `\n${stderr.slice(-500)}` : ''}`;
+    run.summary = parsed.ok ? parsed.report.summary : '';
+    this.records.saveRun(run);
+    if (req) {
+      this.records.saveRequest({
+        ...req,
+        runId: run.id,
+        status: parsed.ok ? 'drafted' : 'failed',
+        summary: parsed.ok ? parsed.report.summary : '',
+        drafts: parsed.ok ? parsed.report.tickets : [],
+        questions: parsed.ok ? parsed.report.questions : [],
+        error: parsed.ok ? null : run.reportError,
+      });
+      this.company.store.appendEvent(run.employeeId, parsed.ok ? 'request.drafted' : 'request.failed', req.id, { count: parsed.ok ? parsed.report.tickets.length : 0 });
+    }
+    this.changed('request', run.ticketId);
+  }
+
+  /** 대표가 초안을 확정한다(고친 초안을 넘길 수 있음). 티켓은 대표 명의로 만들어진다. */
+  acceptRequest(requestId: string, drafts?: TicketDraft[]): Ticket[] {
+    const req = this.records.request(requestId);
+    if (!req || req.status !== 'drafted') throw new DomainError('확정할 수 있는 초안이 없습니다.');
+    const list = drafts ?? req.drafts;
+    const created: Ticket[] = [];
+    this.company.store.transact(() => {
+      for (const d of list) {
+        const deps = d.dependsOn.map((i) => created[i]?.id).filter((x): x is string => Boolean(x));
+        created.push(
+          this.company.createTicket(
+            {
+              projectId: req.projectId,
+              type: d.type,
+              title: d.title,
+              purpose: d.purpose,
+              requirements: d.requirements.map((r) => ({ text: r.text, evidenceType: r.evidenceType as Evidence['type'] })),
+              doneCriteria: d.doneCriteria,
+              writeScope: d.writeScope,
+              dependsOn: deps,
+            },
+            CEO,
+          ),
+        );
+      }
+      this.records.saveRequest({ ...req, status: 'accepted', ticketIds: created.map((t) => t.id) });
+      this.company.store.appendEvent('ceo', 'request.accepted', req.id, { tickets: created.map((t) => t.id) });
+    });
+    this.changed('request', requestId);
+    return created;
+  }
+
+  dismissRequest(requestId: string): void {
+    const req = this.records.request(requestId);
+    if (!req) throw new DomainError('요청이 없습니다.');
+    this.records.saveRequest({ ...req, status: 'dismissed' });
+    this.company.store.appendEvent('ceo', 'request.dismissed', req.id, {});
+    this.changed('request', requestId);
   }
 
   // ======================= 대표 조작 =======================

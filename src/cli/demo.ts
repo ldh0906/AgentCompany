@@ -40,7 +40,7 @@ export async function seedDemo(company: Company, orch: Orchestrator, dataDir: st
 
   company.hireEmployee({ name: '하나 (성실)', roles: ['implementer'], cli: 'fake', model: 'diligent' });
   company.hireEmployee({ name: '둘 (게으름)', roles: ['recorder', 'planner'], cli: 'fake', model: 'lazy' });
-  company.hireEmployee({ name: '셋 (QA)', roles: ['qa'], cli: 'fake', model: 'diligent' });
+  company.hireEmployee({ name: '셋 (QA·비서실장)', roles: ['qa', 'chief-of-staff'], cli: 'fake', model: 'diligent' });
   company.hireEmployee({ name: '넷 (범위 위반)', roles: ['implementer'], cli: 'fake', model: 'rogue' });
 
   orch.records.recordDecision(project.id, '파티 최대 인원은 아직 정하지 않았다. 구현자는 임의로 정하지 않는다.');

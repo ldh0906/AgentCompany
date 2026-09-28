@@ -3,6 +3,7 @@ import { api, type Approval, type DomainEvent, type State } from '../api.ts';
 import { Link, useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
 import { empName, HoldChip, Modal, StatusChip, useAction, when } from '../components/ui.tsx';
+import { RequestBox } from './Requests.tsx';
 
 const ACTIVE = ['assigned', 'in_progress', 'verifying', 'in_review', 'changes_requested', 'integrating'];
 
@@ -25,6 +26,10 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
     case 'ticket.run_aborted': return ko ? `${e.entityId} 실행 중단: ${p.reason}` : `${e.entityId} run aborted: ${p.reason}`;
     case 'ticket.waiting_lock': return ko ? `${e.entityId} 대기: ${p.conflictWith}와 쓰기 범위가 겹쳐 순서를 기다립니다` : `${e.entityId} waiting: write scope overlaps ${p.conflictWith}`;
     case 'ticket.released': return ko ? `${e.entityId} 보류 해제` : `${e.entityId} hold released`;
+    case 'request.submitted': return ko ? `대표 요청 → 비서실장: ${String(p.text ?? '').slice(0, 60)}` : `Request to chief of staff: ${String(p.text ?? '').slice(0, 60)}`;
+    case 'request.drafted': return ko ? `비서실장이 업무 초안 ${p.count}개 작성` : `Chief of staff drafted ${p.count} tickets`;
+    case 'request.accepted': return ko ? `대표가 초안 확정: ${(p.tickets as string[]).join(', ')}` : `CEO accepted drafts: ${(p.tickets as string[]).join(', ')}`;
+    case 'evidence.attested': return ko ? `${e.entityId} ${p.requirementId} 대표 직접 확인` : `${e.entityId} ${p.requirementId} attested by CEO`;
     case 'employee.hired': return ko ? `직원 추가: ${p.name}` : `Hired ${p.name}`;
     case 'approval.requested': return ko ? `승인 요청: ${p.summary}` : `Approval requested: ${p.summary}`;
     case 'orchestrator.recovered': return ko ? '재시작 복구 완료' : 'Recovered after restart';
@@ -129,6 +134,7 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
 
       <div className="grid cols-2">
         <div className="grid" style={{ alignContent: 'start' }}>
+          <RequestBox />
           <div className="card">
             <h2>{t('approvals')} <span className="chip warn">{state.approvals.length}</span></h2>
             <div className="list">

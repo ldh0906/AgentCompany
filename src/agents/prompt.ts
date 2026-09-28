@@ -4,7 +4,7 @@
 import type { Decision, Employee, Evidence, Project, Ticket } from '../core/types.ts';
 
 export interface TaskHeader {
-  kind: 'work' | 'review';
+  kind: 'work' | 'review' | 'drafts';
   ticketId: string;
   nonce: string;
   round: number;
@@ -158,4 +158,47 @@ export function parseTaskHeader(prompt: string): TaskHeader | null {
   } catch {
     return null;
   }
+}
+
+export interface DraftPromptInput {
+  employee: Employee;
+  project: Project;
+  requestId: string;
+  request: string;
+  nonce: string;
+  decisions: Decision[];
+  language: string;
+}
+
+/** 비서실장: 대표 요청을 티켓 초안으로 나눈다. 티켓을 직접 만들 권한은 없고, 대표가 초안을 확정한다. */
+export function buildDraftPrompt(i: DraftPromptInput): string {
+  const header: TaskHeader = { kind: 'drafts', ticketId: i.requestId, nonce: i.nonce, round: 1, writeScope: [], requirementIds: [], evidenceIds: [] };
+  const fence = '```';
+  return `${TASK_HEADER_PREFIX}${JSON.stringify(header)} -->
+You are "${i.employee.name}", chief of staff at an AI development company run by a human CEO.
+Your current directory is a READ-ONLY copy of the project "${i.project.name}". Read it as needed. Do not modify anything.
+
+Turn the CEO request below into a small set of well-scoped tickets that other employees will implement and independently review.
+Rules:
+- Each ticket has a narrow write scope (globs). Tickets that touch the same files must depend on each other (dependsOn = earlier ticket indexes).
+- Each requirement names the MINIMUM evidence that proves it: unit_test / static_check need a verify command to exist; runtime or visual checks need "human_attest"; documents need "inspection".
+- Do not decide product rules or numbers the CEO has not decided. Put them in "questions".
+- Prefer 1-5 tickets. Fewer is better.
+
+${dataBlock('CEO request', i.request)}
+
+${dataBlock('Project verify commands (evidence the system can produce)', i.project.verifyCommands.map((v) => `- ${v.label} [${v.evidenceType}]: ${v.argv.join(' ')}`).join('\n'))}
+
+${dataBlock('Protected paths (never writable)', i.project.protectedPaths.join('\n'))}
+
+${dataBlock('Current decisions', i.decisions.map((d) => `- [${d.id}] ${d.text}`).join('\n'))}
+
+${dataBlock('Project document rules', i.project.docRules)}
+
+## Final answer format (required)
+Write titles and text in language "${i.language}". End with exactly one JSON code block:
+${fence}json
+{"nonce":"${i.nonce}","kind":"drafts","summary":"...","tickets":[{"type":"impl|doc|review|research","title":"...","purpose":"...","requirements":[{"text":"...","evidenceType":"unit_test"}],"doneCriteria":"...","writeScope":["src/feature/**"],"dependsOn":[]}],"questions":[]}
+${fence}
+`;
 }

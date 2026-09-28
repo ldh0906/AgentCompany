@@ -26,6 +26,20 @@ export interface AdapterInfo {
   capabilities: { accessLevels: Employee['accessLevel'][]; permissionRelay: boolean; resume: boolean; profileEnvVar: string | null; notes: string[] };
 }
 
+export interface CeoRequest {
+  id: string;
+  projectId: string;
+  text: string;
+  status: 'drafting' | 'drafted' | 'failed' | 'accepted' | 'dismissed';
+  employeeId: string;
+  summary: string;
+  drafts: { type: string; title: string; purpose: string; requirements: { text: string; evidenceType: string }[]; doneCriteria: string; writeScope: string[]; dependsOn: number[] }[];
+  questions: string[];
+  error: string | null;
+  ticketIds: string[];
+  createdAt: string;
+}
+
 export interface State {
   employees: Employee[];
   projects: Project[];
@@ -36,6 +50,8 @@ export interface State {
   decisions: Decision[];
   adapters: AdapterInfo[];
   events: DomainEvent[];
+  requests: CeoRequest[];
+  chiefOfStaff: string | null;
 }
 
 const TOKEN_KEY = 'agent-company-token';

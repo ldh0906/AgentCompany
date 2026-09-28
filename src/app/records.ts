@@ -2,7 +2,7 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import type { Store } from '../store/db.ts';
-import type { AgentReport } from '../agents/report.ts';
+import type { AgentReport, TicketDraft } from '../agents/report.ts';
 import type { Approval, ApprovalKind, ApprovalState, Decision, DecisionStatus, Evidence, Run, Ticket } from '../core/types.ts';
 import { TERMINAL_STATUSES } from '../core/types.ts';
 import { scopesOverlap } from '../workspace/workspace.ts';
@@ -26,6 +26,22 @@ export interface RunRecord extends Run {
   reportError: string | null;
   finalText: string | null;
   summary: string;
+}
+
+/** 대표 요청 → 비서실장 초안 → 대표 확정. */
+export interface CeoRequest {
+  id: string;
+  projectId: string;
+  text: string;
+  status: 'drafting' | 'drafted' | 'failed' | 'accepted' | 'dismissed';
+  employeeId: string;
+  runId: string | null;
+  summary: string;
+  drafts: TicketDraft[];
+  questions: string[];
+  error: string | null;
+  ticketIds: string[];
+  createdAt: string;
 }
 
 export function newId(prefix: string): string {
@@ -62,6 +78,17 @@ export class Records {
   latestSubmission(ticket: Ticket): RunRecord | null {
     const runs = this.runsForTicket(ticket.id).filter((r) => r.kind === 'work' && r.status === 'succeeded' && r.round === ticket.round);
     return runs.at(-1) ?? null;
+  }
+
+  // ---- 대표 요청 ----
+  saveRequest(r: CeoRequest): void {
+    this.store.put('requests', r.id, r, { project_id: r.projectId, status: r.status, created_at: r.createdAt });
+  }
+  request(id: string): CeoRequest | null {
+    return this.store.get<CeoRequest>('requests', id);
+  }
+  requests(limit = 30): CeoRequest[] {
+    return this.store.list<CeoRequest>('requests', 'ORDER BY created_at DESC LIMIT ?', limit);
   }
 
   // ---- 증거 ----

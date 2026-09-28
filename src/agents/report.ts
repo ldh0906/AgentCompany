@@ -119,3 +119,76 @@ export function parseReport(finalText: string | null, expected: { kind: 'work' |
   if (missing.length) return bad(`판정에 요구사항 ${missing.join(', ')}이(가) 없습니다.`);
   return { ok: true, report: { kind: 'review', nonce: expected.nonce, verdict: r.verdict as ReviewReport['verdict'], summary: r.summary, requirements: reqs } };
 }
+
+// ---- 비서실장 티켓 초안 ----
+
+export interface TicketDraft {
+  type: 'impl' | 'doc' | 'review' | 'research';
+  title: string;
+  purpose: string;
+  requirements: { text: string; evidenceType: string }[];
+  doneCriteria: string;
+  writeScope: string[];
+  dependsOn: number[]; // 같은 초안 목록 안의 앞선 인덱스
+}
+
+export interface DraftReport {
+  kind: 'drafts';
+  nonce: string;
+  summary: string;
+  tickets: TicketDraft[];
+  questions: string[];
+}
+
+const DRAFT_TYPES = ['impl', 'doc', 'review', 'research'];
+const DRAFT_EVIDENCE = ['mockup', 'inspection', 'static_check', 'unit_test', 'runtime', 'human_attest'];
+
+export function parseDrafts(
+  finalText: string | null,
+  nonce: string,
+): { ok: true; report: DraftReport } | { ok: false; reason: 'no_json' | 'nonce_mismatch' | 'schema_invalid'; detail: string } {
+  if (!finalText) return { ok: false, reason: 'no_json', detail: '최종 응답이 없습니다.' };
+  const raw = extractLastJson(finalText) as Record<string, unknown> | null;
+  if (!raw || typeof raw !== 'object') return { ok: false, reason: 'no_json', detail: 'JSON 초안을 찾지 못했습니다.' };
+  if (raw.nonce !== nonce) return { ok: false, reason: 'nonce_mismatch', detail: 'nonce 불일치' };
+  if (!Array.isArray(raw.tickets) || raw.tickets.length === 0 || raw.tickets.length > 12) {
+    return { ok: false, reason: 'schema_invalid', detail: 'tickets는 1~12개 배열이어야 합니다.' };
+  }
+  const tickets: TicketDraft[] = [];
+  for (const [i, x] of (raw.tickets as unknown[]).entries()) {
+    const d = x as Record<string, unknown>;
+    const type = String(d.type);
+    const reqs = Array.isArray(d.requirements) ? (d.requirements as Record<string, unknown>[]) : [];
+    if (!DRAFT_TYPES.includes(type) || !isStr(d.title) || !d.title.trim() || !reqs.length) {
+      return { ok: false, reason: 'schema_invalid', detail: `초안 ${i + 1}의 형식이 잘못되었습니다.` };
+    }
+    const writeScope = Array.isArray(d.writeScope) ? (d.writeScope as unknown[]).filter(isStr) : [];
+    if ((type === 'impl' || type === 'doc') && !writeScope.length) {
+      return { ok: false, reason: 'schema_invalid', detail: `초안 ${i + 1}에 쓰기 범위가 없습니다.` };
+    }
+    tickets.push({
+      type: type as TicketDraft['type'],
+      title: d.title.slice(0, 200),
+      purpose: isStr(d.purpose) ? d.purpose : '',
+      requirements: reqs
+        .map((r) => ({
+          text: String(r.text ?? '').slice(0, 2000),
+          evidenceType: DRAFT_EVIDENCE.includes(String(r.evidenceType)) ? String(r.evidenceType) : 'inspection',
+        }))
+        .filter((r) => r.text),
+      doneCriteria: isStr(d.doneCriteria) && d.doneCriteria ? d.doneCriteria : '요구사항 충족',
+      writeScope,
+      dependsOn: Array.isArray(d.dependsOn) ? (d.dependsOn as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n < i) : [],
+    });
+  }
+  return {
+    ok: true,
+    report: {
+      kind: 'drafts',
+      nonce,
+      summary: isStr(raw.summary) ? raw.summary : '',
+      tickets,
+      questions: Array.isArray(raw.questions) ? (raw.questions as unknown[]).filter(isStr) : [],
+    },
+  };
+}

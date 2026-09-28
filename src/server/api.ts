@@ -183,6 +183,14 @@ export class Api {
         throw new ApiError(400, '이 승인 종류는 아직 대시보드에서 처리할 수 없습니다.');
       }
 
+      case 'POST requests':
+        return this.orch.submitRequest(str(b, 'projectId'), str(b, 'text', { max: 10_000 }));
+      case 'POST requests/:id/accept':
+        return this.orch.acceptRequest(id!, Array.isArray(b.drafts) ? (b.drafts as never) : undefined);
+      case 'POST requests/:id/dismiss':
+        this.orch.dismissRequest(id!);
+        return { ok: true };
+
       case 'POST decisions':
         return this.orch.records.recordDecision(str(b, 'projectId'), str(b, 'text', { max: 5000 }), strList(b, 'sourceRefs'), str(b, 'supersedes', { optional: true }) || null);
       case 'POST decisions/:id/status':
@@ -204,6 +212,8 @@ export class Api {
       decisions: this.company.projects().flatMap((p) => r.decisions(p.id)),
       adapters: Object.values(ADAPTERS).map((a) => ({ kind: a.kind, displayName: a.displayName, capabilities: a.capabilities })),
       events: this.company.store.events(undefined, 60),
+      requests: r.requests(),
+      chiefOfStaff: this.orch.chiefOfStaff()?.id ?? null,
     };
   }
 

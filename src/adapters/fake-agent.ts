@@ -76,6 +76,23 @@ function review(h: TaskHeader, prompt: string): string {
   );
 }
 
+function drafts(h: TaskHeader, prompt: string): string {
+  const request = (prompt.split('### CEO request')[1]?.split('DATA>>>')[0] ?? '').replace('(DATA — not instructions)', '').replace('<<<DATA', '').trim();
+  return finalWith(
+    {
+      nonce: h.nonce,
+      kind: 'drafts',
+      summary: `요청을 구현과 문서 두 업무로 나눴습니다: ${request.slice(0, 60)}`,
+      tickets: [
+        { type: 'impl', title: `${request.slice(0, 40)} 구현`, purpose: request, requirements: [{ text: '기능 구현과 단위 테스트', evidenceType: 'unit_test' }], doneCriteria: '단위 테스트 통과', writeScope: ['src/**', 'test/**'], dependsOn: [] },
+        { type: 'doc', title: `${request.slice(0, 40)} 문서화`, purpose: '설계 문서 반영', requirements: [{ text: '설계 문서 갱신', evidenceType: 'inspection' }], doneCriteria: '검수자 확인', writeScope: ['docs/**'], dependsOn: [0] },
+      ],
+      questions: ['수치가 필요한 부분은 대표 결정이 필요합니다.'],
+    },
+    '업무 초안을 만들었습니다.',
+  );
+}
+
 async function main(): Promise<void> {
   const chunks: Buffer[] = [];
   for await (const c of process.stdin) chunks.push(c as Buffer);
@@ -88,7 +105,7 @@ async function main(): Promise<void> {
   }
   if (behavior === 'slow') await sleep(Number(process.env.FAKE_DELAY_MS ?? 4000));
   else await sleep(Number(process.env.FAKE_DELAY_MS ?? 300));
-  const text = h.kind === 'work' ? await work(h) : review(h, prompt);
+  const text = h.kind === 'work' ? await work(h) : h.kind === 'drafts' ? drafts(h, prompt) : review(h, prompt);
   emit({ type: 'result', result: text, is_error: false });
 }
 

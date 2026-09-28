@@ -38,13 +38,16 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX events_entity ON events(entity_id);
   `,
+  `
+  CREATE TABLE requests (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL);
+  `,
 ];
 
 export const GENESIS_HASH = '0'.repeat(64);
 
 type Row = Record<string, unknown>;
 
-export type EntityTable = 'projects' | 'employees' | 'tickets' | 'runs' | 'approvals' | 'evidence' | 'claims' | 'decisions' | 'messages';
+export type EntityTable = 'projects' | 'employees' | 'tickets' | 'runs' | 'approvals' | 'evidence' | 'claims' | 'decisions' | 'messages' | 'requests';
 
 export class Store {
   readonly db: DatabaseSync;
