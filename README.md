@@ -8,7 +8,7 @@
 
 No API keys. It drives the official CLIs you are already logged into.
 
-[한국어](README.ko.md) · [Design](docs/design/01-design-report.md) · [Measured CLI facts](docs/design/02-m0-findings.md)
+[한국어](README.ko.md) · [Getting started](docs/getting-started.md) · [Concepts](docs/concepts.md) · [Design](docs/design/01-design-report.md) · [Measured CLI facts](docs/design/02-m0-findings.md)
 
 </div>
 

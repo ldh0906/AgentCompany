@@ -9,7 +9,7 @@
 
 API 키가 필요 없습니다. 이미 로그인해 둔 공식 CLI를 그대로 씁니다.
 
-[English](README.md) · [설계 문서](docs/design/01-design-report.md) · [실측 결과](docs/design/02-m0-findings.md)
+[English](README.md) · [시작 가이드 (영문)](docs/getting-started.md) · [핵심 개념 (영문)](docs/concepts.md) · [설계 문서](docs/design/01-design-report.md) · [실측 결과](docs/design/02-m0-findings.md)
 
 </div>
 
