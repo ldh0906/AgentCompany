@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type Approval, type Claim, type DomainEvent, type Evidence, type RunSummary, type Ticket } from '../api.ts';
 import { Link, useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
-import { CliChip, DiffView, empName, HoldChip, Modal, StatusChip, useAction, when } from '../components/ui.tsx';
+import { CliChip, DiffView, empName, HoldChip, Icon, Modal, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
 import { ApprovalItem, describeEvent } from './Dashboard.tsx';
 
 interface Detail {
@@ -38,7 +38,7 @@ export function TicketPage({ id }: { id: string }) {
     if (tab === 'diff') api<{ diff: string; changedPaths: string[] }>(`tickets/${id}/diff`).then(setDiff);
   }, [tab, id, state]);
 
-  if (!detail || !state) return <div className="emptystate">{t('loading')}</div>;
+  if (!detail || !state) return <Skeleton />;
   const tk = detail.ticket;
   const pending = detail.approvals.filter((a) => a.state === 'pending');
   const latestHead = detail.runs.filter((r) => r.kind === 'work' && r.headSha).at(-1)?.headSha;
@@ -91,7 +91,9 @@ export function TicketPage({ id }: { id: string }) {
 
       {tk.hold && (
         <div className="banner warn">
-          <b>⏸ {holdLabel(tk.hold.reason)}</b>
+          <b className="row" style={{ display: 'inline-flex' }}>
+            <Icon name="pause" size={14} /> {holdLabel(tk.hold.reason)}
+          </b>
           <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{tk.hold.note}</div>
         </div>
       )}

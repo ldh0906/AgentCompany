@@ -1,6 +1,6 @@
 // Claude Code 어댑터.
 // 실측(2026-09-28, 2.1.202): -p + stream-json + --verbose, stdin 프롬프트, session_id, --resume <id>, 한글 경로·긴 한글 출력 정상.
-// --permission-prompt-tool 은 --help에 없음(숨김 옵션 추정). 권한 중계는 실측 전까지 '미검증'으로 표시한다.
+// --permission-prompt-tool 은 --help에 없는 숨김 옵션이지만, 2.1.202에서 권한 중계를 실측했다(2026-09-29).
 import { tr } from '../core/i18n.ts';
 
 import path from 'node:path';
@@ -52,8 +52,8 @@ export const claudeAdapter: CliAdapter = {
           'Verified: headless stream-json, resume by ID, Korean paths and output (2.1.202)',
         ),
         tr(
-          '미검증: --permission-prompt-tool 권한 중계 (도움말에 없는 숨김 옵션)',
-          'Unverified: --permission-prompt-tool permission relay (hidden option, absent from help)',
+          '실측: --permission-prompt-tool 권한 중계 동작, 거부해도 실행 계속 (도움말에 없는 숨김 옵션)',
+          'Verified: --permission-prompt-tool relay works; a denial does not stop the run (hidden option, absent from help)',
         ),
         tr(
           '저장소의 .claude 설정(훅 등)이 실행되지 않도록 --setting-sources user 사용',

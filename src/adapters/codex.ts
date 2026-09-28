@@ -1,6 +1,6 @@
 // Codex CLI 어댑터 (exec 경로).
 // 실측(2026-09-28, 0.153.4): exec --json, stdin 프롬프트('-'), thread.started.thread_id, exec resume <id>, 한글 정상.
-// 실행 중 권한 중계는 app-server(JSON-RPC)가 필요하다: 메서드명은 로컬 generate-ts로 확인했으나 실사용 실측 전.
+// 실행 중 권한 중계는 app-server(JSON-RPC)가 필요하다: 0.153.4에서 명령·파일 변경 승인 중계를 실측했다(2026-09-29).
 // 그래서 읽기 전용·전체 자동은 exec, 승인 중계가 필요한 등급(2·3)은 codex-relay(app-server) 경로를 쓴다.
 import { tr } from '../core/i18n.ts';
 
@@ -35,7 +35,7 @@ export const codexAdapter: CliAdapter = {
           'Full-auto runs only in the workspace-write sandbox (no network or writes outside the workspace)',
         ),
         tr(
-          '등급 2·3은 app-server 중계(메서드명은 로컬 스키마로 확인, 실제 구독 실측 전)',
+          '실측: 등급 2·3은 app-server로 명령·파일 변경 승인을 중계(읽기 명령도 묻는다)',
           'Levels 2–3 use app-server relay (method names checked against local schema; subscription testing pending)',
         ),
         tr(

@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { api, type Approval, type DomainEvent, type State } from '../api.ts';
-import { Link, useCompany } from '../App.tsx';
+import { Link, useCompany, useRoute } from '../App.tsx';
 import { useT } from '../i18n.ts';
-import { empName, HoldChip, Modal, StatusChip, useAction, when } from '../components/ui.tsx';
+import { empName, EmptyState, HoldChip, Icon, Modal, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
 import { RequestBox } from './Requests.tsx';
 
 const ACTIVE = ['assigned', 'in_progress', 'verifying', 'in_review', 'changes_requested', 'integrating'];
@@ -129,7 +129,9 @@ export function ApprovalItem({ a }: { a: Approval }) {
       <div className="spread">
         <div>
           <div className="title">
-            {a.kind === 'tool_permission' ? '🔐 ' : '✅ '}
+            <span className={`approval-mark ${a.kind === 'tool_permission' ? 'perm' : ''}`}>
+              <Icon name={a.kind === 'tool_permission' ? 'shield' : 'check'} size={13} />
+            </span>
             {a.ticketId ? <Link to={`/tickets/${a.ticketId}`}>{a.summary}</Link> : a.summary}
           </div>
           <div className="meta">
@@ -202,7 +204,7 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
   const { state, reload } = useCompany();
   const { t, lang, hold } = useT();
   const { busy, run } = useAction();
-  if (!state) return <div className="emptystate">{t('loading')}</div>;
+  if (!state) return <Skeleton />;
   const held = state.tickets.filter((x) => x.hold);
   const active = state.tickets.filter((x) => ACTIVE.includes(x.status) && !x.hold);
   const done = state.tickets.filter((x) => x.status === 'done');
@@ -221,31 +223,31 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
         </div>
       </div>
 
-      {state.projects.length === 0 && (
-        <div className="banner info">
-          {ko ? '먼저 ' : 'Start by '}
-          <Link to="/projects">{ko ? '프로젝트를 등록' : 'registering a project'}</Link>
-          {ko ? '하고 ' : ' and '}
-          <Link to="/org">{ko ? '직원을 2명 이상 추가' : 'adding at least 2 employees'}</Link>
-          {ko ? '하세요.' : '.'}
-        </div>
-      )}
+      <SetupGuide onNewTicket={onNewTicket} />
 
       <div className="grid cols-4" style={{ marginBottom: 16 }}>
-        <div className="card stat">
-          <div className="label">{t('waitingApproval')}</div>
+        <div className={`card stat warn ${state.approvals.length > 0 ? 'hot' : ''}`}>
+          <div className="label">
+            <Icon name="inbox" /> {t('waitingApproval')}
+          </div>
           <div className="value">{state.approvals.length}</div>
         </div>
-        <div className="card stat">
-          <div className="label">{t('onHold')}</div>
+        <div className="card stat bad">
+          <div className="label">
+            <Icon name="pause" /> {t('onHold')}
+          </div>
           <div className="value">{held.length}</div>
         </div>
-        <div className="card stat">
-          <div className="label">{t('inProgress')}</div>
+        <div className="card stat info">
+          <div className="label">
+            <Icon name="bolt" /> {t('inProgress')}
+          </div>
           <div className="value">{active.length}</div>
         </div>
-        <div className="card stat">
-          <div className="label">{t('done')}</div>
+        <div className="card stat ok">
+          <div className="label">
+            <Icon name="check" /> {t('done')}
+          </div>
           <div className="value">{done.length}</div>
         </div>
       </div>
@@ -255,11 +257,14 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
           <RequestBox />
           <div className="card">
             <h2>
-              {t('approvals')} <span className="chip warn">{state.approvals.length}</span>
+              <span className="row">
+                <Icon name="inbox" /> {t('approvals')}
+              </span>
+              <span className="chip warn">{state.approvals.length}</span>
             </h2>
             <div className="list">
               {state.approvals.length === 0 ? (
-                <div className="emptystate">{t('noApprovals')}</div>
+                <EmptyState icon="inbox">{t('noApprovals')}</EmptyState>
               ) : (
                 state.approvals.map((a) => <ApprovalItem key={a.id} a={a} />)
               )}
@@ -267,11 +272,14 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
           </div>
           <div className="card">
             <h2>
-              {t('held')} <span className="chip bad">{held.length}</span>
+              <span className="row">
+                <Icon name="pause" /> {t('held')}
+              </span>
+              <span className="chip bad">{held.length}</span>
             </h2>
             <div className="list">
               {held.length === 0 ? (
-                <div className="emptystate">{t('noHeld')}</div>
+                <EmptyState icon="shield">{t('noHeld')}</EmptyState>
               ) : (
                 held.map((x) => (
                   <div className="item" key={x.id}>
@@ -306,17 +314,21 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
 
         <div className="grid" style={{ alignContent: 'start' }}>
           <div className="card">
-            <h2>{t('inProgress')}</h2>
+            <h2>
+              <span className="row">
+                <Icon name="bolt" /> {t('inProgress')}
+              </span>
+            </h2>
             <div className="list">
               {active.length === 0 ? (
-                <div className="emptystate">
-                  {t('empty')}{' '}
+                <EmptyState icon="bolt">
+                  <div>{t('empty')}</div>
                   {state.projects.length > 0 && (
-                    <button className="btn small" onClick={onNewTicket}>
-                      + {t('newTicket')}
+                    <button className="btn small" style={{ marginTop: 10 }} onClick={onNewTicket}>
+                      <Icon name="plus" /> {t('newTicket')}
                     </button>
                   )}
-                </div>
+                </EmptyState>
               ) : (
                 active.map((x) => (
                   <div className="item" key={x.id}>
@@ -336,7 +348,12 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
             </div>
           </div>
           <div className="card">
-            <h2>{t('activity')}</h2>
+            <h2>
+              <span className="row">
+                <Icon name="activity" /> {t('activity')}
+              </span>
+            </h2>
+            {state.events.length === 0 && <EmptyState icon="activity">{ko ? '아직 기록이 없습니다.' : 'Nothing yet.'}</EmptyState>}
             <ul className="timeline">
               {[...state.events]
                 .reverse()
@@ -352,6 +369,68 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
         </div>
       </div>
     </>
+  );
+}
+
+/** 처음 쓰는 대표를 위한 3단계 안내. 모두 끝나면 사라진다. */
+function SetupGuide({ onNewTicket }: { onNewTicket: () => void }) {
+  const { state } = useCompany();
+  const { lang } = useT();
+  const { go } = useRoute();
+  if (!state) return null;
+  const ko = lang === 'ko';
+  const hasProject = state.projects.length > 0;
+  const hasTeam = state.employees.filter((e) => e.active).length >= 2;
+  const hasTicket = state.tickets.length > 0;
+  if (hasProject && hasTeam && hasTicket) return null;
+  const steps = [
+    {
+      done: hasProject,
+      t: ko ? '프로젝트 등록' : 'Register a project',
+      d: ko ? '작업할 저장소와 검증 명령을 알려 주세요.' : 'Point to a repository and its verify commands.',
+      cta: ko ? '프로젝트로' : 'Projects',
+      onClick: () => go('/projects'),
+    },
+    {
+      done: hasTeam,
+      t: ko ? '직원 2명 이상 채용' : 'Hire 2+ employees',
+      d: ko ? '구현과 검수는 서로 다른 CLI로 두는 것이 좋습니다.' : 'Use different CLIs for implementing and reviewing.',
+      cta: ko ? '팀으로' : 'Team',
+      onClick: () => go('/org'),
+    },
+    {
+      done: hasTicket,
+      t: ko ? '첫 업무 맡기기' : 'Assign the first ticket',
+      d: ko ? '업무를 만들거나 비서실장에게 한 줄로 요청하세요.' : 'Create a ticket or ask the chief of staff in one line.',
+      cta: ko ? '새 업무' : 'New ticket',
+      onClick: onNewTicket,
+    },
+  ];
+  const doneCount = steps.filter((x) => x.done).length;
+  const next = steps.findIndex((x) => !x.done);
+  return (
+    <div className="card setup">
+      <div className="body">
+        <h2>{ko ? '회사를 차려 볼까요' : 'Set up your company'}</h2>
+        <div className="sub">
+          {ko ? `${doneCount}/3 완료 · 세 단계면 첫 업무를 맡길 수 있습니다.` : `${doneCount}/3 done · three steps to your first ticket.`}
+        </div>
+        <div className="steps">
+          {steps.map((x, i) => (
+            <div key={i} className={`step ${x.done ? 'done' : i === next ? 'next' : ''}`}>
+              <span className="num">{x.done ? <Icon name="check" size={14} /> : i + 1}</span>
+              <span className="t">{x.t}</span>
+              <span className="d">{x.d}</span>
+              {!x.done && (
+                <button className={`btn small ${i === next ? 'primary' : ''}`} disabled={i === 2 && !hasProject} onClick={x.onClick}>
+                  {x.cta} <Icon name="arrow" size={14} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

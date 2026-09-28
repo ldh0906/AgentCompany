@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api, type Project } from '../api.ts';
 import { useCompany } from '../App.tsx';
 import { EVIDENCE, useT } from '../i18n.ts';
-import { Modal, useAction } from '../components/ui.tsx';
+import { EmptyState, Icon, Modal, useAction, Skeleton } from '../components/ui.tsx';
 
 function parseVerify(text: string) {
   // 한 줄에 하나: 이름 | 증거종류 | 명령 인자들(공백 구분, 따옴표 지원)
@@ -27,7 +27,7 @@ export function Projects() {
   const { state } = useCompany();
   const { t, lang } = useT();
   const [editing, setEditing] = useState<Project | 'new' | null>(null);
-  if (!state) return <div className="emptystate">{t('loading')}</div>;
+  if (!state) return <Skeleton />;
   const ko = lang === 'ko';
   return (
     <>
@@ -41,9 +41,26 @@ export function Projects() {
           </div>
         </div>
         <button className="btn primary" onClick={() => setEditing('new')}>
-          + {ko ? '프로젝트 등록' : 'Register project'}
+          <Icon name="plus" /> {ko ? '프로젝트 등록' : 'Register project'}
         </button>
       </div>
+      {state.projects.length === 0 && (
+        <div className="card">
+          <EmptyState icon="folder">
+            <div style={{ color: 'var(--text)', fontWeight: 600, fontSize: 14 }}>
+              {ko ? '아직 등록된 프로젝트가 없습니다' : 'No projects yet'}
+            </div>
+            <div style={{ marginTop: 4 }}>
+              {ko
+                ? '로컬 git 저장소 경로와 검증 명령(예: npm test)만 있으면 됩니다.'
+                : 'All you need is a local git repository and a verify command (e.g. npm test).'}
+            </div>
+            <button className="btn primary" style={{ marginTop: 14 }} onClick={() => setEditing('new')}>
+              <Icon name="plus" /> {ko ? '첫 프로젝트 등록' : 'Register your first project'}
+            </button>
+          </EmptyState>
+        </div>
+      )}
       <div className="grid cols-2">
         {state.projects.map((p) => (
           <div className="card" key={p.id}>

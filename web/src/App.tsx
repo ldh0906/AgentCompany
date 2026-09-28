@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api, ApiError, getToken, subscribe, type State } from './api.ts';
 import { LangContext, useT, type Lang } from './i18n.ts';
-import { ToastProvider } from './components/ui.tsx';
+import { Icon, ToastProvider } from './components/ui.tsx';
 import { Dashboard } from './pages/Dashboard.tsx';
 import { Board } from './pages/Board.tsx';
 import { TicketPage } from './pages/TicketPage.tsx';
@@ -95,26 +95,46 @@ function Shell() {
     <div className="layout">
       <aside className="sidebar">
         <div className="brand">
-          <img src="/favicon.svg" alt="" /> {t('appName')}
+          <img src="/favicon.svg" alt="" />
+          <div>
+            {t('appName')}
+            <small>{lang === 'ko' ? 'AI 개발팀 관제실' : 'AI dev team control room'}</small>
+          </div>
         </div>
+        <div className="nav-label">{lang === 'ko' ? '운영' : 'Operate'}</div>
         <nav className="nav">
           <Link to="/">
-            {t('nav_dashboard')} {pending + held > 0 && <span className="count">{pending + held}</span>}
+            <Icon name="dashboard" /> {t('nav_dashboard')} {pending + held > 0 && <span className="count">{pending + held}</span>}
           </Link>
-          <Link to="/board">{t('nav_board')}</Link>
-          <Link to="/org">{t('nav_org')}</Link>
-          <Link to="/projects">{t('nav_projects')}</Link>
-          <Link to="/decisions">{t('nav_decisions')}</Link>
-          <Link to="/system">{t('nav_system')}</Link>
+          <Link to="/board">
+            <Icon name="board" /> {t('nav_board')}
+          </Link>
+          <Link to="/decisions">
+            <Icon name="book" /> {t('nav_decisions')}
+          </Link>
+        </nav>
+        <div className="nav-label">{lang === 'ko' ? '회사' : 'Company'}</div>
+        <nav className="nav">
+          <Link to="/org">
+            <Icon name="team" /> {t('nav_org')}
+          </Link>
+          <Link to="/projects">
+            <Icon name="folder" /> {t('nav_projects')}
+          </Link>
+          <Link to="/system">
+            <Icon name="cpu" /> {t('nav_system')}
+          </Link>
         </nav>
         <div className="spacer" />
         <button className="btn primary" onClick={() => setNewTicket(true)} disabled={!state?.projects.length}>
-          + {t('newTicket')}
+          <Icon name="plus" /> {t('newTicket')}
         </button>
         <div className="foot">
-          <span className={`live ${live ? '' : 'off'}`} /> {live ? 'live' : 'offline'}
+          <span className="live-pill">
+            <span className={`live ${live ? '' : 'off'}`} /> {live ? 'Live' : 'Offline'}
+          </span>
           <span style={{ flex: 1 }} />
-          <select value={lang} onChange={(e) => setLang(e.target.value as Lang)} style={{ width: 'auto', padding: '2px 6px' }}>
+          <select value={lang} onChange={(e) => setLang(e.target.value as Lang)}>
             <option value="ko">한국어</option>
             <option value="en">English</option>
           </select>

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api } from '../api.ts';
 import { useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
-import { useAction, when } from '../components/ui.tsx';
+import { useAction, when, Skeleton } from '../components/ui.tsx';
 
 const STATUS_KO: Record<string, string> = {
   current: '현재 유효',
@@ -28,7 +28,7 @@ export function Decisions() {
   const [filter, setFilter] = useState('current');
   const [text, setText] = useState('');
   const [projectId, setProjectId] = useState('');
-  if (!state) return <div className="emptystate">{t('loading')}</div>;
+  if (!state) return <Skeleton />;
   const ko = lang === 'ko';
   const label = ko ? STATUS_KO : STATUS_EN;
   const list = state.decisions.filter((d) => filter === 'all' || d.status === filter);

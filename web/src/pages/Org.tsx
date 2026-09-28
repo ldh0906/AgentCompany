@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, type Employee } from '../api.ts';
 import { useCompany } from '../App.tsx';
 import { ACCESS, ROLE, useT } from '../i18n.ts';
-import { CliChip, Modal, useAction } from '../components/ui.tsx';
+import { Avatar, CliChip, EmptyState, Icon, Modal, useAction, Skeleton } from '../components/ui.tsx';
 
 const ROLES = Object.keys(ROLE.ko);
 const MODEL_HINT: Record<string, string> = {
@@ -18,7 +18,7 @@ export function Org() {
   const { busy, run } = useAction();
   const [hiring, setHiring] = useState(false);
   const [editing, setEditing] = useState<Employee | null>(null);
-  if (!state) return <div className="emptystate">{t('loading')}</div>;
+  if (!state) return <Skeleton />;
   const ko = lang === 'ko';
   const activeCount = state.employees.filter((e) => e.active).length;
   const workload = (id: string) =>
@@ -35,14 +35,16 @@ export function Org() {
           </div>
         </div>
         <button className="btn primary" disabled={activeCount >= 4} onClick={() => setHiring(true)}>
-          + {t('hire')}
+          <Icon name="plus" /> {t('hire')}
         </button>
       </div>
 
       <div className="grid cols-3">
         <div className="card" style={{ gridColumn: '1 / -1' }}>
           <div className="item">
-            <div className="title">👤 {ko ? '대표 (나)' : 'CEO (you)'}</div>
+            <div className="title row">
+              <Icon name="shield" /> {ko ? '대표 (나)' : 'CEO (you)'}
+            </div>
             <div className="meta">
               {ko
                 ? '최종 승인 · 병합·삭제 승인 · 권한 변경 · 결정 확정. 어떤 직원도 이 권한을 가질 수 없습니다.'
@@ -50,10 +52,27 @@ export function Org() {
             </div>
           </div>
         </div>
+        {state.employees.length === 0 && (
+          <div className="card" style={{ gridColumn: '1 / -1' }}>
+            <EmptyState icon="team">
+              <div style={{ color: 'var(--text)', fontWeight: 600, fontSize: 14 }}>{ko ? '아직 직원이 없습니다' : 'No employees yet'}</div>
+              <div style={{ marginTop: 4 }}>
+                {ko
+                  ? '구현 담당과 검수 담당을 서로 다른 CLI로 두 명 이상 뽑으세요. 예: 구현 Claude Code, 검수 Codex.'
+                  : 'Hire at least two, on different CLIs for implementing and reviewing — e.g. Claude Code builds, Codex reviews.'}
+              </div>
+              <button className="btn primary" style={{ marginTop: 14 }} onClick={() => setHiring(true)}>
+                <Icon name="plus" /> {t('hire')}
+              </button>
+            </EmptyState>
+          </div>
+        )}
         {state.employees.map((e) => (
           <div className="card" key={e.id} style={{ opacity: e.active ? 1 : 0.55 }}>
             <div className="card-head">
-              <span>{e.name}</span>
+              <span className="row">
+                <Avatar employees={state.employees} id={e.id} /> {e.name}
+              </span>
               <span className={`chip ${e.active ? 'ok' : ''}`}>{e.active ? t('active') : t('inactive')}</span>
             </div>
             <div className="body">
