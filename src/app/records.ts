@@ -3,7 +3,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Store } from '../store/db.ts';
 import type { AgentReport, TicketDraft } from '../agents/report.ts';
-import type { Approval, ApprovalKind, ApprovalState, Decision, DecisionStatus, Evidence, Run, Ticket } from '../core/types.ts';
+import type { Approval, ApprovalKind, ApprovalState, Claim, Decision, DecisionStatus, Evidence, Run, Ticket } from '../core/types.ts';
+import type { DeliberationPhase } from '../agents/deliberation.ts';
 import { TERMINAL_STATUSES } from '../core/types.ts';
 import { scopesOverlap } from '../workspace/workspace.ts';
 
@@ -22,6 +23,9 @@ export interface RunRecord extends Run {
   refsBefore: Record<string, string> | null;
   originBefore: string | null;
   postProcessed: boolean;
+  /** 검토형 업무의 단계와 이번 실행이 다루는 주장. */
+  phase?: DeliberationPhase | null;
+  claimIds?: string[];
   report: AgentReport | null;
   reportError: string | null;
   finalText: string | null;
@@ -78,6 +82,14 @@ export class Records {
   latestSubmission(ticket: Ticket): RunRecord | null {
     const runs = this.runsForTicket(ticket.id).filter((r) => r.kind === 'work' && r.status === 'succeeded' && r.round === ticket.round);
     return runs.at(-1) ?? null;
+  }
+
+  // ---- 주장 원장 ----
+  saveClaim(c: Claim): void {
+    this.store.put('claims', c.id, c, { ticket_id: c.ticketId });
+  }
+  claimsFor(ticketId: string): Claim[] {
+    return this.store.list<Claim>('claims', 'WHERE ticket_id = ? ORDER BY rowid', ticketId);
   }
 
   // ---- 대표 요청 ----

@@ -65,6 +65,14 @@ export async function seedDemo(company: Company, orch: Orchestrator, dataDir: st
   });
   company.createTicket({
     projectId: project.id,
+    type: 'review',
+    title: '설계 문서 빈칸·충돌 교차 검토',
+    purpose: '구현자가 임의로 정해야 하는 빈칸과 문서 충돌을 찾는다 (블라인드 분석 → 교차 판정 → 재답변)',
+    requirements: [{ text: '구현자가 임의로 결정해야 하는 빈칸 목록', evidenceType: 'inspection' }],
+    doneCriteria: '미해결 이견은 대표에게 상신',
+  });
+  company.createTicket({
+    projectId: project.id,
     type: 'impl',
     title: '파티 해산 기능',
     purpose: '파티를 해산할 수 있게 한다',

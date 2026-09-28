@@ -29,6 +29,7 @@ export type TicketCommand =
   | { type: 'assign'; assigneeId: string; reviewerId: string; activeEmployeeIds: string[] }
   | { type: 'start_work'; dependenciesDone: boolean; locksAcquired: boolean }
   | { type: 'submit' }
+  | { type: 'deliberation_done'; claims: number; escalated: number }
   | { type: 'run_aborted'; reason: string; hold?: { reason: HoldReason; note: string } }
   | { type: 'verification_passed' }
   | { type: 'verification_failed'; reason: string }
@@ -178,6 +179,15 @@ export function applyTicketCommand(
         'ticket.run_aborted',
         { reason: cmd.reason, ...(cmd.hold ? { hold: cmd.hold.reason } : {}) },
       );
+    }
+
+    case 'deliberation_done': {
+      // 검토형 업무: 블라인드 분석 → 교차 판정 → 재답변 → 코드 종합이 끝나면 대표 확인을 기다린다.
+      if (!isOrchestrator(actor)) return reject('검토 종합은 오케스트레이터만 기록할 수 있습니다.');
+      if (ticket.type !== 'review') return reject('검토형 업무만 교차 검토로 끝낼 수 있습니다.');
+      const bad = expect('in_progress');
+      if (bad) return reject(bad);
+      return next({ status: 'awaiting_approval' }, 'ticket.deliberation_done', { claims: cmd.claims, escalated: cmd.escalated });
     }
 
     case 'verification_passed': {

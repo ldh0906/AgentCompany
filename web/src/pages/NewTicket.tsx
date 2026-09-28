@@ -34,10 +34,10 @@ export function NewTicket({ onClose }: { onClose: () => void }) {
         <div className="row">
           <label style={{ flex: 1 }}>{t('nav_projects')}<select value={projectId} onChange={(e) => setProjectId(e.target.value)}>{state?.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
           <label style={{ width: 180 }}>{ko ? '종류' : 'Type'}
-            <select value={type} onChange={(e) => { const v = e.target.value as Ticket['type']; setType(v); if (v === 'doc') { setScope('docs/**'); setReqs((r) => r.map((x) => ({ ...x, evidenceType: 'inspection' }))); } }}>
+            <select value={type} onChange={(e) => { const v = e.target.value as Ticket['type']; setType(v); if (v === 'doc') { setScope('docs/**'); setReqs((r) => r.map((x) => ({ ...x, evidenceType: 'inspection' }))); } if (v === 'review' || v === 'research') { setScope(''); setReqs((r) => r.map((x) => ({ ...x, evidenceType: 'inspection' }))); } if (v === 'impl') setScope('src/**'); }}>
               <option value="impl">{ko ? '구현' : 'Implementation'}</option>
               <option value="doc">{ko ? '문서' : 'Document'}</option>
-              <option value="review">{ko ? '검토' : 'Review'}</option>
+              <option value="review">{ko ? '교차 검토 (블라인드)' : 'Blind cross-review'}</option>
               <option value="research">{ko ? '조사' : 'Research'}</option>
             </select>
           </label>

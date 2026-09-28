@@ -6,10 +6,11 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { adapterFor } from '../adapters/index.ts';
 import { buildDraftPrompt, buildReviewPrompt, buildWorkPrompt } from '../agents/prompt.ts';
+import { blindPrompt, crossPrompt, parseClaims, parseResponses, parseVerdicts, rebuttalPrompt, synthesize, type DeliberationPhase } from '../agents/deliberation.ts';
 import { parseDrafts, parseReport, type TicketDraft, type WorkReport } from '../agents/report.ts';
 import { writeDecision } from '../approvals/file-queue.ts';
 import type { Actor } from '../core/ticket-machine.ts';
-import type { Employee, Evidence, FailureClass, Project, Ticket, TicketStatus } from '../core/types.ts';
+import type { Claim, Employee, Evidence, FailureClass, Project, Ticket, TicketStatus } from '../core/types.ts';
 import { DEFAULT_BUDGET, TERMINAL_STATUSES } from '../core/types.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
 import { locateExecutable } from '../runner/locate.ts';
@@ -242,6 +243,10 @@ export class Orchestrator {
         await this.startWork(t);
         return;
       case 'in_progress':
+        if (t.type === 'review') {
+          await this.deliberate(t);
+          return;
+        }
         if (!this.hasLiveRun(t.id, 'work')) {
           // 데몬 재시작 후 추적 중인 실행이 없으면 중단 처리(예산은 이미 소모됨).
           this.apply(t.id, { type: 'run_aborted', reason: '실행 추적이 끊겼습니다(재시작 복구).' });
@@ -265,6 +270,7 @@ export class Orchestrator {
   private apply(ticketId: string, cmd: Parameters<Company['applyTicket']>[1], actor: Actor = ORCH): Ticket {
     const t = this.company.applyTicket(ticketId, cmd, actor);
     if (TERMINAL_STATUSES.includes(t.status)) this.records.releaseLocks(ticketId);
+    if (t.status === 'awaiting_approval' && !t.hold) this.ensureIntegrationApproval(t);
     this.changed('ticket', ticketId);
     return t;
   }
@@ -323,6 +329,7 @@ export class Orchestrator {
     }
     const next = this.apply(t.id, { type: 'start_work', dependenciesDone: deps, locksAcquired: true });
     if (next.status !== 'in_progress') return;
+    if (next.type === 'review') return; // 검토형은 다음 tick부터 블라인드 분석을 시작한다
 
     const project = this.company.requireProject(t.projectId);
     const paths = projectPaths(this.opts.dataDir, project.id);
@@ -384,6 +391,8 @@ export class Orchestrator {
     baseSha: string | null;
     refsBefore?: Record<string, string>;
     originBefore?: string;
+    phase?: DeliberationPhase;
+    claimIds?: string[];
   }): Promise<void> {
     const adapter = adapterFor(p.employee.cli);
     const runId = newId('R');
@@ -431,6 +440,8 @@ export class Orchestrator {
       refsBefore: p.refsBefore ?? null,
       originBefore: p.originBefore ?? null,
       postProcessed: false,
+      phase: p.phase ?? null,
+      claimIds: p.claimIds ?? [],
       report: null,
       reportError: null,
       finalText: null,
@@ -483,6 +494,7 @@ export class Orchestrator {
     run.exitCode = outcome?.exitCode ?? null;
 
     const fresh = run;
+    if (run.kind === 'analysis' && run.phase) return this.finishDeliberationRun(run, outcome?.timedOut ? null : parsed.finalText, outcome?.timedOut ? '시간 초과' : stderr);
     if (run.kind === 'analysis') return this.finishDrafts(run, parsed.finalText, outcome, stderr);
 
     const ticket = this.company.requireTicket(run.ticketId);
@@ -498,6 +510,7 @@ export class Orchestrator {
   }
 
   private async finishRun(run: RunRecord, failure: { failure: FailureClass; detail: string; orphan?: boolean } | null): Promise<void> {
+    if (run.kind === 'analysis' && run.phase) return this.finishDeliberationRun(run, null, failure?.detail ?? '실패');
     if (run.kind === 'analysis') return this.finishDrafts(run, null, null, failure?.detail ?? '');
     run.endedAt = new Date().toISOString();
     run.status = failure ? (failure.orphan ? 'orphaned' : 'failed') : 'succeeded';
@@ -707,6 +720,20 @@ export class Orchestrator {
 
   private ensureIntegrationApproval(t: Ticket): void {
     if (this.records.pendingApprovalFor(t.id, 'integrate')) return;
+    if (t.type === 'review') {
+      const claims = this.records.claimsFor(t.id);
+      const escalated = claims.filter((c) => c.status === 'escalated');
+      this.records.createApproval({
+        kind: 'integrate',
+        ticketId: t.id,
+        subject: this.reviewSubject(t),
+        summary: `${t.id} ${t.title} — 주장 ${claims.length}개, 미해결 ${escalated.length}개`,
+        detail: { mode: 'review', claims: claims.length, escalated: escalated.map((c) => ({ id: c.id, text: c.text, verdict: c.verdict, response: c.response })) },
+        requestedBy: 'orchestrator',
+      });
+      this.changed('approval', t.id);
+      return;
+    }
     const sub = this.records.latestSubmission(t);
     if (!sub) return;
     const project = this.company.requireProject(t.projectId);
@@ -727,6 +754,11 @@ export class Orchestrator {
     if (!a || a.kind !== 'integrate' || a.state !== 'pending' || !a.ticketId) throw new DomainError('처리할 수 없는 승인입니다.');
     const t = this.company.requireTicket(a.ticketId);
     const sub = this.records.latestSubmission(t);
+    if (t.type === 'review' && decision === 'approved') {
+      if (sha256(this.reviewSubject(t)) !== a.subjectHash) throw new DomainError('검토 결과가 바뀌었습니다. 새 승인 요청을 확인하세요.');
+      this.records.setApprovalState(approvalId, 'approved', 'ceo', { mode: 'review' });
+      return this.apply(t.id, { type: 'ceo_approve' }, CEO);
+    }
     if (decision === 'rejected') {
       this.records.setApprovalState(approvalId, 'rejected', 'ceo', { reason: opts.reason ?? '' });
       return this.apply(t.id, { type: 'ceo_reject', reason: opts.reason || '대표가 반려했습니다.' }, CEO);
@@ -743,6 +775,12 @@ export class Orchestrator {
   private async integrate(ticketId: string): Promise<void> {
     const t = this.company.requireTicket(ticketId);
     if (t.status !== 'integrating') return;
+    if (t.type === 'review') {
+      const approval = this.records.approvals('approved').filter((a) => a.ticketId === ticketId && a.kind === 'integrate').at(-1);
+      if (approval) this.records.setApprovalState(approval.id, 'consumed', 'orchestrator', {});
+      this.apply(ticketId, { type: 'integrated', commitSha: 'review-acknowledged' });
+      return;
+    }
     const project = this.company.requireProject(t.projectId);
     const sub = this.records.latestSubmission(t);
     const approval = this.records.approvals('approved').filter((a) => a.ticketId === ticketId && a.kind === 'integrate').at(-1);
@@ -828,6 +866,152 @@ export class Orchestrator {
         this.records.setApprovalState(a.id, 'expired', 'orchestrator', { reason: '실행이 끝났습니다.' });
       }
     }
+  }
+
+  // ======================= 검토형 업무: 블라인드 교차 검토 =======================
+
+  private reviewSubject(t: Ticket): string {
+    return `${t.id}|review|${this.records.claimsFor(t.id).map((c) => `${c.id}:${c.verdict}:${c.response}:${c.status}`).join(',')}`;
+  }
+
+  private participants(t: Ticket): Employee[] {
+    const key = `delib:${t.id}:participants`;
+    const saved = this.company.store.getSetting(key);
+    if (saved) return (JSON.parse(saved) as string[]).map((id) => this.company.requireEmployee(id));
+    const list = this.company.activeEmployees().slice(0, 4);
+    this.company.store.setSetting(key, JSON.stringify(list.map((e) => e.id)));
+    return list;
+  }
+
+  private phaseRuns(t: Ticket, phase: DeliberationPhase, employeeId: string): RunRecord[] {
+    return this.records.runsForTicket(t.id).filter((r) => r.phase === phase && r.employeeId === employeeId);
+  }
+
+  /** 한 단계의 한 직원 실행을 관리한다. 끝났으면 true. 두 번 실패하면 대표 결정으로 보류. */
+  private async phaseStep(t: Ticket, phase: DeliberationPhase, e: Employee, needed: boolean, launch: () => Promise<void>): Promise<boolean> {
+    if (!needed) return true;
+    const runs = this.phaseRuns(t, phase, e.id);
+    if (runs.some((r) => r.status === 'running' && this.liveRuns.has(r.id))) return false;
+    if (runs.filter((r) => r.status === 'failed' || r.status === 'orphaned').length >= 2) {
+      this.apply(t.id, { type: 'hold', reason: 'needs_decision', note: `${e.name}의 ${phase} 단계 실행이 두 번 실패했습니다: ${runs.at(-1)?.reportError ?? ''}`.slice(0, 1500) });
+      return false;
+    }
+    if (!e.active) {
+      this.apply(t.id, { type: 'hold', reason: 'needs_decision', note: `검토 참여자 ${e.name}이(가) 비활성 상태입니다.` });
+      return false;
+    }
+    if (this.liveCountFor(e.cli) >= (this.opts.concurrency[e.cli] ?? 1)) return false;
+    await launch();
+    return false;
+  }
+
+  private async deliberate(t: Ticket): Promise<void> {
+    const people = this.participants(t);
+    if (people.length < 2) {
+      this.apply(t.id, { type: 'hold', reason: 'needs_decision', note: '교차 검토에는 활성 직원이 2명 이상 필요합니다.' });
+      return;
+    }
+    const project = this.company.requireProject(t.projectId);
+    const paths = projectPaths(this.opts.dataDir, project.id);
+    const cwd = async () =>
+      this.withProjectLock(project.id, async () => {
+        const base = await syncMirror(project.originPath, paths, project.baseBranch);
+        this.records.setExpectedRef(project.id, `refs/heads/${project.baseBranch}`, base);
+        return ensureDetachedWorktree(paths, 'review', `${t.id}-delib`, base);
+      });
+    const launchPhase = async (e: Employee, phase: DeliberationPhase, prompt: string, nonce: string, claimIds: string[] = []) =>
+      this.launch({ ticket: t, employee: e, kind: 'analysis', cwd: await cwd(), prompt, nonce, accessLevel: 'read-only', baseSha: null, phase, claimIds });
+    const nonce = () => randomBytes(6).toString('hex');
+
+    // 1) 블라인드 분석: 모든 참여자가 서로의 결과를 보지 않고 주장을 낸다.
+    let allDone = true;
+    for (const e of people) {
+      const done = this.phaseRuns(t, 'blind', e.id).some((r) => r.status === 'succeeded');
+      const n = nonce();
+      const ok = await this.phaseStep(t, 'blind', e, !done, () => launchPhase(e, 'blind', blindPrompt(e, project, t, n, this.opts.language), n));
+      allDone &&= ok;
+    }
+    if (!allDone || this.company.requireTicket(t.id).hold) return;
+
+    // 2) 교차 판정: 작성자가 아닌 다른 참여자(가능하면 다른 CLI)에게 배정. 작성자는 가린다.
+    let claims = this.records.claimsFor(t.id);
+    const load = new Map<string, number>();
+    for (const c of claims) {
+      if (c.reviewerId) continue;
+      const author = people.find((p) => p.id === c.authorId);
+      const candidates = people.filter((p) => p.id !== c.authorId);
+      const pick = [...candidates].sort((a, b) => (a.cli !== author?.cli ? 0 : 1) - (b.cli !== author?.cli ? 0 : 1) || (load.get(a.id) ?? 0) - (load.get(b.id) ?? 0))[0]!;
+      load.set(pick.id, (load.get(pick.id) ?? 0) + 1);
+      this.records.saveClaim({ ...c, reviewerId: pick.id, status: 'under_review' });
+    }
+    claims = this.records.claimsFor(t.id);
+    allDone = true;
+    for (const e of people) {
+      const mine = claims.filter((c) => c.reviewerId === e.id && c.verdict === null);
+      const n = nonce();
+      const ok = await this.phaseStep(t, 'cross', e, mine.length > 0, () => launchPhase(e, 'cross', crossPrompt(e, project, t, n, mine, this.opts.language), n, mine.map((c) => c.id)));
+      allDone &&= ok;
+    }
+    if (!allDone || this.company.requireTicket(t.id).hold) return;
+
+    // 3) 재답변: 동의가 아닌 모든 판정에 원 작성자가 답해야 다음으로 넘어간다.
+    claims = this.records.claimsFor(t.id);
+    allDone = true;
+    for (const e of people) {
+      const mine = claims.filter((c) => c.authorId === e.id && c.verdict !== 'agree' && c.response === null);
+      const n = nonce();
+      const ok = await this.phaseStep(t, 'rebuttal', e, mine.length > 0, () => launchPhase(e, 'rebuttal', rebuttalPrompt(e, project, t, n, mine, this.opts.language), n, mine.map((c) => c.id)));
+      allDone &&= ok;
+    }
+    if (!allDone || this.company.requireTicket(t.id).hold) return;
+
+    // 4) 코드 종합: 미해결 이견은 삭제하지 않고 대표에게 올린다.
+    claims = this.records.claimsFor(t.id);
+    const { resolved, escalated } = synthesize(claims);
+    this.company.store.transact(() => {
+      for (const c of [...resolved, ...escalated]) this.records.saveClaim(c);
+    });
+    this.apply(t.id, { type: 'deliberation_done', claims: claims.length, escalated: escalated.length });
+  }
+
+  private async finishDeliberationRun(run: RunRecord, finalText: string | null, failDetail: string): Promise<void> {
+    const t = this.company.requireTicket(run.ticketId);
+    let error: string | null = null;
+    if (run.phase === 'blind') {
+      const r = parseClaims(finalText, run.nonce);
+      if (r.ok) {
+        for (const c of r.claims) {
+          const claim: Claim = { id: newId('C'), ticketId: t.id, authorId: run.employeeId, ...c, reviewerId: null, verdict: null, verdictReason: null, response: null, responseText: null, status: 'proposed' };
+          this.records.saveClaim(claim);
+        }
+        run.summary = `주장 ${r.claims.length}개`;
+      } else error = r.detail;
+    } else if (run.phase === 'cross') {
+      const r = parseVerdicts(finalText, run.nonce, run.claimIds ?? []);
+      if (r.ok) {
+        for (const v of r.verdicts) {
+          const c = this.records.claimsFor(t.id).find((x) => x.id === v.claimId);
+          if (c && c.reviewerId === run.employeeId) this.records.saveClaim({ ...c, verdict: v.verdict, verdictReason: v.reason, status: 'reviewed' });
+        }
+        run.summary = `판정 ${r.verdicts.length}개`;
+      } else error = r.detail;
+    } else if (run.phase === 'rebuttal') {
+      const r = parseResponses(finalText, run.nonce, run.claimIds ?? []);
+      if (r.ok) {
+        for (const v of r.responses) {
+          const c = this.records.claimsFor(t.id).find((x) => x.id === v.claimId);
+          if (c && c.authorId === run.employeeId) this.records.saveClaim({ ...c, response: v.response, responseText: v.text, status: 'responded' });
+        }
+        run.summary = `재답변 ${r.responses.length}개`;
+      } else error = r.detail;
+    }
+    if (!finalText && !error) error = failDetail || '응답 없음';
+    run.endedAt = new Date().toISOString();
+    run.status = error ? 'failed' : 'succeeded';
+    run.reportError = error ? `${error}${failDetail && failDetail !== error ? `\n${failDetail.slice(-500)}` : ''}` : null;
+    this.records.saveRun(run);
+    this.company.store.appendEvent(run.employeeId, `deliberation.${run.phase}.${run.status}`, t.id, { runId: run.id, summary: run.summary, error });
+    this.changed('ticket', t.id);
   }
 
   // ======================= 대표 요청 → 비서실장 초안 =======================

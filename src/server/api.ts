@@ -224,6 +224,7 @@ export class Api {
       ticket: t,
       runs: r.runsForTicket(id).map(({ refsBefore, ...rest }) => rest),
       evidence: r.evidenceFor(id),
+      claims: r.claimsFor(id),
       approvals: r.approvals().filter((a) => a.ticketId === id),
       events: this.company.store.events(id, 500),
     };

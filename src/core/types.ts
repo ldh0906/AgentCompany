@@ -226,11 +226,15 @@ export type ClaimVerdict = 'agree' | 'partial' | 'disagree' | 'insufficient';
 export type ClaimResponse = 'keep' | 'narrow' | 'revise' | 'withdraw' | 'user_decision';
 export type ClaimStatus = 'proposed' | 'under_review' | 'reviewed' | 'responded' | 'resolved' | 'escalated';
 
+export type ClaimImpact = 'high' | 'medium' | 'low';
+
 export interface Claim {
   id: string;
   ticketId: string;
   authorId: string;
   text: string;
+  impact: ClaimImpact;
+  confidence: number;          // 0~1, 작성자 자기 평가
   sources: { doc: string; loc: string }[];
   reviewerId: string | null;
   verdict: ClaimVerdict | null;

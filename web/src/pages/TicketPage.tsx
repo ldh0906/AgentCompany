@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, type Approval, type DomainEvent, type Evidence, type RunSummary, type Ticket } from '../api.ts';
+import { api, type Approval, type Claim, type DomainEvent, type Evidence, type RunSummary, type Ticket } from '../api.ts';
 import { Link, useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
 import { CliChip, DiffView, empName, HoldChip, Modal, StatusChip, useAction, when } from '../components/ui.tsx';
@@ -9,6 +9,7 @@ interface Detail {
   ticket: Ticket;
   runs: (RunSummary & { report?: unknown; finalText?: string | null })[];
   evidence: Evidence[];
+  claims: Claim[];
   approvals: Approval[];
   events: DomainEvent[];
 }
@@ -17,7 +18,7 @@ export function TicketPage({ id }: { id: string }) {
   const { state, reload } = useCompany();
   const { t, lang, evidence: evLabel, role, hold: holdLabel } = useT();
   const [detail, setDetail] = useState<Detail | null>(null);
-  const [tab, setTab] = useState<'timeline' | 'runs' | 'diff'>('timeline');
+  const [tab, setTab] = useState<'timeline' | 'runs' | 'diff' | 'claims'>('timeline');
   const [diff, setDiff] = useState<{ diff: string; changedPaths: string[] } | null>(null);
   const [log, setLog] = useState<{ id: string; text: string; reportError: string | null } | null>(null);
   const [assigning, setAssigning] = useState(false);
@@ -117,8 +118,10 @@ export function TicketPage({ id }: { id: string }) {
         <div className="tabs">
           <button className={tab === 'timeline' ? 'on' : ''} onClick={() => setTab('timeline')}>{t('timeline')}</button>
           <button className={tab === 'runs' ? 'on' : ''} onClick={() => setTab('runs')}>{t('runs')} ({detail.runs.length})</button>
-          <button className={tab === 'diff' ? 'on' : ''} onClick={() => setTab('diff')}>{t('diff')}</button>
+          {tk.type !== 'review' && <button className={tab === 'diff' ? 'on' : ''} onClick={() => setTab('diff')}>{t('diff')}</button>}
+          {detail.claims.length > 0 && <button className={tab === 'claims' ? 'on' : ''} onClick={() => setTab('claims')}>{ko ? '주장 원장' : 'Claim ledger'} ({detail.claims.length})</button>}
         </div>
+        {tab === 'claims' && <ClaimLedger claims={detail.claims} />}
         {tab === 'timeline' && (
           <ul className="timeline">
             {detail.events.map((e) => (
@@ -184,5 +187,55 @@ function AssignModal({ ticket, onClose }: { ticket: Ticket; onClose: () => void 
         {a === r && <div className="banner warn">{lang === 'ko' ? '담당자와 검수자는 달라야 합니다.' : 'Assignee and reviewer must differ.'}</div>}
       </div>
     </Modal>
+  );
+}
+
+const VERDICT_TONE: Record<string, string> = { agree: 'ok', partial: 'warn', disagree: 'bad', insufficient: 'warn' };
+
+function ClaimLedger({ claims }: { claims: Claim[] }) {
+  const { state } = useCompany();
+  const { lang } = useT();
+  const ko = lang === 'ko';
+  const verdictLabel: Record<string, string> = ko
+    ? { agree: '동의', partial: '부분 동의', disagree: '반대', insufficient: '근거 부족' }
+    : { agree: 'Agree', partial: 'Partial', disagree: 'Disagree', insufficient: 'Insufficient' };
+  const responseLabel: Record<string, string> = ko
+    ? { keep: '유지', narrow: '범위 축소', revise: '수정', withdraw: '철회', user_decision: '대표 결정 필요' }
+    : { keep: 'Keep', narrow: 'Narrow', revise: 'Revise', withdraw: 'Withdraw', user_decision: 'CEO decides' };
+  const ordered = [...claims].sort((a, b) => (a.status === 'escalated' ? -1 : 0) - (b.status === 'escalated' ? -1 : 0));
+  return (
+    <div className="body">
+      <div className="sub" style={{ marginBottom: 8 }}>
+        {ko
+          ? '블라인드 분석 → 작성자를 가린 교차 판정 → 원 작성자 재답변 → 코드 종합. 다수결로 지우지 않으며, 유지된 이견은 대표에게 올라옵니다.'
+          : 'Blind analysis → anonymized cross-verdicts → author rebuttal → code synthesis. No majority vote; unresolved disputes go to the CEO.'}
+      </div>
+      <table>
+        <thead>
+          <tr><th>{ko ? '주장' : 'Claim'}</th><th>{ko ? '판정' : 'Verdict'}</th><th>{ko ? '재답변' : 'Rebuttal'}</th><th>{ko ? '결과' : 'Outcome'}</th></tr>
+        </thead>
+        <tbody>
+          {ordered.map((c) => (
+            <tr key={c.id} style={{ background: c.status === 'escalated' ? 'var(--bad-soft)' : undefined }}>
+              <td style={{ maxWidth: 420 }}>
+                <div>{c.text}</div>
+                <div className="sub">{empName(state?.employees ?? [], c.authorId)} · <span className="chip">{c.impact}</span> {Math.round(c.confidence * 100)}%</div>
+                {c.sources.length > 0 && <div className="sub mono">{c.sources.map((s) => `${s.doc} ${s.loc}`).join(' · ')}</div>}
+              </td>
+              <td style={{ maxWidth: 280 }}>
+                {c.verdict ? <span className={`chip ${VERDICT_TONE[c.verdict] ?? ''}`}>{verdictLabel[c.verdict]}</span> : <span className="chip info pulse">…</span>}
+                <div className="sub">{empName(state?.employees ?? [], c.reviewerId)}</div>
+                {c.verdictReason && <div className="sub">{c.verdictReason}</div>}
+              </td>
+              <td style={{ maxWidth: 280 }}>
+                {c.response ? <span className="chip accent">{responseLabel[c.response]}</span> : c.verdict && c.verdict !== 'agree' ? <span className="chip info pulse">…</span> : '—'}
+                {c.responseText && <div className="sub">{c.responseText}</div>}
+              </td>
+              <td>{c.status === 'escalated' ? <span className="chip bad">{ko ? '대표에게 상신' : 'Escalated'}</span> : c.status === 'resolved' ? <span className="chip ok">{ko ? '해결' : 'Resolved'}</span> : <span className="chip">{c.status}</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

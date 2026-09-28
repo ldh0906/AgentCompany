@@ -30,10 +30,12 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
     case 'request.drafted': return ko ? `비서실장이 업무 초안 ${p.count}개 작성` : `Chief of staff drafted ${p.count} tickets`;
     case 'request.accepted': return ko ? `대표가 초안 확정: ${(p.tickets as string[]).join(', ')}` : `CEO accepted drafts: ${(p.tickets as string[]).join(', ')}`;
     case 'evidence.attested': return ko ? `${e.entityId} ${p.requirementId} 대표 직접 확인` : `${e.entityId} ${p.requirementId} attested by CEO`;
+    case 'ticket.deliberation_done': return ko ? `${e.entityId} 교차 검토 종합: 주장 ${p.claims}개, 미해결 ${p.escalated}개` : `${e.entityId} deliberation: ${p.claims} claims, ${p.escalated} unresolved`;
     case 'employee.hired': return ko ? `직원 추가: ${p.name}` : `Hired ${p.name}`;
     case 'approval.requested': return ko ? `승인 요청: ${p.summary}` : `Approval requested: ${p.summary}`;
     case 'orchestrator.recovered': return ko ? '재시작 복구 완료' : 'Recovered after restart';
     default:
+      if (e.type.startsWith('deliberation.')) return `${e.entityId} ${who(e.actor)} ${e.type.split('.')[1]} ${p.summary ?? ''}${p.error ? ` ✗ ${p.error}` : ''}`;
       if (e.type.startsWith('run.')) return `${e.entityId} ${e.type.replace('run.', '')}${p.failureClass ? ` (${p.failureClass})` : ''}`;
       return `${e.type} ${e.entityId}`;
   }
@@ -78,6 +80,9 @@ export function ApprovalItem({ a }: { a: Approval }) {
       </div>
       {a.kind === 'tool_permission' && <pre className="code" style={{ marginTop: 8, maxHeight: 160 }}>{JSON.stringify(d.input, null, 2)}</pre>}
       {a.kind === 'integrate' && typeof d.summary === 'string' && d.summary && <div className="note">{d.summary}</div>}
+      {d.mode === 'review' && Array.isArray(d.escalated) && (d.escalated as { id: string; text: string }[]).length > 0 && (
+        <div className="note">{lang === 'ko' ? '미해결 이견 (대표 판단 필요):' : 'Unresolved disputes:'}{'\n'}{(d.escalated as { id: string; text: string }[]).map((c) => `• ${c.text}`).join('\n')}</div>
+      )}
       {rejecting && (
         <Modal
           title={t('reject')}

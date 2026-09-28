@@ -1,6 +1,6 @@
-import type { Approval, Decision, DomainEvent, Employee, Evidence, Project, Ticket } from '../../src/core/types.ts';
+import type { Approval, Claim, Decision, DomainEvent, Employee, Evidence, Project, Ticket } from '../../src/core/types.ts';
 
-export type { Approval, Decision, DomainEvent, Employee, Evidence, Project, Ticket };
+export type { Approval, Claim, Decision, DomainEvent, Employee, Evidence, Project, Ticket };
 
 export interface RunSummary {
   id: string;

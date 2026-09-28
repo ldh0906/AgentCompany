@@ -93,6 +93,50 @@ function drafts(h: TaskHeader, prompt: string): string {
   );
 }
 
+// ---- 블라인드 교차 검토용 ----
+type DelibHeader = TaskHeader & { claimIds?: string[] };
+
+function claims(h: TaskHeader): string {
+  const who = behavior;
+  return finalWith(
+    {
+      nonce: h.nonce,
+      kind: 'claims',
+      claims: [
+        { text: `[${who}] 파티 최대 인원이 설계 문서에 정해져 있지 않다`, impact: 'high', confidence: 0.9, sources: [{ doc: 'docs/design.md', loc: '## 파티 규칙' }] },
+        { text: `[${who}] 파티 해산 규칙이 문서에 없다`, impact: 'medium', confidence: 0.6, sources: [{ doc: 'docs/design.md', loc: '전체' }] },
+      ],
+    },
+    '독립 분석을 마쳤습니다.',
+  );
+}
+
+function verdicts(h: DelibHeader): string {
+  const ids = h.claimIds ?? [];
+  return finalWith(
+    {
+      nonce: h.nonce,
+      kind: 'verdicts',
+      // 첫 주장에는 동의, 나머지는 근거 부족으로 판정해 재답변 단계를 거치게 한다.
+      verdicts: ids.map((id, i) => ({ claimId: id, verdict: i === 0 ? 'agree' : 'insufficient', reason: i === 0 ? '문서에서 확인됨' : '출처 위치가 너무 넓어 확인할 수 없음' })),
+    },
+    '교차 판정을 마쳤습니다.',
+  );
+}
+
+function responses(h: DelibHeader): string {
+  const ids = h.claimIds ?? [];
+  return finalWith(
+    {
+      nonce: h.nonce,
+      kind: 'responses',
+      // 게으른 성격은 끝까지 유지(→ 대표에게 상신), 나머지는 범위를 좁힌다.
+      responses: ids.map((id) => ({ claimId: id, response: behavior === 'lazy' ? 'keep' : 'narrow', text: behavior === 'lazy' ? '주장을 유지합니다.' : '해산 규칙 중 보상 처리만 빠져 있다고 좁힙니다.' })),
+    },
+    '재답변을 마쳤습니다.',
+  );
+}
+
 async function main(): Promise<void> {
   const chunks: Buffer[] = [];
   for await (const c of process.stdin) chunks.push(c as Buffer);
@@ -105,7 +149,14 @@ async function main(): Promise<void> {
   }
   if (behavior === 'slow') await sleep(Number(process.env.FAKE_DELAY_MS ?? 4000));
   else await sleep(Number(process.env.FAKE_DELAY_MS ?? 300));
-  const text = h.kind === 'work' ? await work(h) : h.kind === 'drafts' ? drafts(h, prompt) : review(h, prompt);
+  const kind = h.kind as string;
+  const text =
+    kind === 'work' ? await work(h)
+    : kind === 'drafts' ? drafts(h, prompt)
+    : kind === 'claims' ? claims(h)
+    : kind === 'verdicts' ? verdicts(h)
+    : kind === 'responses' ? responses(h)
+    : review(h, prompt);
   emit({ type: 'result', result: text, is_error: false });
 }
 
