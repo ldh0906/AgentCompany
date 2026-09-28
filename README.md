@@ -81,7 +81,9 @@ This project separates **measured facts** from assumptions ([details](docs/desig
 - ✅ Measured: Antigravity `agy -p` takes the prompt as a value and ignores stdin (the adapter uses `--print=`).
 - ✅ Tested: crash/restart continuity with a real daemon kill, scope violations, ref tampering, lazy completion, verify-failure budgets, concurrent tickets, auto-merge safety.
 - ✅ Measured end-to-end with a real Antigravity employee: implement → verify (`node --test`) → review → awaiting CEO in 55 s. Headless `--sandbox` can read files, and tools that need permission are auto-denied.
-- ⏳ Not yet measured end-to-end with real subscriptions: Claude `--permission-prompt-tool` relay, Codex app-server approvals.
+- ✅ Measured end-to-end with real Claude Code and Codex employees on app-only profiles: implement at level 2 → awaiting CEO in 28 s (Claude) and 41 s (Codex). Their permission requests reached the dashboard through `--permission-prompt-tool` and the Codex app-server; a denied request did not stop the run.
+- ✅ Measured: as read-only reviewers, Claude and Codex both rejected a fake "done" (a placeholder file) every round, and both called out that `node --test` had passed with **zero tests**.
+- ⚠️ Known limit: the orchestrator records a verify command that passes with zero tests as passing evidence; the independent reviewer is what catches it.
 
 ## Built the way it tells you to build
 

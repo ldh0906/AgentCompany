@@ -164,8 +164,8 @@ export function ApprovalItem({ a }: { a: Approval }) {
         </div>
       </div>
       {a.kind === 'tool_permission' && (
-        <pre className="code" style={{ marginTop: 8, maxHeight: 160 }}>
-          {JSON.stringify(d.input, null, 2)}
+        <pre className="code" style={{ marginTop: 8, maxHeight: 240 }}>
+          {toolInputText(d.input)}
         </pre>
       )}
       {a.kind === 'integrate' && typeof d.summary === 'string' && d.summary && <div className="note">{d.summary}</div>}
@@ -353,4 +353,12 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
       </div>
     </>
   );
+}
+
+/** 파일 변경 요청은 바뀔 파일과 diff를 그대로, 나머지는 JSON으로 보여준다. */
+function toolInputText(input: unknown): string {
+  const x = input as { files?: { path: string; kind: string }[]; diff?: unknown } | null;
+  if (x && Array.isArray(x.files) && typeof x.diff === 'string')
+    return `${x.files.map((f) => `${f.kind}  ${f.path}`).join('\n')}\n\n${x.diff}`;
+  return JSON.stringify(input, null, 2);
 }

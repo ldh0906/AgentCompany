@@ -21,12 +21,31 @@ for await (const line of createInterface({ input: process.stdin })) {
       method: 'item/commandExecution/requestApproval',
       params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'i2', command: 'rm -rf build', cwd: '.' },
     });
-  } else if (m.id === 'c1' || m.id === 'c2') {
+    // 실측(0.153.4): 파일 변경 승인 요청에는 itemId뿐이다. 바뀔 파일은 먼저 온 item/started에 있다.
+    send({
+      method: 'item/started',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'fileChange',
+          id: 'f1',
+          status: 'inProgress',
+          changes: [{ path: 'src/party.js', kind: { type: 'update' }, diff: '+export const x = 1;' }],
+        },
+      },
+    });
+    send({
+      id: 'c3',
+      method: 'item/fileChange/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'f1', reason: null },
+    });
+  } else if (m.id === 'c1' || m.id === 'c2' || m.id === 'c3') {
     send({
       method: 'item/completed',
       params: { item: { type: 'commandExecution', id: m.id, command: m.id, decision: m.result?.decision } },
     });
-    if (++count === 2) {
+    if (++count === 3) {
       send({
         method: 'item/completed',
         params: { item: { type: 'agentMessage', id: 'a1', text: `decisions done: ${m.result?.decision}` } },

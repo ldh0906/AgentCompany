@@ -54,6 +54,8 @@ async function main(): Promise<void> {
   const pending = new Map<number, (m: { result?: unknown; error?: unknown }) => void>();
   let nextId = 1;
   let threadId: string | null = null;
+  // 파일 변경 승인 요청에는 itemId뿐이다. 바뀔 파일·diff는 먼저 온 item/started(fileChange)에 있다.
+  const fileItems = new Map<string, { path: string; kind: string; diff: string }[]>();
   let finished!: (ok: boolean) => void;
   const done = new Promise<boolean>((r) => (finished = r));
   child.once('close', () => finished(false));
@@ -81,6 +83,17 @@ async function main(): Promise<void> {
     if (m.method && m.id !== undefined) {
       void handleServerRequest(m);
       return;
+    }
+    if (m.method === 'item/started' && m.params?.item?.type === 'fileChange') {
+      const changes = Array.isArray(m.params.item.changes) ? m.params.item.changes : [];
+      fileItems.set(
+        String(m.params.item.id),
+        changes.map((c: any) => ({
+          path: String(c?.path ?? ''),
+          kind: String(c?.kind?.type ?? c?.kind ?? ''),
+          diff: String(c?.diff ?? ''),
+        })),
+      );
     }
     if (m.method === 'item/completed' && m.params?.item?.type === 'agentMessage') {
       out({ type: 'item.completed', item: { type: 'agent_message', text: m.params.item.text } });
@@ -114,7 +127,7 @@ async function main(): Promise<void> {
     const { id } = await createApprovalRequest(approvalDir, {
       source: 'codex',
       kind: isCommand ? 'command' : 'fileChange',
-      detail: isCommand ? { command: m.params?.command, cwd: m.params?.cwd } : { reason: m.params?.reason ?? null },
+      detail: isCommand ? { command: m.params?.command, cwd: m.params?.cwd } : fileChangeDetail(m.params, fileItems),
     });
     const d = await waitForDecision(approvalDir, id, approvalTimeoutMs);
     out({ type: 'approval.decided', kind: isCommand ? 'command' : 'fileChange', decision: d.decision });
@@ -152,6 +165,19 @@ async function main(): Promise<void> {
   child.stdin.end();
   child.kill();
   process.exitCode = ok ? 0 : 1;
+}
+
+const MAX_APPROVAL_DIFF = 8_000;
+
+/** 대표가 무엇을 승인하는지 볼 수 있게: 바뀔 파일 목록과 (잘린) diff. */
+function fileChangeDetail(params: any, items: Map<string, { path: string; kind: string; diff: string }[]>): object {
+  const changes = items.get(String(params?.itemId)) ?? [];
+  const diff = changes.map((c) => `--- ${c.path} (${c.kind})\n${c.diff}`).join('\n');
+  return {
+    reason: params?.reason ?? null,
+    files: changes.map((c) => ({ path: c.path, kind: c.kind })),
+    diff: diff.length > MAX_APPROVAL_DIFF ? `${diff.slice(0, MAX_APPROVAL_DIFF)}\n…(truncated)` : diff,
+  };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

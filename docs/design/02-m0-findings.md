@@ -19,7 +19,7 @@
 - **agy 프롬프트 전달:** `--print=<프롬프트>`로 인자에 넣거나, `--input-format stream-json --output-format stream-json`으로 stdin에 NDJSON을 넣습니다. stdin 메시지 형식은 아직 확인하지 못했습니다.
 - 인자 방식은 Windows 명령줄 길이 한계(약 32K자)가 있습니다. 긴 컨텍스트 팩을 넘기려면 stream-json 방식이 필요합니다.
 
-## 2. 권한 요청 가로채기 (코드 준비 완료, 실측 대기)
+## 2. 권한 요청 가로채기 (6절에서 실측 완료)
 
 - **Codex:** 로컬 `codex app-server generate-ts`(0.153.4)로 생성한 스키마를 확인했습니다.
   - 메서드: `initialize`, `thread/start`, `turn/start`, `item/commandExecution/requestApproval`, `item/fileChange/requestApproval`, `turn/completed`
@@ -32,7 +32,7 @@
   - `--mcp-config`, `--strict-mcp-config`, `--setting-sources`, `auth login|status`(`--json`)는 도움말에서 확인했습니다.
 - **agy:** 가로채기 수단이 없습니다. 권한 관련 옵션은 `--sandbox`와 `--dangerously-skip-permissions`뿐입니다.
 
-## 3. 개인 설정 누출 (관찰 1건, 정밀 실측 대기)
+## 3. 개인 설정 누출 (앱 전용 프로필은 6절에서 확인)
 
 - **관찰:** 기본 프로필로 Codex 작업자를 실행하자, 대표 개인 설정의 **supabase MCP 서버가 작업자에게 로드됐습니다.** 인증이 없어 연결은 실패했습니다.
   - 앱 전용 프로필(A안)이 필요하다는 근거입니다.
@@ -76,8 +76,25 @@
   - 이때 결과는 `status: "SUCCESS"`에 **빈 응답**이고, 사유는 stderr에 나옵니다(`a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied`). 어댑터는 빈 응답을 "최종 응답 없음"으로 처리하고, 실행 기록에 stderr를 남깁니다.
 - 앱 전용 프로필 분리 수단은 여전히 없습니다. agy는 사용자의 기본 로그인을 씁니다.
 
-## 6. 남은 실측 (사용자 PC에서 창이 떠도 괜찮은 시간에 실행)
+## 6. Claude Code·Codex 제품 실측 (2026-09-29, 앱 전용 프로필)
+
+같은 임시 샘플 저장소와 같은 업무(`isFull` 함수 + 단위 테스트)로 실측했습니다. 로그인은 대표가 앱 전용 프로필에 직접 했습니다.
+
+| 실측 | Claude Code 2.1.202 | Codex 0.153.4 |
+|---|---|---|
+| 구현, 등급 2(쓰기 + 명령 승인) | 대표 승인 대기까지 **28초** | 대표 승인 대기까지 **41~44초** |
+| 권한 중계 | `--permission-prompt-tool`로 `Bash`(`node --test`) 1건이 대시보드 승인으로 옴. 파일 편집은 묻지 않음 | app-server로 명령 4건 + 파일 변경 1건이 대시보드 승인으로 옴. 읽기 명령(`Get-Content`)까지 묻는다 |
+| 권한 거부 | 거부 사유를 받고 명령 없이 계속 진행. 검증은 오케스트레이터가 직접 실행해 승인 대기까지 도달(34초) | (거부 경로는 가짜 app-server 테스트로 확인) |
+| 읽기 전용 검수자 | 가짜 구현(자리표시 md 파일)을 3회 모두 **수정 요청** | 3회 모두 **수정 요청**. 읽기 전용 샌드박스라 로컬 검증 명령은 막힘 |
+| 개인 설정 누출 | MCP는 앱 승인 서버(`ac_approver`)뿐, 플러그인 0. 스킬·에이전트는 Claude Code 내장만(개인 스킬 없음) | — |
+
+- **발견 1 — Codex 앱 전용 프로필 폴더:** `CODEX_HOME`이 가리키는 폴더가 없으면 Codex는 `codex login`조차 거부합니다. 처음 설치한 사용자가 안내대로 로그인하면 실패했습니다. → 앱이 로그인 점검·실행 전에 빈 프로필 폴더를 만듭니다(`appProfileDir`).
+- **발견 2 — 파일 변경 승인에 내용이 없었음:** `item/fileChange/requestApproval`에는 `itemId`와 `reason`뿐이고, 바뀔 파일과 diff는 먼저 온 `item/started`(fileChange)의 `changes`에 있습니다(로컬 `generate-json-schema`로 확인). 중계기가 이를 기억하지 않아 대표는 무엇을 승인하는지 모른 채 승인해야 했습니다. → 파일 목록과 diff(최대 8,000자)를 승인 요청에 붙이고 대시보드에 그대로 보여줍니다.
+- **발견 3 — 테스트 0개 통과:** 가짜 구현에서 `node --test`는 테스트 0개로 "통과"했습니다. 오케스트레이터는 이를 단위 테스트 증거로 기록했지만, **Claude와 Codex 검수자 모두 "0개 통과는 증거가 아니다"라며 거부**했습니다. 독립 검수가 이 빈틈을 막았습니다. 검증 명령 출력의 테스트 수를 해석하는 기능은 아직 없습니다(알려진 한계).
+
+## 7. 남은 실측
 
 1. ~~agy 기본 실측을 `--print=` 방식으로 다시 측정~~ → 5절에서 완료. stdin stream-json 입력 형식은 확인하지 않았습니다(어댑터가 쓰지 않음).
-2. 권한 실측 A·B·C를 CLI 3종에 대해 실행합니다(agy B·C는 제외).
-3. 앱 전용 프로필 로그인(대표가 직접) 후, 누출 비교를 두 프로필에서 실행합니다.
+2. ~~권한 실측~~ → 5·6절에서 완료.
+3. Codex 앱 전용 프로필의 누출 비교(`debug prompt-input`)는 아직 하지 않았습니다.
+4. Linux·macOS는 CI로 확인합니다.
