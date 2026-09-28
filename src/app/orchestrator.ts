@@ -825,7 +825,10 @@ export class Orchestrator {
       exitCode: null,
       passed: true,
       outputPath: null,
-      summary: tr(`${sub.changedPaths.length}개 파일 변경`, `${sub.changedPaths.length} files changed`),
+      summary: tr(
+        `${sub.changedPaths.length}개 파일 변경`,
+        `${sub.changedPaths.length} file${sub.changedPaths.length === 1 ? '' : 's'} changed`,
+      ),
       createdAt: now(),
     };
     this.records.saveEvidence(diffEvidence, sub.id);
@@ -1018,7 +1021,7 @@ export class Orchestrator {
       subject: this.integrationSubject(t, sub),
       summary: tr(
         `${t.id} ${t.title} — ${sub.changedPaths.length}개 파일 변경`,
-        `${t.id} ${t.title} — ${sub.changedPaths.length} files changed`,
+        `${t.id} ${t.title} — ${sub.changedPaths.length} file${sub.changedPaths.length === 1 ? '' : 's'} changed`,
       ),
       detail: {
         headSha: sub.headSha,

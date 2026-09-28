@@ -12,6 +12,8 @@ No API keys. It drives the official CLIs you are already logged into.
 
 </div>
 
+![CEO dashboard: approvals, a quarantined rogue edit, and ticket drafts from the chief of staff](docs/images/dashboard.png)
+
 ---
 
 Multi-agent tools usually fail in the same ways: agents say "done" without doing the work, two agents overwrite the same file, a debate ends after one round because someone counted messages instead of checking results, and nobody can tell afterwards what was decided or why.
@@ -40,6 +42,8 @@ The demo company has four fake employees: a diligent one, a **lazy** one who cla
 | lazy | says "All done!" with no changes | `verification_failed: no files changed` → round 2 → real work |
 | rogue | also edits `README.md` (protected) | submission quarantined, ticket held for **your** permission |
 
+<p align="center"><img src="docs/images/quarantine.png" width="820" alt="A rogue employee's out-of-scope edit is quarantined"></p>
+
 ## Use it with your real CLIs
 
 ```bash
@@ -64,6 +68,8 @@ By default employees run in **app-only CLI profiles** (`CLAUDE_CONFIG_DIR`, `COD
 | 4 Full auto | nothing asks (post-run checks still apply) | ✅ | ✅ workspace-write sandbox | ✅ |
 
 Levels a CLI cannot enforce are greyed out instead of silently degraded.
+
+<p align="center"><img src="docs/images/team.png" width="820" alt="Team page with per-employee CLI, model, access level and measured CLI capabilities"></p>
 
 ## Status — what is measured vs. planned
 
@@ -99,6 +105,8 @@ stateDiagram-v2
 ```
 
 Review tickets use a different path: blind analysis → anonymized cross-verdicts → mandatory author rebuttal → deterministic synthesis. Disputes the author keeps are escalated to you, never outvoted.
+
+![Claim ledger: blind claims, cross-verdicts, rebuttals; disputes the author keeps are escalated to the CEO](docs/images/claims.png)
 
 ## Architecture
 

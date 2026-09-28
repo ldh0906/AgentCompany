@@ -18,6 +18,16 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
       return ko
         ? `${e.entityId} 배정 — 담당 ${who(p.assigneeId)}, 검수 ${who(p.reviewerId)}`
         : `${e.entityId} assigned to ${who(p.assigneeId)}, reviewer ${who(p.reviewerId)}`;
+    case 'ticket.analyzing':
+      return ko ? `${e.entityId} 분석 시작` : `${e.entityId} analysis started`;
+    case 'ticket.backlog':
+      return ko ? `${e.entityId} 대기 목록 등록` : `${e.entityId} moved to backlog`;
+    case 'ticket.cancelled':
+      return ko ? `${e.entityId} 취소: ${p.reason ?? ''}` : `${e.entityId} cancelled: ${p.reason ?? ''}`;
+    case 'ticket.failed':
+      return ko ? `${e.entityId} 실패: ${p.reason ?? ''}` : `${e.entityId} failed: ${p.reason ?? ''}`;
+    case 'ticket.integration_failed':
+      return ko ? `${e.entityId} 반영 실패: ${p.reason ?? ''}` : `${e.entityId} integration failed: ${p.reason ?? ''}`;
     case 'ticket.in_progress':
       return ko ? `${e.entityId} 작업 시작 (${p.runCount}번째 실행)` : `${e.entityId} work started (run #${p.runCount})`;
     case 'ticket.verifying':
