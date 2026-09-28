@@ -79,7 +79,7 @@ export async function seedDemo(company: Company, orch: Orchestrator, dataDir: st
     purpose: L('새 모험가가 파티에 합류할 수 있게 한다', 'Let a new adventurer join a party'),
     requirements: [{ text: L('합류 함수와 단위 테스트', 'Join function with unit tests'), evidenceType: 'unit_test' }],
     doneCriteria: L('단위 테스트 통과', 'Unit tests pass'),
-    writeScope: ['src/**', 'test/**'],
+    writeScope: ['src/join/**', 'test/join/**'],
   });
   company.createTicket({
     projectId: project.id,
