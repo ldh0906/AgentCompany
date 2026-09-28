@@ -56,8 +56,8 @@ npm run demo
 ## 실제 CLI로 쓰기
 
 ```bash
-npx agent-company doctor     # 설치·로그인 상태 점검
-npx agent-company start      # http://127.0.0.1:4777 대시보드
+agent-company doctor     # 설치·로그인 상태 점검
+agent-company start      # http://127.0.0.1:4777 대시보드
 ```
 
 1. **프로젝트를 등록합니다.** git 저장소 경로, 기준 브랜치, 검증 명령, 보호 경로를 입력합니다.
@@ -97,8 +97,8 @@ CLI가 강제할 수 없는 등급은 조용히 약하게 적용하지 않고, �
 ## 제거
 
 ```bash
-npx agent-company uninstall         # 미리보기
-npx agent-company uninstall --yes   # 삭제. 원본 저장소와 전역 CLI 설정은 절대 건드리지 않습니다.
+agent-company uninstall         # 미리보기
+agent-company uninstall --yes   # 삭제. 원본 저장소와 전역 CLI 설정은 절대 건드리지 않습니다.
 ```
 
 서비스, 예약 작업, 자동 실행 항목은 만들지 않습니다.

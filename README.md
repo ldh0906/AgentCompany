@@ -43,8 +43,8 @@ The demo company has four fake employees: a diligent one, a **lazy** one who cla
 ## Use it with your real CLIs
 
 ```bash
-npx agent-company doctor     # which CLIs are installed and logged in
-npx agent-company start      # opens the dashboard at http://127.0.0.1:4777
+agent-company doctor     # which CLIs are installed and logged in
+agent-company start      # opens the dashboard at http://127.0.0.1:4777
 ```
 
 1. **Register a project**: path to a git repo, base branch, verify commands (`npm test`, `dotnet test`…), protected paths.
@@ -125,8 +125,8 @@ Zero runtime dependencies. Node ≥ 22.18. Windows first, macOS/Linux supported.
 ## Uninstall
 
 ```bash
-npx agent-company uninstall         # preview: data dir, size, dirty worktrees
-npx agent-company uninstall --yes   # delete. Your repos and global CLI configs are never touched.
+agent-company uninstall         # preview: data dir, size, dirty worktrees
+agent-company uninstall --yes   # delete. Your repos and global CLI configs are never touched.
 ```
 
 No services, scheduled tasks or autostart entries are ever created.

@@ -13,9 +13,12 @@ If you just want to see the flow, run `npm run demo` instead (no subscription ne
 ## 2. Install and check
 
 ```bash
-npm install -g agent-company      # or: clone, npm install, npm run build, npm link
+git clone https://github.com/<you>/agent-company && cd agent-company
+npm install && npm run build && npm link   # installs the `agent-company` command
 agent-company doctor
 ```
+
+(An npm release is planned; the npm name `agent-company` belongs to another project, so do not `npm install -g agent-company`.)
 
 `doctor` lists every CLI it found, its version, and whether it is logged in **inside the app-only profile**.
 
