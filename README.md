@@ -82,7 +82,7 @@ This project separates **measured facts** from assumptions ([details](docs/desig
 
 ## Built the way it tells you to build
 
-Every change in this repository was reviewed by a different model (Codex, read-only) and every objection had to be answered with a fix **and** a regression test. Eight review rounds found 32 P1 defects the tests had missed — including a way for verify commands to modify your repository before approval and a time-of-check/time-of-use bug in integration. The full log: [docs/design/03-review-log.md](docs/design/03-review-log.md).
+Every change in this repository was reviewed by a different model (Codex, read-only) and every objection had to be answered with a fix **and** a regression test. Nine review rounds found 34 P1 defects the tests had missed — including a way for verify commands to modify your repository before approval and a time-of-check/time-of-use bug in integration. The full log: [docs/design/03-review-log.md](docs/design/03-review-log.md).
 
 ## How a ticket moves
 

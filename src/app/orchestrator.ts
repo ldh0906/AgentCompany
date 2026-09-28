@@ -162,6 +162,8 @@ export class Orchestrator {
         this.records.saveRun({ ...prepared, status: 'running', pid: late.pid, processStartMs: late.startedAtMs });
         continue;
       }
+      // 실패로 확정하기 전에, 그사이 시작했다가 끝난(또는 그룹 정리 전에 죽은) 실행의 남은 프로세스를 정리한다.
+      await abandonAndTerminate(prepared.runDir);
       await this.finishRun(prepared, {
         failure: 'spawn_failed',
         detail: tr('실행 준비 중 중단되어 프로세스가 시작되지 않았습니다.', 'Run preparation was interrupted; the process did not start.'),
@@ -866,10 +868,11 @@ export class Orchestrator {
     const failures: string[] = [];
     if (project.verifyCommands.length && sub.headSha) {
       const paths = projectPaths(this.opts.dataDir, project.id);
+      // 남은 이전 검증을 "먼저" 끝낸 뒤 작업공간을 초기화한다(종료 전에 초기화하면 이전 프로세스가 다시 파일을 바꿀 수 있다).
+      await this.stopLeftoverVerify(ticketId);
       const vwt = await ensureDetachedWorktree(paths, 'verify', ticketId, sub.headSha);
       // 검증 명령은 제출된 코드를 실행한다(CI와 같음). 실행 전후로 원본 저장소와 미러 ref를 비교해 부작용을 잡는다.
-      // 남은 이전 검증부터 끝낸다. 기준 스냅샷은 DB에 남겨, 검증 중 재시작해도 "이미 바뀐 원본"을 새 기준으로 삼지 않는다.
-      await this.stopLeftoverVerify(ticketId);
+      // 기준 스냅샷은 DB에 남겨, 검증 중 재시작해도 "이미 바뀐 원본"을 새 기준으로 삼지 않는다.
       const before = await this.verifyBaseline(`verify_base:${ticketId}`, project, paths);
       try {
         for (const [i, vc] of project.verifyCommands.entries()) {
