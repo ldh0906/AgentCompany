@@ -83,8 +83,10 @@ export async function waitForExit(runDir: string, shimPid: number | null, pollMs
       // 셔틀이 기록 없이 사라짐(강제 종료 등). 잠깐 더 기다렸다가 판정.
       await new Promise((r) => setTimeout(r, pollMs));
       const late = await readExitRecord(runDir);
-      if (late)
+      if (late) {
+        await reapGroup(runDir); // 셔틀이 기록만 쓰고 그룹을 정리하기 전에 죽었을 수 있다
         return { exitCode: late.exitCode, signal: late.signal, timedOut: late.timedOut, killed: false, durationMs: late.durationMs };
+      }
       // 셔틀만 죽고 CLI는 살아 있을 수 있다(Unix: 별도 프로세스 그룹). 끝났다고 보고하기 전에 CLI 그룹을 정리한다.
       await terminateRun(runDir, null);
       return { exitCode: null, signal: null, timedOut: false, killed: true, durationMs: Date.now() - started };
@@ -133,14 +135,20 @@ export async function startProcess(spec: ProcessSpec): Promise<RunningProcess> {
   });
   shim.unref();
   const pid = shim.pid!;
-  await writeJsonAtomic(files.meta, {
-    file: spec.file,
-    args: spec.args,
-    cwd: spec.cwd,
-    startedAt: new Date(startedAtMs).toISOString(),
-    state: 'running',
-    shimPid: pid,
-  });
+  try {
+    await writeJsonAtomic(files.meta, {
+      file: spec.file,
+      args: spec.args,
+      cwd: spec.cwd,
+      startedAt: new Date(startedAtMs).toISOString(),
+      state: 'running',
+      shimPid: pid,
+    });
+  } catch (error) {
+    // 추적할 수 없는 실행을 남기지 않는다.
+    await terminateRun(spec.runDir, pid);
+    throw error;
+  }
 
   let killed = false;
   const kill = async () => {
@@ -178,6 +186,14 @@ export async function terminateRun(runDir: string, shimPid: number | null): Prom
   if (process.platform !== 'win32') {
     // Unix: CLI와 자손은 셔틀의 그룹(그룹 번호 = 셔틀 pid)에 있다. 셔틀 생존과 무관하게 그룹 전체를 끝낸다.
     const pgid = rec?.pgid ?? rec?.shimPid ?? shimPid;
+    // 이전 버전 기록(pgid 없음)은 CLI가 별도 그룹이었다: 그 그룹도 함께 끝낸다.
+    if (rec && rec.pgid === undefined && rec.cliPid) {
+      try {
+        process.kill(-rec.cliPid, 'SIGKILL');
+      } catch {
+        /* 그룹 없음 */
+      }
+    }
     if (pgid) {
       try {
         process.kill(pgid, 'SIGTERM'); // 셔틀이 살아 있으면 종료 기록을 남기게
@@ -202,8 +218,15 @@ export async function terminateRun(runDir: string, shimPid: number | null): Prom
 export async function reapGroup(runDir: string): Promise<void> {
   if (process.platform === 'win32') return;
   const rec = await readFile(runFilePaths(runDir).pid, 'utf8')
-    .then((x) => JSON.parse(x) as { shimPid?: number; pgid?: number | null })
+    .then((x) => JSON.parse(x) as { shimPid?: number; pgid?: number | null; cliPid?: number | null })
     .catch(() => null);
+  if (rec && rec.pgid === undefined && rec.cliPid) {
+    try {
+      process.kill(-rec.cliPid, 'SIGKILL'); // 이전 버전 기록: CLI 별도 그룹
+    } catch {
+      /* 그룹 없음 */
+    }
+  }
   const pgid = rec?.pgid ?? rec?.shimPid;
   if (!pgid) return;
   try {

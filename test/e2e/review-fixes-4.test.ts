@@ -147,3 +147,21 @@ test('[P1] CLI가 자식(빌드·서버)을 남기고 끝나도 그 자식은 �
   await new Promise((r) => setTimeout(r, 800));
   assert.equal(isAlive(orphan), false, 'CLI가 남긴 자식도 정리됨');
 });
+
+test('[P1] 교차 검토 업무는 검수자 판단보다 강한 증거를 요구할 수 없음 (증거 없이 완료되지 않게)', async (t) => {
+  const env = await setup(t);
+  const tk = env.company.createTicket({
+    projectId: env.projectId,
+    type: 'review',
+    title: '런타임 확인이 필요한 검토',
+    purpose: 'p',
+    requirements: [{ text: '게임에서 실제로 동작', evidenceType: 'runtime' }],
+    doneCriteria: 'd',
+  });
+  await env.orch.tick();
+  await env.orch.tick();
+  const t2 = env.company.requireTicket(tk.id);
+  assert.equal(t2.status, 'analyzing');
+  assert.equal(t2.hold?.reason, 'needs_decision');
+  assert.match(t2.hold!.note, /검수자 판단/);
+});

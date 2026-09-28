@@ -126,6 +126,15 @@ export function applyTicketCommand(ticket: Ticket, cmd: TicketCommand, actor: Ac
       if (ticket.requirements.length === 0)
         return reject(tr('요구사항이 없는 티켓은 대기 목록에 올릴 수 없습니다.', 'Tickets need requirements before entering the backlog.'));
       if (!ticket.doneCriteria.trim()) return reject(tr('완료 조건이 비어 있습니다.', 'Done criteria are empty.'));
+      if (ticket.type === 'review' && ticket.requirements.some((r) => EVIDENCE_STRENGTH[r.evidenceType] > EVIDENCE_STRENGTH.inspection)) {
+        // 교차 검토의 산출물은 주장과 판정뿐이다: 테스트·런타임·대표 확인 증거를 요구하는 요구사항은 검증할 수 없다.
+        return reject(
+          tr(
+            '교차 검토 업무의 요구사항은 "검수자 판단" 증거만 쓸 수 있습니다. 더 강한 증거가 필요하면 구현·조사 업무로 만드세요.',
+            'Cross-review tickets can only use "reviewer inspection" evidence. Use an implementation or research ticket for stronger evidence.',
+          ),
+        );
+      }
       if ((ticket.type === 'impl' || ticket.type === 'doc') && ticket.writeScope.length === 0) {
         return reject(tr('구현·문서 티켓은 쓰기 범위가 있어야 합니다.', 'Implementation and documentation tickets need a write scope.'));
       }
@@ -219,6 +228,13 @@ export function applyTicketCommand(ticket: Ticket, cmd: TicketCommand, actor: Ac
       // 검토형 업무: 블라인드 분석 → 교차 판정 → 재답변 → 코드 종합이 끝나면 대표 확인을 기다린다.
       if (!isOrchestrator(actor))
         return reject(tr('검토 종합은 오케스트레이터만 기록할 수 있습니다.', 'Only the orchestrator can record review synthesis.'));
+      if (ticket.requirements.some((r) => EVIDENCE_STRENGTH[r.evidenceType] > EVIDENCE_STRENGTH.inspection))
+        return reject(
+          tr(
+            '교차 검토로는 이 요구사항의 증거 등급을 충족할 수 없습니다.',
+            'Cross-review cannot satisfy the evidence these requirements need.',
+          ),
+        );
       if (ticket.type !== 'review')
         return reject(tr('검토형 업무만 교차 검토로 끝낼 수 있습니다.', 'Only review tickets can finish through cross-review.'));
       const bad = expect('in_progress');

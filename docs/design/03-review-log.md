@@ -12,6 +12,7 @@ This project was built the same way: code written by Claude (and two Codex worke
 | 5 | not approvable | 3 partial, 4 P1 (one introduced by the round-4 fix itself) | all fixed; tests in `test/e2e/review-fixes-4.test.ts` |
 | 6 | not approvable | 1 partial, 2 P1 (Unix process-group cleanup) | fixed; Unix-only test runs in CI |
 | 7 | not approvable | 1 partial, 2 P1 (CLI pid gap, children left behind by an exiting CLI); no other P1 found in `src/` | redesigned: CLI shares the shim's process group / Job Object |
+| 8 | not approvable | 1 partial, 3 new P1 incl. a product rule gap: a review ticket could require `runtime` evidence and still complete with none | fixed; review tickets may only require reviewer inspection |
 
 The rounds are the product's own protocol, applied to itself: independent review → the author must answer every objection → no majority vote, the CEO decides what is acceptable.
 
