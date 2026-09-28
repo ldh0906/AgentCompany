@@ -258,8 +258,8 @@ function AccessModal({ employee, onClose }: { employee: Employee; onClose: () =>
         {level === 'full-auto' && (
           <div className="banner bad">
             {ko
-              ? '전체 자동은 직원이 묻지 않고 명령을 실행합니다. 사후 범위 검사는 그대로 적용되지만, 실행 중 차단은 되지 않습니다. 계속하려면 full-auto 를 입력하세요.'
-              : 'Full auto runs commands without asking. Post-run scope checks still apply. Type full-auto to confirm.'}
+              ? '전체 자동은 직원이 묻지 않고 명령을 실행합니다. CLI에 따라 브라우저 조작·웹 검색·메시지 보내기 같은 도구까지 허용됩니다(agy 실측). 사후 범위 검사는 그대로 적용되지만, 실행 중 차단은 되지 않습니다. 계속하려면 full-auto 를 입력하세요.'
+              : 'Full auto runs commands without asking. Depending on the CLI this also allows tools like browser control, web search and sending messages (measured on agy). Post-run scope checks still apply, but nothing is blocked during the run. Type full-auto to confirm.'}
             <input style={{ marginTop: 8 }} value={confirmText} onChange={(e) => setConfirmText(e.target.value)} />
           </div>
         )}
