@@ -3,8 +3,7 @@ import { useT } from '../i18n.ts';
 import { empName, HoldChip } from '../components/ui.tsx';
 
 const COLUMNS: { key: string; statuses: string[] }[] = [
-  { key: 'backlog', statuses: ['received', 'analyzing', 'backlog'] },
-  { key: 'assigned', statuses: ['assigned'] },
+  { key: 'todo', statuses: ['received', 'analyzing', 'backlog', 'assigned'] },
   { key: 'in_progress', statuses: ['in_progress'] },
   { key: 'verifying', statuses: ['verifying', 'in_review'] },
   { key: 'changes_requested', statuses: ['changes_requested'] },
@@ -17,7 +16,8 @@ export function Board() {
   const { state } = useCompany();
   const { t, status, lang } = useT();
   if (!state) return <div className="emptystate">{t('loading')}</div>;
-  const label = (k: string) => (k === 'verifying' ? (lang === 'ko' ? '검증·검수' : 'Verify · review') : status(k));
+  const label = (k: string) =>
+    k === 'verifying' ? (lang === 'ko' ? '검증·검수' : 'Verify · review') : k === 'todo' ? (lang === 'ko' ? '할 일' : 'To do') : status(k);
 
   return (
     <>
@@ -32,6 +32,7 @@ export function Board() {
       <div className="board">
         {COLUMNS.map((c) => {
           const items = state.tickets.filter((x) => c.statuses.includes(x.status));
+          if (c.key === 'failed' && items.length === 0) return null; // 실패·취소 열은 있을 때만
           return (
             <div className="column" key={c.key}>
               <h3>

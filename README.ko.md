@@ -46,6 +46,8 @@ npm install && npm run build
 npm run demo
 ```
 
+<p align="center"><img src="docs/images/demo.gif" width="820" alt="데모 업무판: 업무가 할 일에서 검증·검수를 거쳐 대표 승인 대기와 완료로 이동"></p>
+
 데모 회사에는 가짜 직원 넷이 있습니다.
 
 | 직원 | 하는 일 | 시스템의 반응 |

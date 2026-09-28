@@ -34,6 +34,8 @@ npm install && npm run build
 npm run demo
 ```
 
+<p align="center"><img src="docs/images/demo.gif" width="820" alt="The demo board: tickets move from To do through verification and review to Awaiting CEO and Done"></p>
+
 The demo company has four fake employees: a diligent one, a **lazy** one who claims "done" without changing anything, a **rogue** one who edits a protected file, and a QA reviewer. Watch the system catch both:
 
 | Employee | What they do | What the system does |
