@@ -1,8 +1,8 @@
-import { tr } from '../core/i18n.ts';
 // Codex CLI 어댑터 (exec 경로).
 // 실측(2026-09-28, 0.153.4): exec --json, stdin 프롬프트('-'), thread.started.thread_id, exec resume <id>, 한글 정상.
 // 실행 중 권한 중계는 app-server(JSON-RPC)가 필요하다: 메서드명은 로컬 generate-ts로 확인했으나 실사용 실측 전.
 // 그래서 읽기 전용·전체 자동은 exec, 승인 중계가 필요한 등급(2·3)은 codex-relay(app-server) 경로를 쓴다.
+import { tr } from '../core/i18n.ts';
 
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -24,12 +24,26 @@ export const codexAdapter: CliAdapter = {
     permissionRelay: true,
     resume: true,
     profileEnvVar: 'CODEX_HOME',
-    get notes() { return [
-      tr('실측: exec --json, stdin 프롬프트, ID 재개, 한글 정상 (0.153.4)', 'Verified: exec --json, stdin prompts, resume by ID, Korean text (0.153.4)'),
-      tr('전체 자동은 workspace-write 샌드박스 안에서만 동작(네트워크 차단, 작업공간 밖 쓰기 차단)', 'Full-auto runs only in the workspace-write sandbox (no network or writes outside the workspace)'),
-      tr('등급 2·3은 app-server 중계(메서드명은 로컬 스키마로 확인, 실제 구독 실측 전)', 'Levels 2–3 use app-server relay (method names checked against local schema; subscription testing pending)'),
-      tr('허용 목록 자동 승인은 셸 메타문자(; & | $ < > 등)가 없는 명령만', 'Allowlist auto-approval only accepts commands without shell metacharacters (; & | $ < > etc.)'),
-    ]; },
+    get notes() {
+      return [
+        tr(
+          '실측: exec --json, stdin 프롬프트, ID 재개, 한글 정상 (0.153.4)',
+          'Verified: exec --json, stdin prompts, resume by ID, Korean text (0.153.4)',
+        ),
+        tr(
+          '전체 자동은 workspace-write 샌드박스 안에서만 동작(네트워크 차단, 작업공간 밖 쓰기 차단)',
+          'Full-auto runs only in the workspace-write sandbox (no network or writes outside the workspace)',
+        ),
+        tr(
+          '등급 2·3은 app-server 중계(메서드명은 로컬 스키마로 확인, 실제 구독 실측 전)',
+          'Levels 2–3 use app-server relay (method names checked against local schema; subscription testing pending)',
+        ),
+        tr(
+          '허용 목록 자동 승인은 셸 메타문자(; & | $ < > 등)가 없는 명령만',
+          'Allowlist auto-approval only accepts commands without shell metacharacters (; & | $ < > etc.)',
+        ),
+      ];
+    },
   },
 
   buildInvocation(req: InvocationRequest): Invocation {
@@ -83,7 +97,10 @@ export const codexAdapter: CliAdapter = {
   loginStatusArgs: ['login', 'status'],
   loginInstructions(profileDir) {
     return profileDir
-      ? tr(`PowerShell에서 다음을 실행해 앱 전용 프로필로 로그인하세요:\n$env:CODEX_HOME='${profileDir}'; codex login`, `Run in PowerShell to log in with the app profile:\n$env:CODEX_HOME='${profileDir}'; codex login`)
+      ? tr(
+          `PowerShell에서 다음을 실행해 앱 전용 프로필로 로그인하세요:\n$env:CODEX_HOME='${profileDir}'; codex login`,
+          `Run in PowerShell to log in with the app profile:\n$env:CODEX_HOME='${profileDir}'; codex login`,
+        )
       : tr('터미널에서 codex login 을 실행하세요.', 'Run codex login in a terminal.');
   },
 };

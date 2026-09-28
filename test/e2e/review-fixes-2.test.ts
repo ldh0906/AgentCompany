@@ -9,7 +9,14 @@ import { fileURLToPath } from 'node:url';
 import { Store } from '../../src/store/db.ts';
 import { Records } from '../../src/app/records.ts';
 import { git, gitOut } from '../../src/workspace/git.ts';
-import { commitWorktree, ensureTicketWorktree, integrateWithMerge, originFingerprint, projectPaths, syncMirror } from '../../src/workspace/workspace.ts';
+import {
+  commitWorktree,
+  ensureTicketWorktree,
+  integrateWithMerge,
+  originFingerprint,
+  projectPaths,
+  syncMirror,
+} from '../../src/workspace/workspace.ts';
 import { isAlive, startProcess } from '../../src/runner/process.ts';
 import { makeOrigin } from './helpers.ts';
 
@@ -60,7 +67,7 @@ test('반영은 승인된 SHA 자체를 가져옴 (원본 브랜치 = 승인 SHA
   await git(['checkout', '-q', '-b', 'other'], origin);
   const r = await integrateWithMerge(origin, paths, 'T-1', 'main', sha, '기능');
   assert.equal(r.kind, 'merged');
-  assert.equal((await gitOut(['for-each-ref', '--format=%(refname)', 'refs/ac-merge', 'refs/ac-approved'], origin)), '');
+  assert.equal(await gitOut(['for-each-ref', '--format=%(refname)', 'refs/ac-merge', 'refs/ac-approved'], origin), '');
   if (r.kind === 'merged') assert.equal(await gitOut(['rev-parse', 'main'], origin), r.mergeSha);
 });
 
@@ -95,10 +102,26 @@ test('증거는 제출(실행) 단위로만 조회: 이전 회차의 대표 확�
   const d = tmp(t);
   const s = new Store(path.join(d, 'c.db'));
   const r = new Records(s);
-  const base = { ticketId: 'T', round: 1, headSha: 'h', type: 'human_attest' as const, label: '', argv: null, exitCode: null, passed: true, outputPath: null, summary: '', requirementId: 'R1', createdAt: '2026' };
+  const base = {
+    ticketId: 'T',
+    round: 1,
+    headSha: 'h',
+    type: 'human_attest' as const,
+    label: '',
+    argv: null,
+    exitCode: null,
+    passed: true,
+    outputPath: null,
+    summary: '',
+    requirementId: 'R1',
+    createdAt: '2026',
+  };
   r.saveEvidence({ ...base, id: 'E1' }, 'RUN-1');
   r.saveEvidence({ ...base, id: 'E2', round: 2 }, 'RUN-2');
-  assert.deepEqual(r.evidenceFor('T', { submission: 'RUN-2' }).map((e) => e.id), ['E2']);
+  assert.deepEqual(
+    r.evidenceFor('T', { submission: 'RUN-2' }).map((e) => e.id),
+    ['E2'],
+  );
   assert.deepEqual(r.evidenceFor('T', { submission: null }), []);
   s.close();
 });
@@ -107,11 +130,25 @@ test('셔틀: 복구가 포기 표시를 남긴 실행은 CLI를 띄우지 않�
   const d = tmp(t);
   const marker = path.join(d, 'ran.txt');
   writeFileSync(path.join(d, 'abandoned'), 'x');
-  writeFileSync(path.join(d, 'spec.json'), JSON.stringify({
-    file: process.execPath, args: ['-e', `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`], cwd: d, stdinPath: null,
-    stdoutPath: path.join(d, 'out.log'), stderrPath: path.join(d, 'err.log'), pidPath: path.join(d, 'pid.json'), exitPath: path.join(d, 'exit.json'), timeoutMs: 10_000,
-  }));
-  const shim = spawn(process.execPath, ['--no-warnings', path.join(here, '..', '..', 'src', 'runner', 'shim.ts'), path.join(d, 'spec.json')], { windowsHide: true, stdio: 'ignore' });
+  writeFileSync(
+    path.join(d, 'spec.json'),
+    JSON.stringify({
+      file: process.execPath,
+      args: ['-e', `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`],
+      cwd: d,
+      stdinPath: null,
+      stdoutPath: path.join(d, 'out.log'),
+      stderrPath: path.join(d, 'err.log'),
+      pidPath: path.join(d, 'pid.json'),
+      exitPath: path.join(d, 'exit.json'),
+      timeoutMs: 10_000,
+    }),
+  );
+  const shim = spawn(
+    process.execPath,
+    ['--no-warnings', path.join(here, '..', '..', 'src', 'runner', 'shim.ts'), path.join(d, 'spec.json')],
+    { windowsHide: true, stdio: 'ignore' },
+  );
   await new Promise((r) => shim.once('close', r));
   assert.equal(existsSync(marker), false, 'CLI가 실행되지 않음');
   assert.equal(JSON.parse(readFileSync(path.join(d, 'exit.json'), 'utf8')).abandoned, true);
@@ -119,8 +156,17 @@ test('셔틀: 복구가 포기 표시를 남긴 실행은 CLI를 띄우지 않�
 
 test('명시적 종료는 CLI와 그 하위 프로세스까지 종료', { timeout: 30_000 }, async (t) => {
   const d = tmp(t);
-  const script = "const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});console.log(c.pid);setInterval(()=>{},1000)";
-  const p = await startProcess({ file: process.execPath, args: ['-e', script], cwd: d, env: process.env, stdinText: null, runDir: path.join(d, 'run'), timeoutMs: 60_000 });
+  const script =
+    "const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});console.log(c.pid);setInterval(()=>{},1000)";
+  const p = await startProcess({
+    file: process.execPath,
+    args: ['-e', script],
+    cwd: d,
+    env: process.env,
+    stdinText: null,
+    runDir: path.join(d, 'run'),
+    timeoutMs: 60_000,
+  });
   let grandchild = 0;
   for (let i = 0; i < 50 && !grandchild; i++) {
     await new Promise((r) => setTimeout(r, 100));

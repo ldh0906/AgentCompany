@@ -1,9 +1,9 @@
-import { tr } from '../core/i18n.ts';
 // 블라인드 교차 검토 프로토콜의 프롬프트와 보고서 형식.
 // 1) 블라인드 분석: 다른 직원의 결과를 보지 않고 주장을 낸다.
 // 2) 교차 판정: 작성자를 가린 주장을 다른 직원이 판정한다(동의·부분 동의·반대·근거 부족).
 // 3) 재답변: 원 작성자가 동의가 아닌 모든 판정에 답한다(유지·축소·수정·철회·대표 결정 필요).
 // 4) 종합은 LLM이 아니라 코드가 한다(다수결로 억지 합의를 만들지 않는다).
+import { tr } from '../core/i18n.ts';
 
 import type { Claim, ClaimResponse, ClaimVerdict, Employee, Project, Ticket } from '../core/types.ts';
 import { extractLastJson } from './report.ts';
@@ -18,7 +18,16 @@ function data(title: string, body: string): string {
 }
 
 function header(kind: string, t: Ticket, nonce: string, extra: Record<string, unknown> = {}): string {
-  const h = { kind, ticketId: t.id, nonce, round: t.round, writeScope: [], requirementIds: t.requirements.map((r) => r.id), evidenceIds: [], ...extra } as unknown as TaskHeader;
+  const h = {
+    kind,
+    ticketId: t.id,
+    nonce,
+    round: t.round,
+    writeScope: [],
+    requirementIds: t.requirements.map((r) => r.id),
+    evidenceIds: [],
+    ...extra,
+  } as unknown as TaskHeader;
   return `${TASK_HEADER_PREFIX}${JSON.stringify(h)} -->`;
 }
 
@@ -36,7 +45,7 @@ Mark guesses as low confidence. Do not decide product rules the CEO has not deci
 ${data('Review task', question(t))}
 
 ${data('Project document rules', p.docRules)}
-${feedback ? `\n${data("CEO feedback on the previous round (address it)", feedback)}\n` : ''}
+${feedback ? `\n${data('CEO feedback on the previous round (address it)', feedback)}\n` : ''}
 Write in language "${language}". End with exactly one JSON code block:
 ${fence}json
 {"nonce":"${nonce}","kind":"claims","claims":[{"text":"...","impact":"high|medium|low","confidence":0.7,"sources":[{"doc":"docs/design.md","loc":"## Party rules"}]}]}
@@ -45,7 +54,12 @@ ${fence}
 }
 
 export function crossPrompt(e: Employee, p: Project, t: Ticket, nonce: string, claims: Claim[], language: string): string {
-  const list = claims.map((c) => `[${c.id}] (${c.impact}, confidence ${c.confidence}) ${c.text}\n  sources: ${c.sources.map((s) => `${s.doc} ${s.loc}`).join('; ') || '(none)'}`).join('\n');
+  const list = claims
+    .map(
+      (c) =>
+        `[${c.id}] (${c.impact}, confidence ${c.confidence}) ${c.text}\n  sources: ${c.sources.map((s) => `${s.doc} ${s.loc}`).join('; ') || '(none)'}`,
+    )
+    .join('\n');
   return `${header('verdicts', t, nonce, { claimIds: claims.map((c) => c.id) })}
 You are "${e.name}". Judge claims written by OTHER reviewers (authors are hidden on purpose). Your directory is a READ-ONLY copy of "${p.name}"; check the sources yourself.
 For every claim give exactly one verdict:
@@ -100,10 +114,14 @@ function base(text: string | null, nonce: string, kind: string): Record<string, 
   return raw;
 }
 
-export function parseClaims(text: string | null, nonce: string): { ok: true; claims: Pick<Claim, 'text' | 'impact' | 'confidence' | 'sources'>[] } | Fail {
+export function parseClaims(
+  text: string | null,
+  nonce: string,
+): { ok: true; claims: Pick<Claim, 'text' | 'impact' | 'confidence' | 'sources'>[] } | Fail {
   const r = base(text, nonce, 'claims');
   if ('ok' in r) return r as Fail;
-  if (!Array.isArray(r.claims) || r.claims.length === 0 || r.claims.length > 12) return { ok: false, detail: tr('claims는 1~12개여야 합니다.', 'claims must contain 1–12 items.') };
+  if (!Array.isArray(r.claims) || r.claims.length === 0 || r.claims.length > 12)
+    return { ok: false, detail: tr('claims는 1~12개여야 합니다.', 'claims must contain 1–12 items.') };
   const claims = (r.claims as Record<string, unknown>[])
     .filter((c) => typeof c?.text === 'string' && c.text.trim())
     .map((c) => ({
@@ -111,13 +129,19 @@ export function parseClaims(text: string | null, nonce: string): { ok: true; cla
       impact: (['high', 'medium', 'low'].includes(String(c.impact)) ? c.impact : 'medium') as Claim['impact'],
       confidence: Math.min(1, Math.max(0, Number(c.confidence) || 0.5)),
       sources: Array.isArray(c.sources)
-        ? (c.sources as Record<string, unknown>[]).map((s) => ({ doc: String(s?.doc ?? ''), loc: String(s?.loc ?? '') })).filter((s) => s.doc)
+        ? (c.sources as Record<string, unknown>[])
+            .map((s) => ({ doc: String(s?.doc ?? ''), loc: String(s?.loc ?? '') }))
+            .filter((s) => s.doc)
         : [],
     }));
   return claims.length ? { ok: true, claims } : { ok: false, detail: tr('유효한 주장이 없습니다.', 'No valid claims.') };
 }
 
-export function parseVerdicts(text: string | null, nonce: string, claimIds: string[]): { ok: true; verdicts: { claimId: string; verdict: ClaimVerdict; reason: string }[] } | Fail {
+export function parseVerdicts(
+  text: string | null,
+  nonce: string,
+  claimIds: string[],
+): { ok: true; verdicts: { claimId: string; verdict: ClaimVerdict; reason: string }[] } | Fail {
   const r = base(text, nonce, 'verdicts');
   if ('ok' in r) return r as Fail;
   const list = Array.isArray(r.verdicts) ? (r.verdicts as Record<string, unknown>[]) : [];
@@ -125,10 +149,16 @@ export function parseVerdicts(text: string | null, nonce: string, claimIds: stri
     .filter((v) => claimIds.includes(String(v?.claimId)) && VERDICTS.includes(v.verdict as ClaimVerdict))
     .map((v) => ({ claimId: String(v.claimId), verdict: v.verdict as ClaimVerdict, reason: String(v.reason ?? '').slice(0, 3000) }));
   const missing = claimIds.filter((id) => !out.some((v) => v.claimId === id));
-  return missing.length ? { ok: false, detail: tr(`판정 누락: ${missing.join(', ')}`, `Missing verdicts: ${missing.join(', ')}`) } : { ok: true, verdicts: out };
+  return missing.length
+    ? { ok: false, detail: tr(`판정 누락: ${missing.join(', ')}`, `Missing verdicts: ${missing.join(', ')}`) }
+    : { ok: true, verdicts: out };
 }
 
-export function parseResponses(text: string | null, nonce: string, claimIds: string[]): { ok: true; responses: { claimId: string; response: ClaimResponse; text: string }[] } | Fail {
+export function parseResponses(
+  text: string | null,
+  nonce: string,
+  claimIds: string[],
+): { ok: true; responses: { claimId: string; response: ClaimResponse; text: string }[] } | Fail {
   const r = base(text, nonce, 'responses');
   if ('ok' in r) return r as Fail;
   const list = Array.isArray(r.responses) ? (r.responses as Record<string, unknown>[]) : [];
@@ -136,7 +166,9 @@ export function parseResponses(text: string | null, nonce: string, claimIds: str
     .filter((v) => claimIds.includes(String(v?.claimId)) && RESPONSES.includes(v.response as ClaimResponse))
     .map((v) => ({ claimId: String(v.claimId), response: v.response as ClaimResponse, text: String(v.text ?? '').slice(0, 3000) }));
   const missing = claimIds.filter((id) => !out.some((v) => v.claimId === id));
-  return missing.length ? { ok: false, detail: tr(`재답변 누락: ${missing.join(', ')}`, `Missing responses: ${missing.join(', ')}`) } : { ok: true, responses: out };
+  return missing.length
+    ? { ok: false, detail: tr(`재답변 누락: ${missing.join(', ')}`, `Missing responses: ${missing.join(', ')}`) }
+    : { ok: true, responses: out };
 }
 
 /**

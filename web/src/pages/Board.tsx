@@ -23,7 +23,11 @@ export function Board() {
     <>
       <div className="page-head">
         <h1>{t('nav_board')}</h1>
-        <div className="sub">{lang === 'ko' ? '카드는 상태기계가 옮깁니다. 직원의 말이 아니라 증거로 움직입니다.' : 'Cards move by the state machine, on evidence, not on claims.'}</div>
+        <div className="sub">
+          {lang === 'ko'
+            ? '카드는 상태기계가 옮깁니다. 직원의 말이 아니라 증거로 움직입니다.'
+            : 'Cards move by the state machine, on evidence, not on claims.'}
+        </div>
       </div>
       <div className="board">
         {COLUMNS.map((c) => {

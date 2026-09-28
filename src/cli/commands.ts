@@ -15,7 +15,9 @@ import { Store } from '../store/db.ts';
 import { git } from '../workspace/git.ts';
 import { seedDemo } from './demo.ts';
 
-const HELP = () => tr(`Agent Company — 로컬 AI 개발 조직
+const HELP = () =>
+  tr(
+    `Agent Company — 로컬 AI 개발 조직
 
 사용법:
   agent-company start [--port 4777] [--data-dir DIR] [--no-open] [--user-profiles] [--language ko|en]
@@ -25,7 +27,8 @@ const HELP = () => tr(`Agent Company — 로컬 AI 개발 조직
   agent-company uninstall [--data-dir DIR] [--yes]    데이터 정리(미리보기 후 확인)
 
 데이터 폴더 기본값: ~/AgentCompany (환경변수 AGENT_COMPANY_HOME 로 변경)
-`, `Agent Company — Local AI development team
+`,
+    `Agent Company — Local AI development team
 
 Usage:
   agent-company start [--port 4777] [--data-dir DIR] [--no-open] [--user-profiles] [--language ko|en]
@@ -35,7 +38,8 @@ Usage:
   agent-company uninstall [--data-dir DIR] [--yes]    Clean up data (preview, then confirm)
 
 Default data folder: ~/AgentCompany (override with AGENT_COMPANY_HOME)
-`);
+`,
+  );
 
 function selectLanguage(language?: string): void {
   language ??= Intl.DateTimeFormat().resolvedOptions().locale.startsWith('ko') ? 'ko' : 'en';
@@ -93,7 +97,12 @@ async function start(argv: string[], demo: boolean): Promise<void> {
   mkdirSync(dataDir, { recursive: true });
   const existing = readLock(dataDir);
   if (existing) {
-    console.log(tr(`이미 실행 중입니다 (pid ${existing.pid}).\n대시보드: ${existing.url}`, `Already running (pid ${existing.pid}).\nDashboard: ${existing.url}`));
+    console.log(
+      tr(
+        `이미 실행 중입니다 (pid ${existing.pid}).\n대시보드: ${existing.url}`,
+        `Already running (pid ${existing.pid}).\nDashboard: ${existing.url}`,
+      ),
+    );
     if (!values['no-open']) openBrowser(existing.url);
     return;
   }
@@ -112,18 +121,43 @@ async function start(argv: string[], demo: boolean): Promise<void> {
 
   const server = await startServer({ api: new Api(orch, dataDir), port: Number(values.port ?? (demo ? 4778 : 4777)), webRoot: webRoot() });
   broadcast = server.broadcast;
-  writeFileSync(path.join(dataDir, 'daemon.lock'), JSON.stringify({ pid: process.pid, url: server.url, startedAt: new Date().toISOString() }), { mode: 0o600 });
+  writeFileSync(
+    path.join(dataDir, 'daemon.lock'),
+    JSON.stringify({ pid: process.pid, url: server.url, startedAt: new Date().toISOString() }),
+    { mode: 0o600 },
+  );
   orch.start(1000);
 
-  console.log(tr(`\nAgent Company ${demo ? tr('(데모) ', '(demo) ') : ''}실행 중`, `\nAgent Company ${demo ? tr('(데모) ', '(demo) ') : ''}is running`));
+  console.log(
+    tr(
+      `\nAgent Company ${demo ? tr('(데모) ', '(demo) ') : ''}실행 중`,
+      `\nAgent Company ${demo ? tr('(데모) ', '(demo) ') : ''}is running`,
+    ),
+  );
   console.log(tr(`  대시보드: ${server.url}`, `  Dashboard: ${server.url}`));
   console.log(tr(`  데이터:   ${dataDir}`, `  Data:      ${dataDir}`));
   console.log(tr(`  감사 로그: ${recovery.chainDetail}`, `  Audit log: ${recovery.chainDetail}`));
   if (recovery.reattached.length || recovery.ingestedAfterRestart.length) {
-    console.log(tr(`  복구: 재연결 ${recovery.reattached.length}건, 결과 수거 ${recovery.ingestedAfterRestart.length}건, 고아 ${recovery.orphaned.length}건`, `  Recovery: ${recovery.reattached.length} reattached, ${recovery.ingestedAfterRestart.length} results collected, ${recovery.orphaned.length} orphaned`));
+    console.log(
+      tr(
+        `  복구: 재연결 ${recovery.reattached.length}건, 결과 수거 ${recovery.ingestedAfterRestart.length}건, 고아 ${recovery.orphaned.length}건`,
+        `  Recovery: ${recovery.reattached.length} reattached, ${recovery.ingestedAfterRestart.length} results collected, ${recovery.orphaned.length} orphaned`,
+      ),
+    );
   }
-  if (!recovery.chainOk) console.log(tr('  ⚠ 감사 로그 변조가 탐지되었습니다. 대시보드의 시스템 화면을 확인하세요.', '  ⚠ Audit log tampering detected. Check the System page in the dashboard.'));
-  console.log(tr('  종료: Ctrl+C (진행 중인 직원 실행은 계속되며 다음 시작 때 이어받습니다)\n', '  Exit: Ctrl+C (active employee runs continue and reconnect on next startup)\n'));
+  if (!recovery.chainOk)
+    console.log(
+      tr(
+        '  ⚠ 감사 로그 변조가 탐지되었습니다. 대시보드의 시스템 화면을 확인하세요.',
+        '  ⚠ Audit log tampering detected. Check the System page in the dashboard.',
+      ),
+    );
+  console.log(
+    tr(
+      '  종료: Ctrl+C (진행 중인 직원 실행은 계속되며 다음 시작 때 이어받습니다)\n',
+      '  Exit: Ctrl+C (active employee runs continue and reconnect on next startup)\n',
+    ),
+  );
   if (!values['no-open']) openBrowser(server.url);
 
   const shutdown = async () => {
@@ -144,7 +178,13 @@ async function runDoctor(argv: string[]): Promise<void> {
   const r = await doctor(dataDir);
   console.log(`Node ${r.node} · ${r.git ?? tr('git 없음', 'git not found')} · ${r.platform}\n`);
   for (const c of r.clis) {
-    const mark = !c.found ? tr('✗ 미설치', '✗ Not installed') : c.login === 'ok' ? tr('✓ 준비됨', '✓ Ready') : c.login === 'missing' ? tr('! 로그인 필요', '! Login required') : tr('? 확인 불가', '? Unknown');
+    const mark = !c.found
+      ? tr('✗ 미설치', '✗ Not installed')
+      : c.login === 'ok'
+        ? tr('✓ 준비됨', '✓ Ready')
+        : c.login === 'missing'
+          ? tr('! 로그인 필요', '! Login required')
+          : tr('? 확인 불가', '? Unknown');
     console.log(`${c.displayName.padEnd(12)} ${mark}  ${c.version ?? ''}`);
     if (c.found && c.login !== 'ok') console.log(`  └ ${c.loginHelp.replaceAll('\n', '\n    ')}`);
   }
@@ -158,7 +198,10 @@ async function runInfo(argv: string[]): Promise<void> {
 }
 
 async function uninstall(argv: string[]): Promise<void> {
-  const { values } = parseArgs({ args: argv, options: { 'data-dir': { type: 'string' }, yes: { type: 'boolean' }, language: { type: 'string' } } });
+  const { values } = parseArgs({
+    args: argv,
+    options: { 'data-dir': { type: 'string' }, yes: { type: 'boolean' }, language: { type: 'string' } },
+  });
   selectLanguage(values.language);
   const dataDir = path.resolve(values['data-dir'] ?? defaultDataDir(false));
   if (!existsSync(dataDir)) {
@@ -171,9 +214,24 @@ async function uninstall(argv: string[]): Promise<void> {
     return;
   }
   const info = await installInfo(dataDir);
-  console.log(tr(`삭제 대상: ${dataDir} (${(info.sizeBytes / 1024 / 1024).toFixed(1)} MB)`, `To delete: ${dataDir} (${(info.sizeBytes / 1024 / 1024).toFixed(1)} MB)`));
-  console.log(tr('  - 회사 DB, 실행 기록, 미러 저장소, 작업공간, 앱 전용 CLI 프로필(로그인 파일 포함)', '  - Company database, run records, mirrors, workspaces, app CLI profiles (including login files)'));
-  console.log(tr('  - 대표의 원본 저장소, 전역 git·Claude·Codex·agy 설정은 건드리지 않습니다.', '  - Your original repositories and global git, Claude, Codex, and agy settings are left intact.'));
+  console.log(
+    tr(
+      `삭제 대상: ${dataDir} (${(info.sizeBytes / 1024 / 1024).toFixed(1)} MB)`,
+      `To delete: ${dataDir} (${(info.sizeBytes / 1024 / 1024).toFixed(1)} MB)`,
+    ),
+  );
+  console.log(
+    tr(
+      '  - 회사 DB, 실행 기록, 미러 저장소, 작업공간, 앱 전용 CLI 프로필(로그인 파일 포함)',
+      '  - Company database, run records, mirrors, workspaces, app CLI profiles (including login files)',
+    ),
+  );
+  console.log(
+    tr(
+      '  - 대표의 원본 저장소, 전역 git·Claude·Codex·agy 설정은 건드리지 않습니다.',
+      '  - Your original repositories and global git, Claude, Codex, and agy settings are left intact.',
+    ),
+  );
   const dirty: string[] = [];
   for (const m of info.mirrors) {
     const list = await git(['worktree', 'list', '--porcelain'], m, { allowFail: true });
@@ -193,7 +251,11 @@ async function uninstall(argv: string[]): Promise<void> {
     return;
   }
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
-  console.log(existsSync(dataDir) ? tr('일부 파일을 지우지 못했습니다(사용 중일 수 있음).', 'Some files could not be deleted (they may be in use).') : tr('삭제했습니다. 남은 파일이 없습니다.', 'Deleted. No files remain.'));
+  console.log(
+    existsSync(dataDir)
+      ? tr('일부 파일을 지우지 못했습니다(사용 중일 수 있음).', 'Some files could not be deleted (they may be in use).')
+      : tr('삭제했습니다. 남은 파일이 없습니다.', 'Deleted. No files remain.'),
+  );
 }
 
 export async function main(argv: string[]): Promise<void> {

@@ -48,7 +48,17 @@ export function when(iso: string | null | undefined): string {
   return d.toLocaleDateString();
 }
 
-export function Modal({ title, onClose, children, actions }: { title: string; onClose: () => void; children: ReactNode; actions?: ReactNode }) {
+export function Modal({
+  title,
+  onClose,
+  children,
+  actions,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+  actions?: ReactNode;
+}) {
   const { t } = useT();
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -118,7 +128,14 @@ export function DiffView({ text }: { text: string }) {
   return (
     <pre className="code diff">
       {text.split('\n').map((line, i) => {
-        const cls = line.startsWith('+') && !line.startsWith('+++') ? 'add' : line.startsWith('-') && !line.startsWith('---') ? 'del' : line.startsWith('@@') ? 'hunk' : '';
+        const cls =
+          line.startsWith('+') && !line.startsWith('+++')
+            ? 'add'
+            : line.startsWith('-') && !line.startsWith('---')
+              ? 'del'
+              : line.startsWith('@@')
+                ? 'hunk'
+                : '';
         return (
           <div key={i} className={cls}>
             {line || ' '}

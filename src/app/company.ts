@@ -1,6 +1,6 @@
-import { tr } from '../core/i18n.ts';
 // 회사 서비스: 저장소 위에서 직원·프로젝트·티켓을 다룬다.
 // 티켓 상태 변경은 반드시 applyTicketCommand를 거치고, 결과와 이벤트를 한 트랜잭션에 저장한다.
+import { tr } from '../core/i18n.ts';
 
 import { randomUUID } from 'node:crypto';
 import { Store } from '../store/db.ts';
@@ -82,11 +82,21 @@ export class Company {
     if (input.roles.length === 0) throw new DomainError(tr('역할을 하나 이상 골라야 합니다.', 'Select at least one role.'));
     const accessLevel = input.accessLevel ?? 'write-ask';
     if (accessLevel === 'full-auto') {
-      throw new DomainError(tr('전체 자동 등급은 직원을 만든 뒤 대표 승인 절차로만 올릴 수 있습니다.', 'Full-auto access requires CEO approval after creating the employee.'));
+      throw new DomainError(
+        tr(
+          '전체 자동 등급은 직원을 만든 뒤 대표 승인 절차로만 올릴 수 있습니다.',
+          'Full-auto access requires CEO approval after creating the employee.',
+        ),
+      );
     }
     return this.store.transact(() => {
       if (this.activeEmployees().length >= MAX_ACTIVE_EMPLOYEES) {
-        throw new DomainError(tr(`활성 직원은 최대 ${MAX_ACTIVE_EMPLOYEES}명입니다. 다른 직원을 비활성화한 뒤 추가하세요.`, `At most ${MAX_ACTIVE_EMPLOYEES} employees can be active. Deactivate another employee first.`));
+        throw new DomainError(
+          tr(
+            `활성 직원은 최대 ${MAX_ACTIVE_EMPLOYEES}명입니다. 다른 직원을 비활성화한 뒤 추가하세요.`,
+            `At most ${MAX_ACTIVE_EMPLOYEES} employees can be active. Deactivate another employee first.`,
+          ),
+        );
       }
       const employee: Employee = {
         id: `E-${randomUUID().slice(0, 8)}`,
@@ -100,17 +110,26 @@ export class Company {
         createdAt: this.clock(),
       };
       this.saveEmployee(employee);
-      this.store.appendEvent(actorId(actor), 'employee.hired', employee.id, { name: employee.name, cli: employee.cli, model: employee.model, roles: employee.roles }, this.clock());
+      this.store.appendEvent(
+        actorId(actor),
+        'employee.hired',
+        employee.id,
+        { name: employee.name, cli: employee.cli, model: employee.model, roles: employee.roles },
+        this.clock(),
+      );
       return employee;
     });
   }
 
   setEmployeeActive(id: string, active: boolean, actor: Actor = { kind: 'ceo' }): Employee {
-    if (actor.kind !== 'ceo') throw new DomainError(tr('직원 활성 상태는 대표만 바꿀 수 있습니다.', 'Only the CEO can change employee active status.'));
+    if (actor.kind !== 'ceo')
+      throw new DomainError(tr('직원 활성 상태는 대표만 바꿀 수 있습니다.', 'Only the CEO can change employee active status.'));
     return this.store.transact(() => {
       const e = this.requireEmployee(id);
       if (active && !e.active && this.activeEmployees().length >= MAX_ACTIVE_EMPLOYEES) {
-        throw new DomainError(tr(`활성 직원은 최대 ${MAX_ACTIVE_EMPLOYEES}명입니다.`, `At most ${MAX_ACTIVE_EMPLOYEES} employees can be active.`));
+        throw new DomainError(
+          tr(`활성 직원은 최대 ${MAX_ACTIVE_EMPLOYEES}명입니다.`, `At most ${MAX_ACTIVE_EMPLOYEES} employees can be active.`),
+        );
       }
       const updated = { ...e, active };
       this.saveEmployee(updated);
@@ -199,35 +218,40 @@ export class Company {
   createTicket(input: NewTicket, actor: Actor = { kind: 'ceo' }): Ticket {
     if (actor.kind === 'employee') {
       // 직원(비서실장 포함)은 티켓을 직접 만들지 않는다. 초안을 내면 오케스트레이터가 검증해 만든다.
-      throw new DomainError(tr('직원은 티켓을 직접 만들 수 없습니다. 티켓 초안을 제출하세요.', 'Employees cannot create tickets directly. Submit ticket drafts instead.'));
+      throw new DomainError(
+        tr(
+          '직원은 티켓을 직접 만들 수 없습니다. 티켓 초안을 제출하세요.',
+          'Employees cannot create tickets directly. Submit ticket drafts instead.',
+        ),
+      );
     }
     this.requireProject(input.projectId);
     if (!input.title.trim()) throw new DomainError(tr('티켓 제목이 비어 있습니다.', 'Ticket title is empty.'));
     const now = this.clock();
     return this.store.transact(() => {
-    const ticket: Ticket = {
-      id: `T-${this.nextTicketNumber()}`,
-      projectId: input.projectId,
-      type: input.type,
-      title: input.title.trim(),
-      purpose: input.purpose,
-      requesterId: actorId(actor),
-      assigneeId: null,
-      reviewerId: null,
-      priority: input.priority ?? 2,
-      status: 'received',
-      hold: null,
-      writeScope: input.writeScope ?? [],
-      readScope: input.readScope ?? ['**'],
-      requirements: input.requirements.map((r, i) => ({ ...r, id: `R${i + 1}` })),
-      doneCriteria: input.doneCriteria,
-      round: 1,
-      runCount: 0,
-      budget: DEFAULT_BUDGET,
-      dependsOn: input.dependsOn ?? [],
-      createdAt: now,
-      updatedAt: now,
-    };
+      const ticket: Ticket = {
+        id: `T-${this.nextTicketNumber()}`,
+        projectId: input.projectId,
+        type: input.type,
+        title: input.title.trim(),
+        purpose: input.purpose,
+        requesterId: actorId(actor),
+        assigneeId: null,
+        reviewerId: null,
+        priority: input.priority ?? 2,
+        status: 'received',
+        hold: null,
+        writeScope: input.writeScope ?? [],
+        readScope: input.readScope ?? ['**'],
+        requirements: input.requirements.map((r, i) => ({ ...r, id: `R${i + 1}` })),
+        doneCriteria: input.doneCriteria,
+        round: 1,
+        runCount: 0,
+        budget: DEFAULT_BUDGET,
+        dependsOn: input.dependsOn ?? [],
+        createdAt: now,
+        updatedAt: now,
+      };
       this.saveTicket(ticket);
       this.store.appendEvent(actorId(actor), 'ticket.created', ticket.id, { title: ticket.title, type: ticket.type }, now);
       return ticket;

@@ -1,5 +1,5 @@
-import { tr } from '../core/i18n.ts';
 // 로컬 대시보드 서버. 127.0.0.1에만 열고, 세션 토큰과 Host 헤더를 검사한다(DNS 리바인딩 방어). CORS 없음.
+import { tr } from '../core/i18n.ts';
 
 import http from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -92,7 +92,12 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
         const header = req.headers.authorization?.replace(/^Bearer\s+/i, '') ?? '';
         const supplied = url.pathname === '/api/stream' ? (url.searchParams.get('token') ?? '') : header;
         if (!safeEqual(supplied, token)) {
-          send(res, 401, { error: tr('인증 토큰이 필요합니다. 터미널에 표시된 주소로 다시 여세요.', 'Authentication token required. Reopen the URL shown in the terminal.') });
+          send(res, 401, {
+            error: tr(
+              '인증 토큰이 필요합니다. 터미널에 표시된 주소로 다시 여세요.',
+              'Authentication token required. Reopen the URL shown in the terminal.',
+            ),
+          });
           return;
         }
         if (url.pathname === '/api/stream') {
@@ -147,7 +152,12 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
 async function serveStatic(res: http.ServerResponse, pathname: string, webRoot: string | null): Promise<void> {
   if (!webRoot || !existsSync(webRoot)) {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    res.end(tr('<!doctype html><meta charset="utf-8"><title>Agent Company</title><p>대시보드가 빌드되지 않았습니다. <code>npm run build</code>를 실행하세요.</p>', '<!doctype html><meta charset="utf-8"><title>Agent Company</title><p>The dashboard has not been built. Run <code>npm run build</code>.</p>'));
+    res.end(
+      tr(
+        '<!doctype html><meta charset="utf-8"><title>Agent Company</title><p>대시보드가 빌드되지 않았습니다. <code>npm run build</code>를 실행하세요.</p>',
+        '<!doctype html><meta charset="utf-8"><title>Agent Company</title><p>The dashboard has not been built. Run <code>npm run build</code>.</p>',
+      ),
+    );
     return;
   }
   const rel = decodeURIComponent(pathname).replace(/^\/+/, '');
@@ -157,7 +167,9 @@ async function serveStatic(res: http.ServerResponse, pathname: string, webRoot: 
     res.writeHead(403).end();
     return;
   }
-  const isFile = await stat(file).then((s) => s.isFile()).catch(() => false);
+  const isFile = await stat(file)
+    .then((s) => s.isFile())
+    .catch(() => false);
   if (!isFile) file = path.join(webRoot, 'index.html'); // SPA
   const data = await readFile(file);
   res.writeHead(200, {

@@ -80,7 +80,8 @@ export async function waitForExit(runDir: string, shimPid: number | null, pollMs
       // 셔틀이 기록 없이 사라짐(강제 종료 등). 잠깐 더 기다렸다가 판정.
       await new Promise((r) => setTimeout(r, pollMs));
       const late = await readExitRecord(runDir);
-      if (late) return { exitCode: late.exitCode, signal: late.signal, timedOut: late.timedOut, killed: false, durationMs: late.durationMs };
+      if (late)
+        return { exitCode: late.exitCode, signal: late.signal, timedOut: late.timedOut, killed: false, durationMs: late.durationMs };
       return { exitCode: null, signal: null, timedOut: false, killed: true, durationMs: Date.now() - started };
     }
     await new Promise((r) => setTimeout(r, pollMs));
@@ -104,7 +105,13 @@ export async function startProcess(spec: ProcessSpec): Promise<RunningProcess> {
     exitPath: files.exit,
     timeoutMs: spec.timeoutMs,
   });
-  await writeJsonAtomic(files.meta, { file: spec.file, args: spec.args, cwd: spec.cwd, startedAt: new Date(startedAtMs).toISOString(), state: 'starting' });
+  await writeJsonAtomic(files.meta, {
+    file: spec.file,
+    args: spec.args,
+    cwd: spec.cwd,
+    startedAt: new Date(startedAtMs).toISOString(),
+    state: 'starting',
+  });
 
   // 셔틀은 detached: 데몬의 Job Object 밖에서 살아남는다. 셔틀 자신은 창을 만들지 않는다.
   const shim: ChildProcess = spawn(process.execPath, ['--no-warnings', shimScript(), files.spec], {
@@ -121,14 +128,23 @@ export async function startProcess(spec: ProcessSpec): Promise<RunningProcess> {
   });
   shim.unref();
   const pid = shim.pid!;
-  await writeJsonAtomic(files.meta, { file: spec.file, args: spec.args, cwd: spec.cwd, startedAt: new Date(startedAtMs).toISOString(), state: 'running', shimPid: pid });
+  await writeJsonAtomic(files.meta, {
+    file: spec.file,
+    args: spec.args,
+    cwd: spec.cwd,
+    startedAt: new Date(startedAtMs).toISOString(),
+    state: 'running',
+    shimPid: pid,
+  });
 
   let killed = false;
   const kill = async () => {
     killed = true;
     if (process.platform !== 'win32') {
       // CLI는 셔틀과 다른 프로세스 그룹이다: CLI 그룹부터 종료한다.
-      const rec = await readFile(files.pid, 'utf8').then((x) => JSON.parse(x) as { cliPid?: number }).catch(() => null);
+      const rec = await readFile(files.pid, 'utf8')
+        .then((x) => JSON.parse(x) as { cliPid?: number })
+        .catch(() => null);
       if (rec?.cliPid) {
         try {
           process.kill(-rec.cliPid, 'SIGKILL');
@@ -141,7 +157,15 @@ export async function startProcess(spec: ProcessSpec): Promise<RunningProcess> {
   };
   const done = waitForExit(spec.runDir, pid).then(async (o) => {
     const outcome = { ...o, killed: o.killed || killed };
-    await writeJsonAtomic(files.meta, { file: spec.file, args: spec.args, cwd: spec.cwd, startedAt: new Date(startedAtMs).toISOString(), state: 'exited', shimPid: pid, ...outcome });
+    await writeJsonAtomic(files.meta, {
+      file: spec.file,
+      args: spec.args,
+      cwd: spec.cwd,
+      startedAt: new Date(startedAtMs).toISOString(),
+      state: 'exited',
+      shimPid: pid,
+      ...outcome,
+    });
     return outcome;
   });
   return { pid, startedAtMs, stdoutPath: files.stdout, stderrPath: files.stderr, done, kill };
@@ -182,7 +206,12 @@ export function processStartTimeMs(pid: number): Promise<number | null> {
     if (process.platform === 'win32') {
       execFile(
         'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${Number(pid)} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`],
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `(Get-Process -Id ${Number(pid)} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`,
+        ],
         { windowsHide: true, timeout: 10_000 },
         (err, stdout) => {
           const t = Date.parse(String(stdout).trim());

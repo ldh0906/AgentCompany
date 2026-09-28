@@ -1,5 +1,5 @@
-import { tr } from '../core/i18n.ts';
 // 실행·증거·승인·결정·경로 잠금 저장. 상태 변경은 이벤트와 함께 기록한다.
+import { tr } from '../core/i18n.ts';
 
 import { createHash, randomUUID } from 'node:crypto';
 import type { Store } from '../store/db.ts';
@@ -118,7 +118,15 @@ export class Records {
   }
 
   // ---- 승인 ----
-  createApproval(input: { kind: ApprovalKind; ticketId: string | null; subject: string; summary: string; detail: unknown; requestedBy: string; expiresAt?: string | null }): Approval {
+  createApproval(input: {
+    kind: ApprovalKind;
+    ticketId: string | null;
+    subject: string;
+    summary: string;
+    detail: unknown;
+    requestedBy: string;
+    expiresAt?: string | null;
+  }): Approval {
     const now = new Date().toISOString();
     const a: Approval = {
       id: newId('A'),
@@ -135,7 +143,13 @@ export class Records {
     };
     this.store.transact(() => {
       this.store.put('approvals', a.id, a, { ticket_id: a.ticketId, state: a.state, created_at: a.createdAt });
-      this.store.appendEvent(input.requestedBy, 'approval.requested', a.id, { kind: a.kind, ticketId: a.ticketId, summary: a.summary }, now);
+      this.store.appendEvent(
+        input.requestedBy,
+        'approval.requested',
+        a.id,
+        { kind: a.kind, ticketId: a.ticketId, summary: a.summary },
+        now,
+      );
     });
     return a;
   }
@@ -148,7 +162,11 @@ export class Records {
       : this.store.list<Approval>('approvals', 'ORDER BY created_at DESC LIMIT 200');
   }
   pendingApprovalFor(ticketId: string, kind: ApprovalKind): Approval | null {
-    return this.store.list<Approval>('approvals', "WHERE ticket_id = ? AND state = 'pending' ORDER BY created_at", ticketId).find((a) => a.kind === kind) ?? null;
+    return (
+      this.store
+        .list<Approval>('approvals', "WHERE ticket_id = ? AND state = 'pending' ORDER BY created_at", ticketId)
+        .find((a) => a.kind === kind) ?? null
+    );
   }
   setApprovalState(id: string, state: ApprovalState, actor: string, extra: Record<string, unknown> = {}): Approval {
     return this.store.transact(() => {
@@ -164,7 +182,16 @@ export class Records {
 
   // ---- 결정 기록 ----
   recordDecision(projectId: string, text: string, sourceRefs: string[] = [], supersedes: string | null = null): Decision {
-    const d: Decision = { id: newId('D'), projectId, text, status: 'current', sourceRefs, supersedes, reflectedIn: [], createdAt: new Date().toISOString() };
+    const d: Decision = {
+      id: newId('D'),
+      projectId,
+      text,
+      status: 'current',
+      sourceRefs,
+      supersedes,
+      reflectedIn: [],
+      createdAt: new Date().toISOString(),
+    };
     this.store.transact(() => {
       if (supersedes) this.setDecisionStatus(supersedes, 'superseded');
       this.store.put('decisions', d.id, d, { project_id: projectId, status: d.status, created_at: d.createdAt });
@@ -208,7 +235,9 @@ export class Records {
       const rows = this.store.db.prepare('SELECT ticket_id, glob FROM path_locks').all() as { ticket_id: string; glob: string }[];
       const byTicket = new Map<string, string[]>();
       for (const r of rows) byTicket.set(r.ticket_id, [...(byTicket.get(r.ticket_id) ?? []), r.glob]);
-      const activeIds = new Set(activeTickets.filter((t) => t.projectId === ticket.projectId && !TERMINAL_STATUSES.includes(t.status)).map((t) => t.id));
+      const activeIds = new Set(
+        activeTickets.filter((t) => t.projectId === ticket.projectId && !TERMINAL_STATUSES.includes(t.status)).map((t) => t.id),
+      );
       for (const [other, globs] of byTicket) {
         if (other === ticket.id || !activeIds.has(other)) continue;
         if (scopesOverlap(ticket.writeScope, globs)) return { ok: false as const, conflictWith: other };

@@ -1,5 +1,5 @@
-import { tr } from '../core/i18n.ts';
 // 가짜 직원 어댑터. model 값이 성격이 된다: diligent | lazy | rogue | slow
+import { tr } from '../core/i18n.ts';
 
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -17,14 +17,23 @@ function fakeAgentScript(): string {
 
 export const fakeAdapter: CliAdapter = {
   kind: 'fake',
-  get displayName() { return tr('데모 직원(가짜)', 'Demo employee (fake)'); },
+  get displayName() {
+    return tr('데모 직원(가짜)', 'Demo employee (fake)');
+  },
   executable: process.execPath,
   capabilities: {
     accessLevels: ['read-only', 'write-ask', 'write-allowlist', 'full-auto'],
     permissionRelay: false,
     resume: true,
     profileEnvVar: null,
-    get notes() { return [tr('구독 없이 흐름을 시연하는 가짜 직원입니다. 모델 값으로 성격을 고릅니다: diligent, lazy, rogue, slow', 'Fake employee for demos without a subscription. Choose behavior via model: diligent, lazy, rogue, slow')]; },
+    get notes() {
+      return [
+        tr(
+          '구독 없이 흐름을 시연하는 가짜 직원입니다. 모델 값으로 성격을 고릅니다: diligent, lazy, rogue, slow',
+          'Fake employee for demos without a subscription. Choose behavior via model: diligent, lazy, rogue, slow',
+        ),
+      ];
+    },
   },
   buildInvocation(req: InvocationRequest): Invocation {
     return {

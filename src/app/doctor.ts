@@ -1,5 +1,5 @@
-import { tr } from '../core/i18n.ts';
 // 환경 진단과 설치 정보. 인증 파일은 절대 열지 않는다(공식 상태 명령의 결과만 본다).
+import { tr } from '../core/i18n.ts';
 
 import { execFile } from 'node:child_process';
 import { readdir, stat } from 'node:fs/promises';
@@ -69,7 +69,10 @@ export async function doctor(dataDir: string, useAppProfiles = true): Promise<Do
         check.login = s.code === 0 && !negative ? 'ok' : 'missing';
         check.loginDetail = text.replace(/[A-Za-z0-9_\-]{32,}/g, '***');
       } else {
-        check.loginDetail = tr('공식 로그인 상태 명령이 없어 첫 실행 때 확인합니다.', 'No official login status command; checked on first run.');
+        check.loginDetail = tr(
+          '공식 로그인 상태 명령이 없어 첫 실행 때 확인합니다.',
+          'No official login status command; checked on first run.',
+        );
       }
     }
     clis.push(check);
@@ -111,6 +114,9 @@ export async function installInfo(dataDir: string) {
     sizeBytes: await dirSize(dataDir),
     services: tr('없음 (서비스·예약 작업·자동 실행을 만들지 않습니다)', 'None (no services, scheduled tasks, or startup entries created)'),
     network: tr('127.0.0.1 에서만 열립니다', 'Listens on 127.0.0.1 only'),
-    credentials: tr('저장하지 않습니다. 앱 전용 프로필 폴더에는 각 CLI가 스스로 관리하는 로그인 파일이 생기며, Agent Company는 이를 읽지 않습니다.', 'Not stored. Each CLI manages its own login files in the app profile folder; Agent Company does not read them.'),
+    credentials: tr(
+      '저장하지 않습니다. 앱 전용 프로필 폴더에는 각 CLI가 스스로 관리하는 로그인 파일이 생기며, Agent Company는 이를 읽지 않습니다.',
+      'Not stored. Each CLI manages its own login files in the app profile folder; Agent Company does not read them.',
+    ),
   };
 }

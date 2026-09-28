@@ -11,24 +11,31 @@ export type LocatedExe = {
 
 export async function locateExecutable(name: string, env = process.env): Promise<LocatedExe | null> {
   const win = process.platform === 'win32';
-  const value = (key: string) => Object.entries(env).find(([k]) => win ? k.toLowerCase() === key.toLowerCase() : k === key)?.[1];
+  const value = (key: string) => Object.entries(env).find(([k]) => (win ? k.toLowerCase() === key.toLowerCase() : k === key))?.[1];
   const dirs = name.includes('/') || name.includes('\\') ? [''] : (value('PATH') ?? '').split(win ? ';' : ':');
   const extensions = win && !path.extname(name) ? (value('PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : [''];
   let fallback: LocatedExe | null = null;
   for (const dir of dirs) {
-    for (const ext of [...extensions, ...(win && !path.extname(name) && !extensions.some(e => e.toLowerCase() === '.ps1') ? ['.ps1'] : [])]) {
+    for (const ext of [
+      ...extensions,
+      ...(win && !path.extname(name) && !extensions.some((e) => e.toLowerCase() === '.ps1') ? ['.ps1'] : []),
+    ]) {
       const file = path.resolve(dir.replace(/^"|"$/g, ''), name + ext);
       try {
         if (!(await stat(file)).isFile()) continue;
         const suffix = path.extname(file).toLowerCase();
-        if (suffix === '.ps1') { fallback ??= { kind: 'ps1-only', path: file }; continue; }
+        if (suffix === '.ps1') {
+          fallback ??= { kind: 'ps1-only', path: file };
+          continue;
+        }
         if (suffix === '.cmd' || suffix === '.bat') {
           const content = await readFile(file, 'utf8');
           const rel = shimTarget(content);
           if (rel) {
             const script = path.resolve(path.dirname(file), rel.replace(/[\\/]/g, path.sep));
             try {
-              if ((await stat(script)).isFile()) return { kind: 'node-script', path: file, launch: { file: process.execPath, argsPrefix: [script] } };
+              if ((await stat(script)).isFile())
+                return { kind: 'node-script', path: file, launch: { file: process.execPath, argsPrefix: [script] } };
             } catch {
               // 대상이 사라진 shim도 발견한 경로를 유지한다.
             }

@@ -82,4 +82,7 @@ export async function driveUntil(env: Env, ticketId: string, until: (t: Ticket) 
   }
 }
 
-export const statusIs = (...s: TicketStatus[]) => (t: Ticket) => s.includes(t.status);
+export const statusIs =
+  (...s: TicketStatus[]) =>
+  (t: Ticket) =>
+    s.includes(t.status);

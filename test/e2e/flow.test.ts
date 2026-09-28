@@ -13,7 +13,10 @@ test('정상 흐름: 작업 → 검증 증거 → 독립 검수 → 대표 승�
   assert.notEqual(waiting.assigneeId, waiting.reviewerId);
 
   const evidence = env.orch.records.evidenceFor(ticket.id);
-  assert.ok(evidence.some((e) => e.type === 'unit_test' && e.passed), '오케스트레이터가 만든 단위 테스트 증거');
+  assert.ok(
+    evidence.some((e) => e.type === 'unit_test' && e.passed),
+    '오케스트레이터가 만든 단위 테스트 증거',
+  );
   // 반영 전에는 원본 저장소가 그대로
   assert.equal(await gitOut(['rev-parse', 'main'], env.origin), mainBefore);
   assert.equal((await git(['branch', '--list', 'ac/*'], env.origin)).stdout.trim(), '');
@@ -49,7 +52,9 @@ test('범위 밖 수정(보호 경로 README.md) → 결과 격리, 대표 권�
 });
 
 test('검증 명령이 계속 실패하면 회차 한도 후 성공 처리 없이 대표 결정 보류', { timeout: 180_000 }, async (t) => {
-  const env = await setup(t, { verify: [{ label: 'always fails', argv: ['node', '-e', 'console.error("테스트 실패"); process.exit(1)'], evidenceType: 'unit_test' }] });
+  const env = await setup(t, {
+    verify: [{ label: 'always fails', argv: ['node', '-e', 'console.error("테스트 실패"); process.exit(1)'], evidenceType: 'unit_test' }],
+  });
   const ticket = newImplTicket(env);
   const held = await driveUntil(env, ticket.id, (x) => x.hold !== null, 150_000);
   assert.equal(held.status, 'changes_requested');
@@ -81,28 +86,32 @@ test('대표 반려 → 수정 요청으로 돌아가 다음 회차 진행', { t
   assert.equal(again.round, 2);
 });
 
-test('같은 프로젝트의 두 업무가 동시에 진행돼도 서로의 정상 커밋을 위반으로 오인하지 않음 (데모에서 발견한 버그)', { timeout: 180_000 }, async (t) => {
-  const env = await setup(t);
-  env.company.hireEmployee({ name: '구현 2', roles: ['implementer'], cli: 'fake', model: 'diligent' });
-  const a = newImplTicket(env);
-  const b = env.company.createTicket({
-    projectId: env.projectId,
-    type: 'doc',
-    title: '문서',
-    purpose: 'p',
-    requirements: [{ text: '문서 갱신', evidenceType: 'inspection' }],
-    doneCriteria: 'd',
-    writeScope: ['docs/**'],
-  });
-  const both = async () => {
-    const ta = await driveUntil(env, a.id, (x) => x.status === 'awaiting_approval' || x.hold !== null, 150_000);
-    const tb = await driveUntil(env, b.id, (x) => x.status === 'awaiting_approval' || x.hold !== null, 150_000);
-    return [ta, tb];
-  };
-  const [ta, tb] = await both();
-  assert.equal(ta!.status, 'awaiting_approval', `A 보류: ${ta!.hold?.note}`);
-  assert.equal(tb!.status, 'awaiting_approval', `B 보류: ${tb!.hold?.note}`);
-});
+test(
+  '같은 프로젝트의 두 업무가 동시에 진행돼도 서로의 정상 커밋을 위반으로 오인하지 않음 (데모에서 발견한 버그)',
+  { timeout: 180_000 },
+  async (t) => {
+    const env = await setup(t);
+    env.company.hireEmployee({ name: '구현 2', roles: ['implementer'], cli: 'fake', model: 'diligent' });
+    const a = newImplTicket(env);
+    const b = env.company.createTicket({
+      projectId: env.projectId,
+      type: 'doc',
+      title: '문서',
+      purpose: 'p',
+      requirements: [{ text: '문서 갱신', evidenceType: 'inspection' }],
+      doneCriteria: 'd',
+      writeScope: ['docs/**'],
+    });
+    const both = async () => {
+      const ta = await driveUntil(env, a.id, (x) => x.status === 'awaiting_approval' || x.hold !== null, 150_000);
+      const tb = await driveUntil(env, b.id, (x) => x.status === 'awaiting_approval' || x.hold !== null, 150_000);
+      return [ta, tb];
+    };
+    const [ta, tb] = await both();
+    assert.equal(ta!.status, 'awaiting_approval', `A 보류: ${ta!.hold?.note}`);
+    assert.equal(tb!.status, 'awaiting_approval', `B 보류: ${tb!.hold?.note}`);
+  },
+);
 
 test('직원이 git ref를 조작하면(브랜치 생성) 범위 위반으로 격리', { timeout: 120_000 }, async (t) => {
   const env = await setup(t, { implementer: 'tamper' });

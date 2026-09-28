@@ -19,6 +19,7 @@ jobs:
       - run: git config --global user.name ci && git config --global user.email ci@example.com
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run format:check
       - run: npm test
       - run: npm run build
       - run: node dist/cli/main.js --help

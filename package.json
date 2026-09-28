@@ -22,13 +22,16 @@
     "demo": "node src/cli/main.ts demo",
     "test": "node --no-warnings --test --test-concurrency=1 \"test/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json && tsc -p web/tsconfig.json",
-    "build": "tsc -p tsconfig.build.json && vite build --config web/vite.config.ts"
+    "build": "tsc -p tsconfig.build.json && vite build --config web/vite.config.ts",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"web/src/**/*.{ts,tsx,css}\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"web/src/**/*.{ts,tsx,css}\""
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "prettier": "^3.9.9",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "typescript": "^7.0.2",

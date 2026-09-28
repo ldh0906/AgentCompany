@@ -34,7 +34,11 @@ export function Link({ to, children, className }: { to: string; children: React.
 }
 
 // ---- 회사 상태(SSE로 실시간 갱신) ----
-const StateContext = createContext<{ state: State | null; reload: () => void; live: boolean }>({ state: null, reload: () => {}, live: false });
+const StateContext = createContext<{ state: State | null; reload: () => void; live: boolean }>({
+  state: null,
+  reload: () => {},
+  live: false,
+});
 export const useCompany = () => useContext(StateContext);
 
 function useCompanyState() {
@@ -123,7 +127,9 @@ function Shell() {
 }
 
 export function App() {
-  const [lang, setLangState] = useState<Lang>(() => (localStorage.getItem('ac-lang') as Lang) || (navigator.language.startsWith('ko') ? 'ko' : 'en'));
+  const [lang, setLangState] = useState<Lang>(
+    () => (localStorage.getItem('ac-lang') as Lang) || (navigator.language.startsWith('ko') ? 'ko' : 'en'),
+  );
   const setLang = (l: Lang) => {
     localStorage.setItem('ac-lang', l);
     setLangState(l);
@@ -146,9 +152,7 @@ export function App() {
     <LangContext.Provider value={{ lang, setLang }}>
       <RouteContext.Provider value={{ path, go }}>
         <StateContext.Provider value={company}>
-          <ToastProvider>
-            {company.error?.status === 401 ? <AuthMissing /> : <Shell />}
-          </ToastProvider>
+          <ToastProvider>{company.error?.status === 401 ? <AuthMissing /> : <Shell />}</ToastProvider>
         </StateContext.Provider>
       </RouteContext.Provider>
     </LangContext.Provider>

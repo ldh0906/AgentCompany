@@ -11,7 +11,10 @@ import { writeDecision } from '../../src/approvals/file-queue.ts';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 test('허용 목록: 접두사가 맞고 셸 메타문자가 없을 때만 자동 승인', () => {
-  const list = [['npm', 'test'], ['git', 'status']];
+  const list = [
+    ['npm', 'test'],
+    ['git', 'status'],
+  ];
   assert.equal(isAllowlisted('npm test', list), true);
   assert.equal(isAllowlisted('npm test -- --watch', list), true);
   assert.equal(isAllowlisted(['git', 'status'], list), true);
@@ -52,11 +55,20 @@ test('Codex 중계: 허용 목록 명령은 자동 승인, 나머지는 파일 �
   }, 50);
   const code = await new Promise<number | null>((r) => child.once('close', r));
   clearInterval(poll);
-  const events = stdout.trim().split('\n').map((l) => JSON.parse(l));
+  const events = stdout
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l));
   assert.equal(code, 0);
   assert.ok(events.some((e) => e.type === 'thread.started' && e.thread_id === 'thread-1'));
-  assert.ok(events.some((e) => e.type === 'approval.auto' && e.command === 'npm test'), 'npm test 자동 승인');
-  assert.ok(events.some((e) => e.type === 'approval.decided' && e.decision === 'deny'), 'rm -rf 는 대표에게 물어 거부');
+  assert.ok(
+    events.some((e) => e.type === 'approval.auto' && e.command === 'npm test'),
+    'npm test 자동 승인',
+  );
+  assert.ok(
+    events.some((e) => e.type === 'approval.decided' && e.decision === 'deny'),
+    'rm -rf 는 대표에게 물어 거부',
+  );
   assert.equal(answered.size, 1, '대표에게는 한 건만 올라옴');
   assert.ok(events.some((e) => e.type === 'item.completed' && e.item?.type === 'agent_message'));
 });

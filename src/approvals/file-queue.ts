@@ -13,9 +13,14 @@ export async function atomicJson(path: string, value: unknown): Promise<void> {
   try {
     await writeFile(temporary, JSON.stringify(value, null, 2), { flag: 'wx', mode: 0o600 });
     await rename(temporary, path);
-  } finally { await unlink(temporary).catch(() => {}); }
+  } finally {
+    await unlink(temporary).catch(() => {});
+  }
 }
-export async function createApprovalRequest(dir: string, req: { source: string; kind: string; detail: unknown }): Promise<{ id: string; path: string }> {
+export async function createApprovalRequest(
+  dir: string,
+  req: { source: string; kind: string; detail: unknown },
+): Promise<{ id: string; path: string }> {
   await mkdir(dir, { recursive: true });
   const id = randomUUID();
   const path = join(dir, `${id}.request.json`);
@@ -25,7 +30,12 @@ export async function createApprovalRequest(dir: string, req: { source: string; 
 export function parseDecision(value: unknown): Decision {
   if (!value || typeof value !== 'object') throw new Error('잘못된 승인 결정입니다.');
   const d = value as Decision;
-  if (!['allow', 'deny', 'timeout'].includes(d.decision) || (d.scope !== undefined && !['once', 'ticket'].includes(d.scope)) || (d.message !== undefined && typeof d.message !== 'string')) throw new Error('잘못된 승인 결정입니다.');
+  if (
+    !['allow', 'deny', 'timeout'].includes(d.decision) ||
+    (d.scope !== undefined && !['once', 'ticket'].includes(d.scope)) ||
+    (d.message !== undefined && typeof d.message !== 'string')
+  )
+    throw new Error('잘못된 승인 결정입니다.');
   return { decision: d.decision, ...(d.scope ? { scope: d.scope } : {}), ...(d.message !== undefined ? { message: d.message } : {}) };
 }
 export async function writeDecision(dir: string, id: string, decision: Decision): Promise<void> {
@@ -39,9 +49,11 @@ export async function waitForDecision(dir: string, id: string, timeoutMs: number
   if (!Number.isFinite(timeoutMs) || timeoutMs < 0) throw new Error('유효한 제한 시간이 필요합니다.');
   const deadline = performance.now() + timeoutMs;
   while (!signal?.aborted) {
-    try { return parseDecision(JSON.parse(await readFile(join(dir, `${id}.decision.json`), 'utf8'))); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return { decision: 'deny', message: '결정 파일을 검증할 수 없어 거부했습니다.' };
+    try {
+      return parseDecision(JSON.parse(await readFile(join(dir, `${id}.decision.json`), 'utf8')));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+        return { decision: 'deny', message: '결정 파일을 검증할 수 없어 거부했습니다.' };
     }
     const remaining = deadline - performance.now();
     if (remaining <= 0) break;

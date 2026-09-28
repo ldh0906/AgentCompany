@@ -1,5 +1,5 @@
-import { tr } from '../core/i18n.ts';
 // REST API. 모든 변경은 Company/Orchestrator를 거친다(상태기계와 권한 규칙이 그대로 적용됨).
+import { tr } from '../core/i18n.ts';
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -38,14 +38,16 @@ function str(b: Body, key: string, opts: { optional?: boolean; max?: number } = 
 
 function oneOf<T extends string>(b: Body, key: string, allowed: readonly T[], fallback?: T): T {
   const v = b[key] ?? fallback;
-  if (typeof v !== 'string' || !allowed.includes(v as T)) throw new ApiError(400, tr(`${key} 값이 올바르지 않습니다: ${String(v)}`, `Invalid ${key}: ${String(v)}`));
+  if (typeof v !== 'string' || !allowed.includes(v as T))
+    throw new ApiError(400, tr(`${key} 값이 올바르지 않습니다: ${String(v)}`, `Invalid ${key}: ${String(v)}`));
   return v as T;
 }
 
 function strList(b: Body, key: string): string[] {
   const v = b[key];
   if (v === undefined) return [];
-  if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) throw new ApiError(400, tr(`${key}는 문자열 배열이어야 합니다.`, `${key} must be an array of strings.`));
+  if (!Array.isArray(v) || !v.every((x) => typeof x === 'string'))
+    throw new ApiError(400, tr(`${key}는 문자열 배열이어야 합니다.`, `${key} must be an array of strings.`));
   return (v as string[]).map((s) => s.trim()).filter(Boolean);
 }
 
@@ -56,7 +58,8 @@ function verifyCommands(b: Body): VerifyCommand[] | undefined {
   return v.map((x, i) => {
     const o = x as Body;
     const argv = o.argv;
-    if (!Array.isArray(argv) || !argv.length || !argv.every((a) => typeof a === 'string')) throw new ApiError(400, tr(`검증 명령 ${i + 1}의 argv가 올바르지 않습니다.`, `Invalid argv for verification command ${i + 1}.`));
+    if (!Array.isArray(argv) || !argv.length || !argv.every((a) => typeof a === 'string'))
+      throw new ApiError(400, tr(`검증 명령 ${i + 1}의 argv가 올바르지 않습니다.`, `Invalid argv for verification command ${i + 1}.`));
     return { label: str(o, 'label'), argv: argv as string[], evidenceType: oneOf(o, 'evidenceType', EVIDENCE, 'unit_test') };
   });
 }
@@ -77,7 +80,10 @@ export class Api {
 
   async handle(method: string, pathname: string, query: URLSearchParams, body: unknown): Promise<unknown> {
     const b = (body && typeof body === 'object' ? body : {}) as Body;
-    const parts = pathname.replace(/^\/api\/?/, '').split('/').filter(Boolean);
+    const parts = pathname
+      .replace(/^\/api\/?/, '')
+      .split('/')
+      .filter(Boolean);
     const [head, id, action] = parts;
     const route = `${method} ${head ?? ''}${id ? '/:id' : ''}${action ? `/${action}` : ''}`;
 
@@ -101,10 +107,17 @@ export class Api {
         const cli = oneOf(b, 'cli', CLIS);
         const level = oneOf(b, 'accessLevel', LEVELS, 'write-ask');
         if (!ADAPTERS[cli].capabilities.accessLevels.includes(level)) {
-          throw new ApiError(400, tr(`${ADAPTERS[cli].displayName}는 '${level}' 등급을 지원하지 않습니다.`, `${ADAPTERS[cli].displayName} does not support '${level}' access.`));
+          throw new ApiError(
+            400,
+            tr(
+              `${ADAPTERS[cli].displayName}는 '${level}' 등급을 지원하지 않습니다.`,
+              `${ADAPTERS[cli].displayName} does not support '${level}' access.`,
+            ),
+          );
         }
         const roles = strList(b, 'roles') as RoleTemplate[];
-        if (!roles.length || !roles.every((r) => ROLES.includes(r))) throw new ApiError(400, tr('역할을 하나 이상 골라야 합니다.', 'Select at least one role.'));
+        if (!roles.length || !roles.every((r) => ROLES.includes(r)))
+          throw new ApiError(400, tr('역할을 하나 이상 골라야 합니다.', 'Select at least one role.'));
         return this.company.hireEmployee({
           name: str(b, 'name', { max: 60 }),
           roles,
@@ -119,8 +132,10 @@ export class Api {
       case 'POST employees/:id/access': {
         const level = oneOf(b, 'accessLevel', LEVELS);
         const e = this.company.requireEmployee(id!);
-        if (!ADAPTERS[e.cli].capabilities.accessLevels.includes(level)) throw new ApiError(400, tr('이 CLI가 지원하지 않는 등급입니다.', 'This CLI does not support this access level.'));
-        if (level === 'full-auto' && b.confirm !== 'full-auto') throw new ApiError(400, tr('전체 자동 등급은 확인 문구가 필요합니다.', 'Full-auto access requires confirmation text.'));
+        if (!ADAPTERS[e.cli].capabilities.accessLevels.includes(level))
+          throw new ApiError(400, tr('이 CLI가 지원하지 않는 등급입니다.', 'This CLI does not support this access level.'));
+        if (level === 'full-auto' && b.confirm !== 'full-auto')
+          throw new ApiError(400, tr('전체 자동 등급은 확인 문구가 필요합니다.', 'Full-auto access requires confirmation text.'));
         return this.company.setAccessLevel(id!, level, { kind: 'ceo' });
       }
 
@@ -136,7 +151,8 @@ export class Api {
         });
       case 'PATCH projects/:id': {
         const patch: Record<string, unknown> = {};
-        if (b.integrationMode !== undefined) patch.integrationMode = oneOf(b, 'integrationMode', ['manual', 'auto_after_approval'] as const);
+        if (b.integrationMode !== undefined)
+          patch.integrationMode = oneOf(b, 'integrationMode', ['manual', 'auto_after_approval'] as const);
         if (b.protectedPaths !== undefined) patch.protectedPaths = strList(b, 'protectedPaths');
         if (b.verifyCommands !== undefined) patch.verifyCommands = verifyCommands(b);
         if (b.docRules !== undefined) patch.docRules = str(b, 'docRules', { optional: true });
@@ -146,8 +162,12 @@ export class Api {
 
       case 'POST tickets': {
         const reqs = b.requirements;
-        if (!Array.isArray(reqs) || !reqs.length) throw new ApiError(400, tr('요구사항을 하나 이상 적어야 합니다.', 'Provide at least one requirement.'));
-        const requirements = reqs.map((r) => ({ text: str(r as Body, 'text', { max: 2000 }), evidenceType: oneOf(r as Body, 'evidenceType', EVIDENCE, 'inspection') }));
+        if (!Array.isArray(reqs) || !reqs.length)
+          throw new ApiError(400, tr('요구사항을 하나 이상 적어야 합니다.', 'Provide at least one requirement.'));
+        const requirements = reqs.map((r) => ({
+          text: str(r as Body, 'text', { max: 2000 }),
+          evidenceType: oneOf(r as Body, 'evidenceType', EVIDENCE, 'inspection'),
+        }));
         return this.company.createTicket({
           projectId: str(b, 'projectId'),
           type: oneOf(b, 'type', TYPES, 'impl'),
@@ -181,7 +201,10 @@ export class Api {
           const mode = b.mode === undefined ? undefined : oneOf(b, 'mode', ['manual', 'auto_after_approval'] as const);
           return this.orch.decideIntegration(id!, decision, { ...(mode ? { mode } : {}), reason: str(b, 'reason', { optional: true }) });
         }
-        throw new ApiError(400, tr('이 승인 종류는 아직 대시보드에서 처리할 수 없습니다.', 'This approval type is not yet supported in the dashboard.'));
+        throw new ApiError(
+          400,
+          tr('이 승인 종류는 아직 대시보드에서 처리할 수 없습니다.', 'This approval type is not yet supported in the dashboard.'),
+        );
       }
 
       case 'POST requests':
@@ -193,9 +216,17 @@ export class Api {
         return { ok: true };
 
       case 'POST decisions':
-        return this.orch.records.recordDecision(str(b, 'projectId'), str(b, 'text', { max: 5000 }), strList(b, 'sourceRefs'), str(b, 'supersedes', { optional: true }) || null);
+        return this.orch.records.recordDecision(
+          str(b, 'projectId'),
+          str(b, 'text', { max: 5000 }),
+          strList(b, 'sourceRefs'),
+          str(b, 'supersedes', { optional: true }) || null,
+        );
       case 'POST decisions/:id/status':
-        this.orch.records.setDecisionStatus(id!, oneOf(b, 'status', ['current', 'past', 'superseded', 'withdrawn', 'needs_verification', 'draft'] as const));
+        this.orch.records.setDecisionStatus(
+          id!,
+          oneOf(b, 'status', ['current', 'past', 'superseded', 'withdrawn', 'needs_verification', 'draft'] as const),
+        );
         return { ok: true };
     }
     throw new ApiError(404, tr(`알 수 없는 API: ${method} ${pathname}`, `Unknown API: ${method} ${pathname}`));
@@ -233,7 +264,12 @@ export class Api {
 
   async ticketDiff(id: string) {
     const t = this.company.requireTicket(id);
-    const sub = this.orch.records.latestSubmission(t) ?? this.orch.records.runsForTicket(id).filter((x) => x.kind === 'work' && x.headSha).at(-1);
+    const sub =
+      this.orch.records.latestSubmission(t) ??
+      this.orch.records
+        .runsForTicket(id)
+        .filter((x) => x.kind === 'work' && x.headSha)
+        .at(-1);
     if (!sub?.headSha || !sub.baseSha) return { diff: '', changedPaths: [] };
     const paths = projectPaths(this.dataDir, t.projectId);
     return { diff: await diffText(paths.mirror, sub.baseSha, sub.headSha, 400_000), changedPaths: sub.changedPaths, headSha: sub.headSha };
@@ -243,7 +279,13 @@ export class Api {
     const run = this.orch.records.run(id);
     if (!run) throw new ApiError(404, tr('실행 기록이 없습니다.', 'Run record not found.'));
     const text = await readFile(path.join(run.runDir, `${stream}.log`), 'utf8').catch(() => '');
-    return { text: text.slice(-200_000), truncated: text.length > 200_000, report: run.report, finalText: run.finalText, reportError: run.reportError };
+    return {
+      text: text.slice(-200_000),
+      truncated: text.length > 200_000,
+      report: run.report,
+      finalText: run.finalText,
+      reportError: run.reportError,
+    };
   }
 
   async doctor(refresh: boolean): Promise<DoctorReport> {

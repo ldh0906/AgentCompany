@@ -1,13 +1,22 @@
-import { tr } from '../core/i18n.ts';
 // 오케스트레이터: 결정적 코드로 티켓을 진행시킨다. LLM은 여기서 명령을 내리지 못한다.
 // 흐름: 접수 → 대기 목록 → 배정 → 작업 실행 → 제출 검증(범위·증거) → 독립 검수 → 대표 승인 → 반영
+import { tr } from '../core/i18n.ts';
 
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { adapterFor } from '../adapters/index.ts';
 import { buildDraftPrompt, buildReviewPrompt, buildWorkPrompt } from '../agents/prompt.ts';
-import { blindPrompt, crossPrompt, parseClaims, parseResponses, parseVerdicts, rebuttalPrompt, synthesize, type DeliberationPhase } from '../agents/deliberation.ts';
+import {
+  blindPrompt,
+  crossPrompt,
+  parseClaims,
+  parseResponses,
+  parseVerdicts,
+  rebuttalPrompt,
+  synthesize,
+  type DeliberationPhase,
+} from '../agents/deliberation.ts';
 import { parseDrafts, parseReport, type TicketDraft, type WorkReport } from '../agents/report.ts';
 import { writeDecision } from '../approvals/file-queue.ts';
 import type { Actor } from '../core/ticket-machine.ts';
@@ -57,13 +66,21 @@ export interface RecoveryReport {
   orphaned: string[];
 }
 
-const LOCK_HOLDING: TicketStatus[] = ['in_progress', 'verifying', 'in_review', 'changes_requested', 'awaiting_approval', 'integrating', 'assigned'];
+const LOCK_HOLDING: TicketStatus[] = [
+  'in_progress',
+  'verifying',
+  'in_review',
+  'changes_requested',
+  'awaiting_approval',
+  'integrating',
+  'assigned',
+];
 
 export class Orchestrator {
   readonly company: Company;
   readonly records: Records;
   private readonly opts: Required<Omit<OrchestratorOptions, 'onChange'>> & Pick<OrchestratorOptions, 'onChange'>;
-  private readonly busy = new Set<string>();         // 티켓 단위 비동기 작업 중
+  private readonly busy = new Set<string>(); // 티켓 단위 비동기 작업 중
   private readonly liveRuns = new Map<string, Promise<void>>();
   private readonly reviewFailures = new Map<string, number>();
   private timer: NodeJS.Timeout | null = null;
@@ -122,7 +139,9 @@ export class Orchestrator {
     const chain = this.company.store.verifyEventChain();
     const report: RecoveryReport = {
       chainOk: chain.ok,
-      chainDetail: chain.ok ? tr(`이벤트 ${chain.count}개 검증`, `Verified ${chain.count} events`) : tr(`이벤트 #${chain.brokenAt}에서 변조 탐지: ${chain.reason}`, `Tampering detected at event #${chain.brokenAt}: ${chain.reason}`),
+      chainDetail: chain.ok
+        ? tr(`이벤트 ${chain.count}개 검증`, `Verified ${chain.count} events`)
+        : tr(`이벤트 #${chain.brokenAt}에서 변조 탐지: ${chain.reason}`, `Tampering detected at event #${chain.brokenAt}: ${chain.reason}`),
       reattached: [],
       ingestedAfterRestart: [],
       orphaned: [],
@@ -141,7 +160,10 @@ export class Orchestrator {
         this.records.saveRun({ ...prepared, status: 'running', pid: late.pid, processStartMs: late.startedAtMs });
         continue;
       }
-      await this.finishRun(prepared, { failure: 'spawn_failed', detail: tr('실행 준비 중 중단되어 프로세스가 시작되지 않았습니다.', 'Run preparation was interrupted; the process did not start.') });
+      await this.finishRun(prepared, {
+        failure: 'spawn_failed',
+        detail: tr('실행 준비 중 중단되어 프로세스가 시작되지 않았습니다.', 'Run preparation was interrupted; the process did not start.'),
+      });
       report.orphaned.push(prepared.id);
     }
     for (const run of this.records.runsByStatus('running')) {
@@ -150,7 +172,10 @@ export class Orchestrator {
       if (alive) {
         // 셔틀이 살아 있다: 같은 실행에 재연결해 종료 기록(exit.json)을 기다린다.
         report.reattached.push(run.id);
-        this.track(run.id, waitForExit(run.runDir, run.pid).then((o) => this.completeRun(run.id, o)));
+        this.track(
+          run.id,
+          waitForExit(run.runDir, run.pid).then((o) => this.completeRun(run.id, o)),
+        );
       } else {
         report.ingestedAfterRestart.push(run.id);
         const outcome = finished ? { exitCode: finished.exitCode, timedOut: finished.timedOut } : null;
@@ -205,7 +230,10 @@ export class Orchestrator {
         const after = await snapshotRefs(paths.mirror);
         // 오케스트레이터 자신이 바꾼 ref(다른 티켓 커밋·미러 동기화)는 위반이 아니다. 기록과 다른 변경만 잡는다.
         run.refViolations = refChanges(run.refsBefore, after, [branchRef]).filter(
-          (ref) => !ref.startsWith('refs/ac-merge/') && !ref.startsWith('refs/ac-approved/') && this.records.expectedRef(project.id, ref) !== after[ref],
+          (ref) =>
+            !ref.startsWith('refs/ac-merge/') &&
+            !ref.startsWith('refs/ac-approved/') &&
+            this.records.expectedRef(project.id, ref) !== after[ref],
         );
       }
       if (run.originBefore !== null) run.originChanged = (await originFingerprint(project.originPath)) !== run.originBefore;
@@ -216,7 +244,9 @@ export class Orchestrator {
   /** 원본 저장소에서 오케스트레이터가 반영으로 바꾼 것이 아닌 ref 변경. */
   private async unexpectedOriginRefs(project: Project, before: Record<string, string>): Promise<string[]> {
     const after = await snapshotRefs(project.originPath);
-    return refChanges(before, after, []).filter((ref) => ref.startsWith('refs/heads/') || ref.startsWith('refs/tags/')).filter((ref) => this.records.expectedOriginRef(project.id, ref) !== after[ref]);
+    return refChanges(before, after, [])
+      .filter((ref) => ref.startsWith('refs/heads/') || ref.startsWith('refs/tags/'))
+      .filter((ref) => this.records.expectedOriginRef(project.id, ref) !== after[ref]);
   }
 
   private readonly projectLocks = new Map<string, Promise<unknown>>();
@@ -225,14 +255,19 @@ export class Orchestrator {
   private withProjectLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
     const prev = this.projectLocks.get(projectId) ?? Promise.resolve();
     const next = prev.catch(() => {}).then(fn);
-    this.projectLocks.set(projectId, next.catch(() => {}));
+    this.projectLocks.set(
+      projectId,
+      next.catch(() => {}),
+    );
     return next;
   }
 
   private track(runId: string, p: Promise<void>): void {
-    const wrapped = p.catch((error) => {
-      this.company.store.appendEvent('orchestrator', 'orchestrator.error', runId, { error: String(error) });
-    }).finally(() => this.liveRuns.delete(runId));
+    const wrapped = p
+      .catch((error) => {
+        this.company.store.appendEvent('orchestrator', 'orchestrator.error', runId, { error: String(error) });
+      })
+      .finally(() => this.liveRuns.delete(runId));
     this.liveRuns.set(runId, wrapped);
   }
 
@@ -269,7 +304,14 @@ export class Orchestrator {
         try {
           this.apply(t.id, { type: 'accept_to_backlog' });
         } catch (error) {
-          this.apply(t.id, { type: 'hold', reason: 'needs_decision', note: tr(`티켓 정보 보완 필요: ${String((error as Error).message)}`, `Ticket details need updating: ${String((error as Error).message)}`) });
+          this.apply(t.id, {
+            type: 'hold',
+            reason: 'needs_decision',
+            note: tr(
+              `티켓 정보 보완 필요: ${String((error as Error).message)}`,
+              `Ticket details need updating: ${String((error as Error).message)}`,
+            ),
+          });
         }
         return;
       case 'backlog':
@@ -286,7 +328,10 @@ export class Orchestrator {
         }
         if (!this.hasLiveRun(t.id, 'work')) {
           // 데몬 재시작 후 추적 중인 실행이 없으면 중단 처리(예산은 이미 소모됨).
-          this.apply(t.id, { type: 'run_aborted', reason: tr('실행 추적이 끊겼습니다(재시작 복구).', 'Run tracking was lost (restart recovery).') });
+          this.apply(t.id, {
+            type: 'run_aborted',
+            reason: tr('실행 추적이 끊겼습니다(재시작 복구).', 'Run tracking was lost (restart recovery).'),
+          });
         }
         return;
       case 'verifying':
@@ -316,7 +361,10 @@ export class Orchestrator {
     if (this.busy.has(ticketId)) return;
     this.busy.add(ticketId);
     const id = `busy:${ticketId}`;
-    this.track(id, fn().finally(() => this.busy.delete(ticketId)));
+    this.track(
+      id,
+      fn().finally(() => this.busy.delete(ticketId)),
+    );
   }
 
   private hasLiveRun(ticketId: string, kind: 'work' | 'review'): boolean {
@@ -332,11 +380,20 @@ export class Orchestrator {
   private autoAssign(t: Ticket): void {
     const active = this.company.activeEmployees();
     if (active.length < 2) {
-      this.apply(t.id, { type: 'hold', reason: 'needs_decision', note: tr('담당자와 검수자를 나누려면 활성 직원이 2명 이상 필요합니다.', 'At least two active employees are needed for separate assignee and reviewer roles.') });
+      this.apply(t.id, {
+        type: 'hold',
+        reason: 'needs_decision',
+        note: tr(
+          '담당자와 검수자를 나누려면 활성 직원이 2명 이상 필요합니다.',
+          'At least two active employees are needed for separate assignee and reviewer roles.',
+        ),
+      });
       return;
     }
-    const wants = t.type === 'impl' ? ['implementer'] : t.type === 'doc' ? ['planner', 'recorder', 'architect'] : ['architect', 'planner', 'qa'];
-    const load = (e: Employee) => this.company.tickets().filter((x) => x.assigneeId === e.id && !TERMINAL_STATUSES.includes(x.status)).length;
+    const wants =
+      t.type === 'impl' ? ['implementer'] : t.type === 'doc' ? ['planner', 'recorder', 'architect'] : ['architect', 'planner', 'qa'];
+    const load = (e: Employee) =>
+      this.company.tickets().filter((x) => x.assigneeId === e.id && !TERMINAL_STATUSES.includes(x.status)).length;
     const byLoad = (a: Employee, b: Employee) => load(a) - load(b);
     const assignee = [...active].sort(byLoad).find((e) => e.roles.some((r) => wants.includes(r))) ?? [...active].sort(byLoad)[0]!;
     const others = active.filter((e) => e.id !== assignee.id);
@@ -353,12 +410,21 @@ export class Orchestrator {
   private async startWork(t: Ticket): Promise<void> {
     const employee = this.company.requireEmployee(t.assigneeId!);
     if (!employee.active) {
-      this.apply(t.id, { type: 'hold', reason: 'needs_decision', note: tr(`담당자 ${employee.name}이(가) 비활성 상태입니다.`, `Assignee ${employee.name} is inactive.`) });
+      this.apply(t.id, {
+        type: 'hold',
+        reason: 'needs_decision',
+        note: tr(`담당자 ${employee.name}이(가) 비활성 상태입니다.`, `Assignee ${employee.name} is inactive.`),
+      });
       return;
     }
     if (this.liveCountFor(employee.cli) >= (this.opts.concurrency[employee.cli] ?? 1)) return;
     const deps = t.dependsOn.every((d) => this.company.requireTicket(d).status === 'done');
-    const locks = deps ? this.records.acquireLocks(t, this.company.tickets().filter((x) => LOCK_HOLDING.includes(x.status))) : { ok: true as const };
+    const locks = deps
+      ? this.records.acquireLocks(
+          t,
+          this.company.tickets().filter((x) => LOCK_HOLDING.includes(x.status)),
+        )
+      : { ok: true as const };
     if (!locks.ok) {
       // 다른 업무와 쓰기 범위가 겹친다: 오류가 아니라 대기. 같은 사유로는 한 번만 기록한다.
       this.noteOnce(t.id, 'ticket.waiting_lock', { conflictWith: locks.conflictWith });
@@ -456,7 +522,10 @@ export class Orchestrator {
     for (const f of inv.files) await writeFile(f.path, f.content, 'utf8');
     await writeFile(path.join(runDir, 'prompt.md'), p.prompt, 'utf8');
 
-    const located = inv.file === process.execPath ? { launch: { file: inv.file, argsPrefix: [] as string[] } } : await locateExecutable(inv.file, inv.env);
+    const located =
+      inv.file === process.execPath
+        ? { launch: { file: inv.file, argsPrefix: [] as string[] } }
+        : await locateExecutable(inv.file, inv.env);
     const run: RunRecord = {
       id: runId,
       ticketId: p.ticket.id,
@@ -493,10 +562,20 @@ export class Orchestrator {
       summary: '',
     };
     this.records.saveRun(run); // 먼저 기록하고 나중에 실행(write-ahead)
-    this.company.store.appendEvent(p.employee.id, `run.${p.kind}.prepared`, p.ticket.id, { runId, cli: p.employee.cli, model: p.employee.model });
+    this.company.store.appendEvent(p.employee.id, `run.${p.kind}.prepared`, p.ticket.id, {
+      runId,
+      cli: p.employee.cli,
+      model: p.employee.model,
+    });
 
     if (!located?.launch) {
-      await this.finishRun(run, { failure: 'spawn_failed', detail: tr(`${adapter.displayName} 실행 파일(${inv.file})을 찾지 못했습니다.`, `${adapter.displayName} executable (${inv.file}) not found.`) });
+      await this.finishRun(run, {
+        failure: 'spawn_failed',
+        detail: tr(
+          `${adapter.displayName} 실행 파일(${inv.file})을 찾지 못했습니다.`,
+          `${adapter.displayName} executable (${inv.file}) not found.`,
+        ),
+      });
       return;
     }
     try {
@@ -539,15 +618,33 @@ export class Orchestrator {
     run.exitCode = outcome?.exitCode ?? null;
 
     const fresh = run;
-    if (run.kind === 'analysis' && run.phase) return this.finishDeliberationRun(run, outcome?.timedOut ? null : parsed.finalText, outcome?.timedOut ? tr('시간 초과', 'Timed out') : stderr);
+    if (run.kind === 'analysis' && run.phase)
+      return this.finishDeliberationRun(
+        run,
+        outcome?.timedOut ? null : parsed.finalText,
+        outcome?.timedOut ? tr('시간 초과', 'Timed out') : stderr,
+      );
     if (run.kind === 'analysis') return this.finishDrafts(run, parsed.finalText, outcome, stderr);
 
     const ticket = this.company.requireTicket(run.ticketId);
-    const report = parseReport(parsed.finalText, { kind: run.kind === 'review' ? 'review' : 'work', nonce: run.nonce, requirementIds: ticket.requirements.map((r) => r.id) });
+    const report = parseReport(parsed.finalText, {
+      kind: run.kind === 'review' ? 'review' : 'work',
+      nonce: run.nonce,
+      requirementIds: ticket.requirements.map((r) => r.id),
+    });
     if (outcome?.timedOut) return this.finishRun(fresh, { failure: 'timeout', detail: tr('실행 시간 초과', 'Run timed out') });
     if (!report.ok) {
-      const cls: FailureClass = report.reason === 'nonce_mismatch' ? 'nonce_mismatch' : parsed.finalText ? 'schema_invalid' : adapter.classifyFailure({ exitCode: run.exitCode, timedOut: false, stderr, finalText: parsed.errorText ?? parsed.finalText });
-      return this.finishRun(fresh, { failure: outcome === null && !parsed.finalText ? 'unknown' : cls, detail: `${report.detail}${stderr ? `\nstderr: ${stderr.slice(-800)}` : ''}`, orphan: outcome === null && !parsed.finalText });
+      const cls: FailureClass =
+        report.reason === 'nonce_mismatch'
+          ? 'nonce_mismatch'
+          : parsed.finalText
+            ? 'schema_invalid'
+            : adapter.classifyFailure({ exitCode: run.exitCode, timedOut: false, stderr, finalText: parsed.errorText ?? parsed.finalText });
+      return this.finishRun(fresh, {
+        failure: outcome === null && !parsed.finalText ? 'unknown' : cls,
+        detail: `${report.detail}${stderr ? `\nstderr: ${stderr.slice(-800)}` : ''}`,
+        orphan: outcome === null && !parsed.finalText,
+      });
     }
     fresh.report = report.report;
     fresh.summary = report.report.summary;
@@ -582,20 +679,33 @@ export class Orchestrator {
       if (failure) {
         const hold =
           failure.failure === 'usage_limit'
-            ? { reason: 'usage_limit' as const, note: tr('구독 사용량 한도에 도달했습니다. 한도가 풀린 뒤 대표가 재개하세요.', 'Subscription usage limit reached. The CEO can resume after the limit resets.') }
+            ? {
+                reason: 'usage_limit' as const,
+                note: tr(
+                  '구독 사용량 한도에 도달했습니다. 한도가 풀린 뒤 대표가 재개하세요.',
+                  'Subscription usage limit reached. The CEO can resume after the limit resets.',
+                ),
+              }
             : failure.failure === 'auth_required'
               ? { reason: 'needs_permission' as const, note: tr('직원 CLI 로그인이 필요합니다.', 'Employee CLI login required.') }
               : failure.failure === 'spawn_failed'
                 ? { reason: 'needs_decision' as const, note: failure.detail }
                 : undefined;
-        this.apply(ticket.id, { type: 'run_aborted', reason: `${failure.failure}: ${failure.detail.slice(0, 300)}`, ...(hold ? { hold } : {}) });
+        this.apply(ticket.id, {
+          type: 'run_aborted',
+          reason: `${failure.failure}: ${failure.detail.slice(0, 300)}`,
+          ...(hold ? { hold } : {}),
+        });
         return;
       }
       const wr = run.report as WorkReport;
       if (wr.status !== 'done') {
         this.apply(ticket.id, {
           type: 'run_aborted',
-          reason: tr(`직원이 ${wr.status === 'blocked' ? tr('진행 불가', 'Blocked') : tr('대표 결정 필요', 'CEO decision needed')}를 보고`, `Employee reported: ${wr.status === 'blocked' ? tr('진행 불가', 'Blocked') : tr('대표 결정 필요', 'CEO decision needed')}`),
+          reason: tr(
+            `직원이 ${wr.status === 'blocked' ? tr('진행 불가', 'Blocked') : tr('대표 결정 필요', 'CEO decision needed')}를 보고`,
+            `Employee reported: ${wr.status === 'blocked' ? tr('진행 불가', 'Blocked') : tr('대표 결정 필요', 'CEO decision needed')}`,
+          ),
           hold: { reason: 'needs_decision', note: [wr.summary, ...wr.questions].join('\n').slice(0, 2000) },
         });
         return;
@@ -610,7 +720,14 @@ export class Orchestrator {
       const n = (this.reviewFailures.get(ticket.id) ?? 0) + 1;
       this.reviewFailures.set(ticket.id, n);
       if (n >= 2 || failure.failure === 'usage_limit' || failure.failure === 'auth_required') {
-        this.apply(ticket.id, { type: 'hold', reason: failure.failure === 'usage_limit' ? 'usage_limit' : 'needs_decision', note: tr(`검수 실행 실패(${n}회): ${failure.detail.slice(0, 300)}`, `Review run failed (${n} attempts): ${failure.detail.slice(0, 300)}`) });
+        this.apply(ticket.id, {
+          type: 'hold',
+          reason: failure.failure === 'usage_limit' ? 'usage_limit' : 'needs_decision',
+          note: tr(
+            `검수 실행 실패(${n}회): ${failure.detail.slice(0, 300)}`,
+            `Review run failed (${n} attempts): ${failure.detail.slice(0, 300)}`,
+          ),
+        });
       }
       return;
     }
@@ -626,7 +743,9 @@ export class Orchestrator {
         met: r.met,
         verifiedEvidence: [
           // 인용 증거는 티켓 공통이거나 바로 이 요구사항 전용일 때만 인정한다(다른 요구사항의 대표 확인 전용 금지).
-          ...r.evidenceIds.map((id) => evidence.find((e) => e.id === id && e.passed && (!e.requirementId || e.requirementId === r.id))?.type),
+          ...r.evidenceIds.map(
+            (id) => evidence.find((e) => e.id === id && e.passed && (!e.requirementId || e.requirementId === r.id))?.type,
+          ),
           // 대표의 직접 확인은 검수자가 인용하지 않아도 그 요구사항의 증거가 된다.
           ...evidence.filter((e) => e.type === 'human_attest' && e.passed && e.requirementId === r.id).map((e) => e.type),
         ].filter((x): x is Evidence['type'] => Boolean(x)),
@@ -635,7 +754,14 @@ export class Orchestrator {
         this.apply(ticket.id, { type: 'review_approve', checks }, reviewer);
       } catch (error) {
         if (!(error instanceof DomainError)) throw error;
-        this.apply(ticket.id, { type: 'hold', reason: 'needs_decision', note: tr(`검수자는 승인했지만 시스템이 거부했습니다: ${error.message}`, `Reviewer approved, but the system rejected it: ${error.message}`) });
+        this.apply(ticket.id, {
+          type: 'hold',
+          reason: 'needs_decision',
+          note: tr(
+            `검수자는 승인했지만 시스템이 거부했습니다: ${error.message}`,
+            `Reviewer approved, but the system rejected it: ${error.message}`,
+          ),
+        });
       }
     } else {
       const reasons = rr.requirements.filter((r) => !r.met).map((r) => `- ${r.id}: ${r.reason}`);
@@ -657,19 +783,31 @@ export class Orchestrator {
     if (sub.refViolations.length || sub.originChanged) {
       this.apply(ticketId, {
         type: 'scope_violation',
-        paths: [...sub.refViolations.map((r) => `ref:${r}`), ...(sub.originChanged ? [tr('원본 저장소 작업 트리', 'Original repository working tree')] : [])],
+        paths: [
+          ...sub.refViolations.map((r) => `ref:${r}`),
+          ...(sub.originChanged ? [tr('원본 저장소 작업 트리', 'Original repository working tree')] : []),
+        ],
       });
       return;
     }
     if (!sub.headSha) {
       if (ticket.type === 'impl' || ticket.type === 'doc') {
-        this.apply(ticketId, { type: 'verification_failed', reason: tr('변경된 파일이 없습니다. "완료" 보고와 달리 실제 변경이 없습니다.', 'No files changed. The completion report has no actual changes.') });
+        this.apply(ticketId, {
+          type: 'verification_failed',
+          reason: tr(
+            '변경된 파일이 없습니다. "완료" 보고와 달리 실제 변경이 없습니다.',
+            'No files changed. The completion report has no actual changes.',
+          ),
+        });
         return;
       }
     } else {
       const scope = checkScope(sub.changedPaths, ticket.writeScope, project.protectedPaths);
       if (!scope.ok) {
-        this.apply(ticketId, { type: 'scope_violation', paths: [...scope.outOfScope, ...scope.protectedTouched.map((p) => tr(`보호:${p}`, `Protected:${p}`))] });
+        this.apply(ticketId, {
+          type: 'scope_violation',
+          paths: [...scope.outOfScope, ...scope.protectedTouched.map((p) => tr(`보호:${p}`, `Protected:${p}`))],
+        });
         return;
       }
     }
@@ -698,32 +836,65 @@ export class Orchestrator {
       const vwt = await ensureDetachedWorktree(paths, 'verify', ticketId, sub.headSha);
       // 검증 명령은 제출된 코드를 실행한다(CI와 같음). 실행 전후로 원본 저장소와 미러 ref를 비교해 부작용을 잡는다.
       const snap = () =>
-        this.withProjectLock(project.id, async () => ({ origin: await originFingerprint(project.originPath), refs: await snapshotRefs(paths.mirror), originRefs: await snapshotRefs(project.originPath) }));
+        this.withProjectLock(project.id, async () => ({
+          origin: await originFingerprint(project.originPath),
+          refs: await snapshotRefs(paths.mirror),
+          originRefs: await snapshotRefs(project.originPath),
+        }));
       const before = await snap();
       try {
-      for (const [i, vc] of project.verifyCommands.entries()) {
-        const ev = await this.runVerifyCommand(vc, vwt, path.join(sub.runDir, 'verify', String(i)));
-        const e: Evidence = { id: newId('EV'), ticketId, round: ticket.round, headSha: sub.headSha, type: vc.evidenceType, label: vc.label, argv: vc.argv, ...ev, createdAt: now() };
-        this.records.saveEvidence(e, sub.id);
-        if (!e.passed) failures.push(tr(`${vc.label} 실패 (exit ${e.exitCode ?? '-'}):\n${e.summary}`, `${vc.label} failed (exit ${e.exitCode ?? '-'}):\n${e.summary}`));
-      }
+        for (const [i, vc] of project.verifyCommands.entries()) {
+          const ev = await this.runVerifyCommand(vc, vwt, path.join(sub.runDir, 'verify', String(i)));
+          const e: Evidence = {
+            id: newId('EV'),
+            ticketId,
+            round: ticket.round,
+            headSha: sub.headSha,
+            type: vc.evidenceType,
+            label: vc.label,
+            argv: vc.argv,
+            ...ev,
+            createdAt: now(),
+          };
+          this.records.saveEvidence(e, sub.id);
+          if (!e.passed)
+            failures.push(
+              tr(
+                `${vc.label} 실패 (exit ${e.exitCode ?? '-'}):\n${e.summary}`,
+                `${vc.label} failed (exit ${e.exitCode ?? '-'}):\n${e.summary}`,
+              ),
+            );
+        }
       } finally {
         const after = await snap();
         const refViol = refChanges(before.refs, after.refs, []).filter(
-          (ref) => !ref.startsWith('refs/ac-merge/') && !ref.startsWith('refs/ac-approved/') && this.records.expectedRef(project.id, ref) !== after.refs[ref],
+          (ref) =>
+            !ref.startsWith('refs/ac-merge/') &&
+            !ref.startsWith('refs/ac-approved/') &&
+            this.records.expectedRef(project.id, ref) !== after.refs[ref],
         );
         const originRefViol = await this.unexpectedOriginRefs(project, before.originRefs);
         if (before.origin !== after.origin || refViol.length || originRefViol.length) {
           this.apply(ticketId, {
             type: 'scope_violation',
-            paths: [...(before.origin !== after.origin ? [tr('검증 명령 실행 중 원본 저장소 변경', 'Original repository changed during verification')] : []), ...refViol.map((r) => tr(`검증 중 ref:${r}`, `Ref during verification:${r}`)), ...originRefViol.map((r) => tr(`검증 중 원본 ref:${r}`, `Original ref during verification:${r}`))],
+            paths: [
+              ...(before.origin !== after.origin
+                ? [tr('검증 명령 실행 중 원본 저장소 변경', 'Original repository changed during verification')]
+                : []),
+              ...refViol.map((r) => tr(`검증 중 ref:${r}`, `Ref during verification:${r}`)),
+              ...originRefViol.map((r) => tr(`검증 중 원본 ref:${r}`, `Original ref during verification:${r}`)),
+            ],
           });
           return;
         }
       }
     }
     this.changed('ticket', ticketId);
-    if (failures.length) this.apply(ticketId, { type: 'verification_failed', reason: tr(`시스템 검증 실패:\n${failures.join('\n\n')}`, `System verification failed:\n${failures.join('\n\n')}`) });
+    if (failures.length)
+      this.apply(ticketId, {
+        type: 'verification_failed',
+        reason: tr(`시스템 검증 실패:\n${failures.join('\n\n')}`, `System verification failed:\n${failures.join('\n\n')}`),
+      });
     else this.apply(ticketId, { type: 'verification_passed' });
   }
 
@@ -734,7 +905,13 @@ export class Orchestrator {
   ): Promise<{ exitCode: number | null; passed: boolean; outputPath: string | null; summary: string }> {
     const [cmd, ...rest] = vc.argv;
     const located = cmd ? await locateExecutable(cmd) : null;
-    if (!located?.launch) return { exitCode: null, passed: false, outputPath: null, summary: tr(`실행 파일 ${cmd}을(를) 찾지 못했습니다.`, `Executable ${cmd} not found.`) };
+    if (!located?.launch)
+      return {
+        exitCode: null,
+        passed: false,
+        outputPath: null,
+        summary: tr(`실행 파일 ${cmd}을(를) 찾지 못했습니다.`, `Executable ${cmd} not found.`),
+      };
     const proc = await startProcess({
       file: located.launch.file,
       args: [...located.launch.argsPrefix, ...rest],
@@ -747,7 +924,12 @@ export class Orchestrator {
     const o = await proc.done;
     const tail = async (f: string) => (await readFile(f, 'utf8').catch(() => '')).slice(-1500);
     const summary = `${await tail(proc.stdoutPath)}\n${await tail(proc.stderrPath)}`.trim().slice(-1500);
-    return { exitCode: o.exitCode, passed: o.exitCode === 0 && !o.timedOut, outputPath: proc.stdoutPath, summary: o.timedOut ? tr(`시간 초과\n${summary}`, `Timed out\n${summary}`) : summary };
+    return {
+      exitCode: o.exitCode,
+      passed: o.exitCode === 0 && !o.timedOut,
+      outputPath: proc.stdoutPath,
+      summary: o.timedOut ? tr(`시간 초과\n${summary}`, `Timed out\n${summary}`) : summary,
+    };
   }
 
   // ======================= 독립 검수 =======================
@@ -755,7 +937,11 @@ export class Orchestrator {
   private startReview(t: Ticket): void {
     const reviewer = this.company.requireEmployee(t.reviewerId!);
     if (!reviewer.active) {
-      this.apply(t.id, { type: 'hold', reason: 'needs_decision', note: tr(`검수자 ${reviewer.name}이(가) 비활성 상태입니다.`, `Reviewer ${reviewer.name} is inactive.`) });
+      this.apply(t.id, {
+        type: 'hold',
+        reason: 'needs_decision',
+        note: tr(`검수자 ${reviewer.name}이(가) 비활성 상태입니다.`, `Reviewer ${reviewer.name} is inactive.`),
+      });
       return;
     }
     if (this.liveCountFor(reviewer.cli) >= (this.opts.concurrency[reviewer.cli] ?? 1)) return;
@@ -772,14 +958,25 @@ export class Orchestrator {
         project,
         ticket: t,
         nonce,
-        diff: sub.headSha ? await diffText(paths.mirror, sub.baseSha, sub.headSha) : tr('(파일 변경 없음: 조사·보고 업무)', '(No file changes: research/report task)'),
+        diff: sub.headSha
+          ? await diffText(paths.mirror, sub.baseSha, sub.headSha)
+          : tr('(파일 변경 없음: 조사·보고 업무)', '(No file changes: research/report task)'),
         changedPaths: sub.changedPaths,
         evidence: this.records.evidenceFor(t.id, { submission: sub.id }),
         assigneeSummary: sub.summary,
         language: this.opts.language,
       });
       // 검수자는 항상 읽기 전용으로 실행한다.
-      await this.launch({ ticket: t, employee: reviewer, kind: 'review', cwd: rwt, prompt, nonce, accessLevel: 'read-only', baseSha: sub.baseSha });
+      await this.launch({
+        ticket: t,
+        employee: reviewer,
+        kind: 'review',
+        cwd: rwt,
+        prompt,
+        nonce,
+        accessLevel: 'read-only',
+        baseSha: sub.baseSha,
+      });
     });
   }
 
@@ -798,8 +995,15 @@ export class Orchestrator {
         kind: 'integrate',
         ticketId: t.id,
         subject: this.reviewSubject(t),
-        summary: tr(`${t.id} ${t.title} — 주장 ${claims.length}개, 미해결 ${escalated.length}개`, `${t.id} ${t.title} — ${claims.length} claims, ${escalated.length} unresolved`),
-        detail: { mode: 'review', claims: claims.length, escalated: escalated.map((c) => ({ id: c.id, text: c.text, verdict: c.verdict, response: c.response })) },
+        summary: tr(
+          `${t.id} ${t.title} — 주장 ${claims.length}개, 미해결 ${escalated.length}개`,
+          `${t.id} ${t.title} — ${claims.length} claims, ${escalated.length} unresolved`,
+        ),
+        detail: {
+          mode: 'review',
+          claims: claims.length,
+          escalated: escalated.map((c) => ({ id: c.id, text: c.text, verdict: c.verdict, response: c.response })),
+        },
         requestedBy: 'orchestrator',
       });
       this.changed('approval', t.id);
@@ -812,22 +1016,39 @@ export class Orchestrator {
       kind: 'integrate',
       ticketId: t.id,
       subject: this.integrationSubject(t, sub),
-      summary: tr(`${t.id} ${t.title} — ${sub.changedPaths.length}개 파일 변경`, `${t.id} ${t.title} — ${sub.changedPaths.length} files changed`),
-      detail: { headSha: sub.headSha, baseSha: sub.baseSha, changedPaths: sub.changedPaths, mode: project.integrationMode, summary: sub.summary },
+      summary: tr(
+        `${t.id} ${t.title} — ${sub.changedPaths.length}개 파일 변경`,
+        `${t.id} ${t.title} — ${sub.changedPaths.length} files changed`,
+      ),
+      detail: {
+        headSha: sub.headSha,
+        baseSha: sub.baseSha,
+        changedPaths: sub.changedPaths,
+        mode: project.integrationMode,
+        summary: sub.summary,
+      },
       requestedBy: 'orchestrator',
     });
     this.changed('approval', t.id);
   }
 
   /** 대표의 승인·거부. mode를 주면 이번 반영에만 그 방식을 쓴다. */
-  decideIntegration(approvalId: string, decision: 'approved' | 'rejected', opts: { mode?: Project['integrationMode']; reason?: string } = {}): Ticket {
+  decideIntegration(
+    approvalId: string,
+    decision: 'approved' | 'rejected',
+    opts: { mode?: Project['integrationMode']; reason?: string } = {},
+  ): Ticket {
     const a = this.records.approval(approvalId);
-    if (!a || a.kind !== 'integrate' || a.state !== 'pending' || !a.ticketId) throw new DomainError(tr('처리할 수 없는 승인입니다.', 'This approval cannot be processed.'));
+    if (!a || a.kind !== 'integrate' || a.state !== 'pending' || !a.ticketId)
+      throw new DomainError(tr('처리할 수 없는 승인입니다.', 'This approval cannot be processed.'));
     const t = this.company.requireTicket(a.ticketId);
     const sub = this.records.latestSubmission(t);
     const tx = <T>(fn: () => T): T => this.company.store.transact(fn);
     if (t.type === 'review' && decision === 'approved') {
-      if (sha256(this.reviewSubject(t)) !== a.subjectHash) throw new DomainError(tr('검토 결과가 바뀌었습니다. 새 승인 요청을 확인하세요.', 'Review results changed. Check the new approval request.'));
+      if (sha256(this.reviewSubject(t)) !== a.subjectHash)
+        throw new DomainError(
+          tr('검토 결과가 바뀌었습니다. 새 승인 요청을 확인하세요.', 'Review results changed. Check the new approval request.'),
+        );
       return tx(() => {
         this.records.setApprovalState(approvalId, 'approved', 'ceo', { mode: 'review' });
         return this.apply(t.id, { type: 'ceo_approve' }, CEO);
@@ -840,8 +1061,15 @@ export class Orchestrator {
       });
     }
     if (!sub || sha256(this.integrationSubject(t, sub)) !== a.subjectHash) {
-      this.records.setApprovalState(approvalId, 'expired', 'orchestrator', { reason: tr('승인 대상이 바뀌었습니다.', 'Approval subject changed.') });
-      throw new DomainError(tr('승인 요청 이후 제출물이 바뀌어 승인이 무효가 되었습니다. 새 승인 요청을 확인하세요.', 'Submission changed after the approval request, invalidating approval. Check the new request.'));
+      this.records.setApprovalState(approvalId, 'expired', 'orchestrator', {
+        reason: tr('승인 대상이 바뀌었습니다.', 'Approval subject changed.'),
+      });
+      throw new DomainError(
+        tr(
+          '승인 요청 이후 제출물이 바뀌어 승인이 무효가 되었습니다. 새 승인 요청을 확인하세요.',
+          'Submission changed after the approval request, invalidating approval. Check the new request.',
+        ),
+      );
     }
     const mode = opts.mode ?? (a.detail as { mode: Project['integrationMode'] }).mode;
     return tx(() => {
@@ -853,7 +1081,11 @@ export class Orchestrator {
   private async integrate(ticketId: string): Promise<void> {
     const t = this.company.requireTicket(ticketId);
     if (t.status !== 'integrating') return;
-    const approvalFor = () => this.records.approvals('approved').filter((a) => a.ticketId === ticketId && a.kind === 'integrate').at(-1);
+    const approvalFor = () =>
+      this.records
+        .approvals('approved')
+        .filter((a) => a.ticketId === ticketId && a.kind === 'integrate')
+        .at(-1);
     const finishWithout = (commitSha: string) =>
       this.company.store.transact(() => {
         const a = approvalFor();
@@ -866,7 +1098,10 @@ export class Orchestrator {
     const approval = approvalFor();
     if (sub && !sub.headSha && approval && t.type === 'research') return finishWithout('no-changes'); // 조사 결과는 반영할 파일이 없다
     if (!sub?.headSha || !approval) {
-      this.apply(ticketId, { type: 'integration_failed', reason: tr('반영할 제출물 또는 승인 기록이 없습니다.', 'No submission or approval record for integration.') });
+      this.apply(ticketId, {
+        type: 'integration_failed',
+        reason: tr('반영할 제출물 또는 승인 기록이 없습니다.', 'No submission or approval record for integration.'),
+      });
       return;
     }
     const mode = (approval.detail as { mode?: Project['integrationMode'] }).mode ?? project.integrationMode;
@@ -900,7 +1135,13 @@ export class Orchestrator {
                 if (!r.passed) return { ok: false, reason: `${vc.label}: ${r.summary.slice(-300)}` };
               }
               if ((await originFingerprint(project.originPath)) !== fp || (await this.unexpectedOriginRefs(project, originRefs)).length) {
-                return { ok: false, reason: tr('병합 재검증 명령이 원본 저장소를 변경했습니다.', 'Merge re-verification command changed the original repository.') };
+                return {
+                  ok: false,
+                  reason: tr(
+                    '병합 재검증 명령이 원본 저장소를 변경했습니다.',
+                    'Merge re-verification command changed the original repository.',
+                  ),
+                };
               }
               return { ok: true };
             })
@@ -929,7 +1170,9 @@ export class Orchestrator {
       const files = await readdir(run.approvalDir).catch(() => [] as string[]);
       for (const f of files.filter((x) => x.endsWith('.request.json'))) {
         const reqId = f.replace('.request.json', '');
-        const exists = this.records.approvals().some((a) => a.kind === 'tool_permission' && (a.detail as { requestId?: string }).requestId === reqId);
+        const exists = this.records
+          .approvals()
+          .some((a) => a.kind === 'tool_permission' && (a.detail as { requestId?: string }).requestId === reqId);
         if (exists || files.includes(`${reqId}.decision.json`)) continue;
         const req = JSON.parse(await readFile(path.join(run.approvalDir, f), 'utf8')) as { kind: string; detail: unknown };
         this.records.createApproval({
@@ -947,7 +1190,8 @@ export class Orchestrator {
 
   async decideToolPermission(approvalId: string, allow: boolean, message?: string): Promise<void> {
     const a = this.records.approval(approvalId);
-    if (!a || a.kind !== 'tool_permission' || a.state !== 'pending') throw new DomainError(tr('처리할 수 없는 권한 요청입니다.', 'This permission request cannot be processed.'));
+    if (!a || a.kind !== 'tool_permission' || a.state !== 'pending')
+      throw new DomainError(tr('처리할 수 없는 권한 요청입니다.', 'This permission request cannot be processed.'));
     const d = a.detail as { requestId: string; approvalDir: string };
     await writeDecision(d.approvalDir, d.requestId, { decision: allow ? 'allow' : 'deny', ...(message ? { message } : {}) });
     this.records.setApprovalState(approvalId, allow ? 'approved' : 'rejected', 'ceo');
@@ -965,7 +1209,9 @@ export class Orchestrator {
   // ======================= 검토형 업무: 블라인드 교차 검토 =======================
 
   private reviewSubject(t: Ticket): string {
-    return `${t.id}|review|${t.round}|${this.roundClaims(t).map((c) => `${c.id}:${c.verdict}:${c.response}:${c.status}`).join(',')}`;
+    return `${t.id}|review|${t.round}|${this.roundClaims(t)
+      .map((c) => `${c.id}:${c.verdict}:${c.response}:${c.status}`)
+      .join(',')}`;
   }
 
   /** 이번 회차의 주장만. 대표가 반려하면 새 회차에서 처음부터 다시 분석한다. */
@@ -987,16 +1233,33 @@ export class Orchestrator {
   }
 
   /** 한 단계의 한 직원 실행을 관리한다. 끝났으면 true. 두 번 실패하면 대표 결정으로 보류. */
-  private async phaseStep(t: Ticket, phase: DeliberationPhase, e: Employee, needed: boolean, launch: () => Promise<void>): Promise<boolean> {
+  private async phaseStep(
+    t: Ticket,
+    phase: DeliberationPhase,
+    e: Employee,
+    needed: boolean,
+    launch: () => Promise<void>,
+  ): Promise<boolean> {
     if (!needed) return true;
     const runs = this.phaseRuns(t, phase, e.id);
     if (runs.some((r) => r.status === 'running' && this.liveRuns.has(r.id))) return false;
     if (runs.filter((r) => r.status === 'failed' || r.status === 'orphaned').length >= 2) {
-      this.apply(t.id, { type: 'hold', reason: 'needs_decision', note: tr(`${e.name}의 ${phase} 단계 실행이 두 번 실패했습니다: ${runs.at(-1)?.reportError ?? ''}`, `${e.name} failed the ${phase} phase twice: ${runs.at(-1)?.reportError ?? ''}`).slice(0, 1500) });
+      this.apply(t.id, {
+        type: 'hold',
+        reason: 'needs_decision',
+        note: tr(
+          `${e.name}의 ${phase} 단계 실행이 두 번 실패했습니다: ${runs.at(-1)?.reportError ?? ''}`,
+          `${e.name} failed the ${phase} phase twice: ${runs.at(-1)?.reportError ?? ''}`,
+        ).slice(0, 1500),
+      });
       return false;
     }
     if (!e.active) {
-      this.apply(t.id, { type: 'hold', reason: 'needs_decision', note: tr(`검토 참여자 ${e.name}이(가) 비활성 상태입니다.`, `Review participant ${e.name} is inactive.`) });
+      this.apply(t.id, {
+        type: 'hold',
+        reason: 'needs_decision',
+        note: tr(`검토 참여자 ${e.name}이(가) 비활성 상태입니다.`, `Review participant ${e.name} is inactive.`),
+      });
       return false;
     }
     if (this.liveCountFor(e.cli) >= (this.opts.concurrency[e.cli] ?? 1)) return false;
@@ -1007,7 +1270,11 @@ export class Orchestrator {
   private async deliberate(t: Ticket): Promise<void> {
     const people = this.participants(t);
     if (people.length < 2) {
-      this.apply(t.id, { type: 'hold', reason: 'needs_decision', note: tr('교차 검토에는 활성 직원이 2명 이상 필요합니다.', 'Cross-review requires at least two active employees.') });
+      this.apply(t.id, {
+        type: 'hold',
+        reason: 'needs_decision',
+        note: tr('교차 검토에는 활성 직원이 2명 이상 필요합니다.', 'Cross-review requires at least two active employees.'),
+      });
       return;
     }
     const project = this.company.requireProject(t.projectId);
@@ -1019,7 +1286,18 @@ export class Orchestrator {
         return ensureDetachedWorktree(paths, 'review', `${t.id}-delib`, base);
       });
     const launchPhase = async (e: Employee, phase: DeliberationPhase, prompt: string, nonce: string, claimIds: string[] = []) =>
-      this.launch({ ticket: t, employee: e, kind: 'analysis', cwd: await cwd(), prompt, nonce, accessLevel: 'read-only', baseSha: null, phase, claimIds });
+      this.launch({
+        ticket: t,
+        employee: e,
+        kind: 'analysis',
+        cwd: await cwd(),
+        prompt,
+        nonce,
+        accessLevel: 'read-only',
+        baseSha: null,
+        phase,
+        claimIds,
+      });
     const nonce = () => randomBytes(6).toString('hex');
 
     // 1) 블라인드 분석: 모든 참여자가 서로의 결과를 보지 않고 주장을 낸다.
@@ -1027,7 +1305,9 @@ export class Orchestrator {
     for (const e of people) {
       const done = this.phaseRuns(t, 'blind', e.id).some((r) => r.status === 'succeeded');
       const n = nonce();
-      const ok = await this.phaseStep(t, 'blind', e, !done, () => launchPhase(e, 'blind', blindPrompt(e, project, t, n, this.opts.language, this.lastFeedback(t)), n));
+      const ok = await this.phaseStep(t, 'blind', e, !done, () =>
+        launchPhase(e, 'blind', blindPrompt(e, project, t, n, this.opts.language, this.lastFeedback(t)), n),
+      );
       allDone &&= ok;
     }
     if (!allDone || this.company.requireTicket(t.id).hold) return;
@@ -1039,7 +1319,9 @@ export class Orchestrator {
       if (c.reviewerId) continue;
       const author = people.find((p) => p.id === c.authorId);
       const candidates = people.filter((p) => p.id !== c.authorId);
-      const pick = [...candidates].sort((a, b) => (a.cli !== author?.cli ? 0 : 1) - (b.cli !== author?.cli ? 0 : 1) || (load.get(a.id) ?? 0) - (load.get(b.id) ?? 0))[0]!;
+      const pick = [...candidates].sort(
+        (a, b) => (a.cli !== author?.cli ? 0 : 1) - (b.cli !== author?.cli ? 0 : 1) || (load.get(a.id) ?? 0) - (load.get(b.id) ?? 0),
+      )[0]!;
       load.set(pick.id, (load.get(pick.id) ?? 0) + 1);
       this.records.saveClaim({ ...c, reviewerId: pick.id, status: 'under_review' });
     }
@@ -1048,7 +1330,15 @@ export class Orchestrator {
     for (const e of people) {
       const mine = claims.filter((c) => c.reviewerId === e.id && c.verdict === null);
       const n = nonce();
-      const ok = await this.phaseStep(t, 'cross', e, mine.length > 0, () => launchPhase(e, 'cross', crossPrompt(e, project, t, n, mine, this.opts.language), n, mine.map((c) => c.id)));
+      const ok = await this.phaseStep(t, 'cross', e, mine.length > 0, () =>
+        launchPhase(
+          e,
+          'cross',
+          crossPrompt(e, project, t, n, mine, this.opts.language),
+          n,
+          mine.map((c) => c.id),
+        ),
+      );
       allDone &&= ok;
     }
     if (!allDone || this.company.requireTicket(t.id).hold) return;
@@ -1059,7 +1349,15 @@ export class Orchestrator {
     for (const e of people) {
       const mine = claims.filter((c) => c.authorId === e.id && c.verdict !== 'agree' && c.response === null);
       const n = nonce();
-      const ok = await this.phaseStep(t, 'rebuttal', e, mine.length > 0, () => launchPhase(e, 'rebuttal', rebuttalPrompt(e, project, t, n, mine, this.opts.language), n, mine.map((c) => c.id)));
+      const ok = await this.phaseStep(t, 'rebuttal', e, mine.length > 0, () =>
+        launchPhase(
+          e,
+          'rebuttal',
+          rebuttalPrompt(e, project, t, n, mine, this.opts.language),
+          n,
+          mine.map((c) => c.id),
+        ),
+      );
       allDone &&= ok;
     }
     if (!allDone || this.company.requireTicket(t.id).hold) return;
@@ -1080,7 +1378,19 @@ export class Orchestrator {
       const r = parseClaims(finalText, run.nonce);
       if (r.ok) {
         for (const c of r.claims) {
-          const claim: Claim = { id: newId('C'), ticketId: t.id, round: t.round, authorId: run.employeeId, ...c, reviewerId: null, verdict: null, verdictReason: null, response: null, responseText: null, status: 'proposed' };
+          const claim: Claim = {
+            id: newId('C'),
+            ticketId: t.id,
+            round: t.round,
+            authorId: run.employeeId,
+            ...c,
+            reviewerId: null,
+            verdict: null,
+            verdictReason: null,
+            response: null,
+            responseText: null,
+            status: 'proposed',
+          };
           this.records.saveClaim(claim);
         }
         run.summary = tr(`주장 ${r.claims.length}개`, `${r.claims.length} claims`);
@@ -1090,7 +1400,8 @@ export class Orchestrator {
       if (r.ok) {
         for (const v of r.verdicts) {
           const c = this.records.claimsFor(t.id).find((x) => x.id === v.claimId);
-          if (c && c.reviewerId === run.employeeId) this.records.saveClaim({ ...c, verdict: v.verdict, verdictReason: v.reason, status: 'reviewed' });
+          if (c && c.reviewerId === run.employeeId)
+            this.records.saveClaim({ ...c, verdict: v.verdict, verdictReason: v.reason, status: 'reviewed' });
         }
         run.summary = tr(`판정 ${r.verdicts.length}개`, `${r.verdicts.length} verdicts`);
       } else error = r.detail;
@@ -1099,7 +1410,8 @@ export class Orchestrator {
       if (r.ok) {
         for (const v of r.responses) {
           const c = this.records.claimsFor(t.id).find((x) => x.id === v.claimId);
-          if (c && c.authorId === run.employeeId) this.records.saveClaim({ ...c, response: v.response, responseText: v.text, status: 'responded' });
+          if (c && c.authorId === run.employeeId)
+            this.records.saveClaim({ ...c, response: v.response, responseText: v.text, status: 'responded' });
         }
         run.summary = tr(`재답변 ${r.responses.length}개`, `${r.responses.length} responses`);
       } else error = r.detail;
@@ -1109,7 +1421,11 @@ export class Orchestrator {
     run.status = error ? 'failed' : 'succeeded';
     run.reportError = error ? `${error}${failDetail && failDetail !== error ? `\n${failDetail.slice(-500)}` : ''}` : null;
     this.records.saveRun(run);
-    this.company.store.appendEvent(run.employeeId, `deliberation.${run.phase}.${run.status}`, t.id, { runId: run.id, summary: run.summary, error });
+    this.company.store.appendEvent(run.employeeId, `deliberation.${run.phase}.${run.status}`, t.id, {
+      runId: run.id,
+      summary: run.summary,
+      error,
+    });
     this.changed('ticket', t.id);
   }
 
@@ -1123,7 +1439,13 @@ export class Orchestrator {
   async submitRequest(projectId: string, text: string): Promise<CeoRequest> {
     const project = this.company.requireProject(projectId);
     const chief = this.chiefOfStaff();
-    if (!chief) throw new DomainError(tr('비서실장 역할의 활성 직원이 없습니다. 직원에게 비서실장 역할을 주거나 업무를 직접 만드세요.', 'No active chief of staff. Assign that role to an employee or create a ticket directly.'));
+    if (!chief)
+      throw new DomainError(
+        tr(
+          '비서실장 역할의 활성 직원이 없습니다. 직원에게 비서실장 역할을 주거나 업무를 직접 만드세요.',
+          'No active chief of staff. Assign that role to an employee or create a ticket directly.',
+        ),
+      );
     if (!text.trim()) throw new DomainError(tr('요청 내용이 비어 있습니다.', 'Request is empty.'));
     const req: CeoRequest = {
       id: newId('Q'),
@@ -1148,8 +1470,25 @@ export class Orchestrator {
       return ensureDetachedWorktree(paths, 'review', `_request-${req.id}`, base);
     });
     const nonce = randomBytes(6).toString('hex');
-    const prompt = buildDraftPrompt({ employee: chief, project, requestId: req.id, request: req.text, nonce, decisions: this.records.decisions(project.id, 'current'), language: this.opts.language });
-    await this.launch({ ticket: { id: req.id, round: 1, budget: DEFAULT_BUDGET }, employee: chief, kind: 'analysis', cwd, prompt, nonce, accessLevel: 'read-only', baseSha: null });
+    const prompt = buildDraftPrompt({
+      employee: chief,
+      project,
+      requestId: req.id,
+      request: req.text,
+      nonce,
+      decisions: this.records.decisions(project.id, 'current'),
+      language: this.opts.language,
+    });
+    await this.launch({
+      ticket: { id: req.id, round: 1, budget: DEFAULT_BUDGET },
+      employee: chief,
+      kind: 'analysis',
+      cwd,
+      prompt,
+      nonce,
+      accessLevel: 'read-only',
+      baseSha: null,
+    });
     const run = this.records.runsForTicket(req.id).at(-1);
     const saved = this.records.request(req.id)!;
     if (run && saved.status === 'drafting') this.records.saveRequest({ ...saved, runId: run.id });
@@ -1157,9 +1496,16 @@ export class Orchestrator {
     return this.records.request(req.id)!;
   }
 
-  private async finishDrafts(run: RunRecord, finalText: string | null, outcome: { timedOut: boolean } | null, stderr: string): Promise<void> {
+  private async finishDrafts(
+    run: RunRecord,
+    finalText: string | null,
+    outcome: { timedOut: boolean } | null,
+    stderr: string,
+  ): Promise<void> {
     const req = this.records.request(run.ticketId);
-    const parsed = outcome?.timedOut ? ({ ok: false, reason: 'timeout', detail: tr('시간 초과', 'Timed out') } as const) : parseDrafts(finalText, run.nonce);
+    const parsed = outcome?.timedOut
+      ? ({ ok: false, reason: 'timeout', detail: tr('시간 초과', 'Timed out') } as const)
+      : parseDrafts(finalText, run.nonce);
     run.endedAt = new Date().toISOString();
     run.status = parsed.ok ? 'succeeded' : 'failed';
     run.reportError = parsed.ok ? null : `${parsed.detail}${stderr ? `\n${stderr.slice(-500)}` : ''}`;
@@ -1175,7 +1521,9 @@ export class Orchestrator {
         questions: parsed.ok ? parsed.report.questions : [],
         error: parsed.ok ? null : run.reportError,
       });
-      this.company.store.appendEvent(run.employeeId, parsed.ok ? 'request.drafted' : 'request.failed', req.id, { count: parsed.ok ? parsed.report.tickets.length : 0 });
+      this.company.store.appendEvent(run.employeeId, parsed.ok ? 'request.drafted' : 'request.failed', req.id, {
+        count: parsed.ok ? parsed.report.tickets.length : 0,
+      });
     }
     this.changed('request', run.ticketId);
   }
@@ -1228,7 +1576,8 @@ export class Orchestrator {
    */
   attest(ticketId: string, requirementId: string, note: string): Evidence {
     const t = this.company.requireTicket(ticketId);
-    if (!t.requirements.some((r) => r.id === requirementId)) throw new DomainError(tr(`요구사항 ${requirementId}이(가) 없습니다.`, `Requirement ${requirementId} not found.`));
+    if (!t.requirements.some((r) => r.id === requirementId))
+      throw new DomainError(tr(`요구사항 ${requirementId}이(가) 없습니다.`, `Requirement ${requirementId} not found.`));
     const sub = this.records.latestSubmission(t);
     if (!sub) throw new DomainError(tr('확인할 제출물이 아직 없습니다.', 'No submission to confirm yet.'));
     const e: Evidence = {
@@ -1275,8 +1624,10 @@ export class Orchestrator {
 async function findShim(runDir: string): Promise<{ pid: number; startedAtMs: number | null } | null> {
   const read = async (f: string) => JSON.parse(await readFile(path.join(runDir, f), 'utf8')) as Record<string, unknown>;
   const meta = await read('run.json').catch(() => null);
-  if (typeof meta?.shimPid === 'number') return { pid: meta.shimPid, startedAtMs: typeof meta.startedAt === 'string' ? Date.parse(meta.startedAt) : null };
+  if (typeof meta?.shimPid === 'number')
+    return { pid: meta.shimPid, startedAtMs: typeof meta.startedAt === 'string' ? Date.parse(meta.startedAt) : null };
   const pid = await read('pid.json').catch(() => null);
-  if (typeof pid?.shimPid === 'number') return { pid: pid.shimPid, startedAtMs: typeof pid.startedAtMs === 'number' ? pid.startedAtMs : null };
+  if (typeof pid?.shimPid === 'number')
+    return { pid: pid.shimPid, startedAtMs: typeof pid.startedAtMs === 'number' ? pid.startedAtMs : null };
   return null;
 }

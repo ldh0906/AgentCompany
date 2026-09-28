@@ -154,7 +154,12 @@ test('선행 업무 미완료면 대기 보류, 오케스트레이터가 해제 
 
 test('실행 중단 시 배정 상태로 돌아가고 예산은 소모된 채 유지', () => {
   const t = run(ticket(), TO_REVIEW.slice(0, 4));
-  const r = applyTicketCommand(t, { type: 'run_aborted', reason: '사용량 한도', hold: { reason: 'usage_limit', note: '5시간 후 재개' } }, ORCH, NOW);
+  const r = applyTicketCommand(
+    t,
+    { type: 'run_aborted', reason: '사용량 한도', hold: { reason: 'usage_limit', note: '5시간 후 재개' } },
+    ORCH,
+    NOW,
+  );
   assert.ok(r.ok);
   if (!r.ok) return;
   assert.equal(r.ticket.status, 'assigned');
@@ -260,7 +265,8 @@ test('속성: 대표 승인 없이는 반영·완료에 도달하지 않고, 검
         reviewApproved = false;
         ceoApproved = false;
       }
-      if (r.ticket.status === 'integrating' || r.ticket.status === 'done') assert.ok(ceoApproved, `seed ${seed}: 대표 승인 없이 ${r.ticket.status}`);
+      if (r.ticket.status === 'integrating' || r.ticket.status === 'done')
+        assert.ok(ceoApproved, `seed ${seed}: 대표 승인 없이 ${r.ticket.status}`);
       if (r.ticket.assigneeId && r.ticket.reviewerId) assert.notEqual(r.ticket.assigneeId, r.ticket.reviewerId);
       if (r.ticket.hold) assert.equal(r.ticket.hold.resumeTo, r.ticket.status);
       t = r.ticket;

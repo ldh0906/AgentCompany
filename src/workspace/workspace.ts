@@ -1,6 +1,6 @@
-import { tr } from '../core/i18n.ts';
 // 작업공간: 원본 저장소 → (bare 미러) → 티켓 worktree / 검증 worktree → 승인 후 원본 반영.
 // 직원은 원본 저장소를 절대 직접 만지지 않는다.
+import { tr } from '../core/i18n.ts';
 
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -9,11 +9,11 @@ import path from 'node:path';
 import { AGENT_IDENTITY, git, gitOut, splitZ } from './git.ts';
 
 export interface ProjectPaths {
-  root: string;       // <dataDir>/projects/<projectId>
-  mirror: string;     // bare 미러
-  worktrees: string;  // 티켓 worktree 상위
-  verify: string;     // 검증 worktree 상위
-  review: string;     // 검수용 읽기 사본 상위
+  root: string; // <dataDir>/projects/<projectId>
+  mirror: string; // bare 미러
+  worktrees: string; // 티켓 worktree 상위
+  verify: string; // 검증 worktree 상위
+  review: string; // 검수용 읽기 사본 상위
 }
 
 export function projectPaths(dataDir: string, projectId: string): ProjectPaths {
@@ -81,7 +81,7 @@ export async function changedPaths(repo: string, baseSha: string, head: string):
   const out = (await git(['diff', '--name-status', '-z', '--find-renames', `${baseSha}..${head}`], repo)).stdout;
   const parts = splitZ(out);
   const paths = new Set<string>();
-  for (let i = 0; i < parts.length; ) {
+  for (let i = 0; i < parts.length;) {
     const status = parts[i++]!;
     if (status.startsWith('R') || status.startsWith('C')) {
       paths.add(parts[i++]!);
@@ -118,7 +118,12 @@ function matches(p: string, globs: string[], caseInsensitive: boolean): boolean 
 }
 
 /** 변경 경로가 쓰기 범위 안에 있고 보호 경로를 건드리지 않았는지. */
-export function checkScope(paths: string[], writeScope: string[], protectedPaths: string[], caseInsensitive = CASE_INSENSITIVE_FS): ScopeCheck {
+export function checkScope(
+  paths: string[],
+  writeScope: string[],
+  protectedPaths: string[],
+  caseInsensitive = CASE_INSENSITIVE_FS,
+): ScopeCheck {
   const outOfScope = paths.filter((p) => !matches(p, writeScope, caseInsensitive));
   const protectedTouched = paths.filter((p) => matches(p, protectedPaths, caseInsensitive));
   return { ok: outOfScope.length === 0 && protectedTouched.length === 0, outOfScope, protectedTouched };
@@ -168,10 +173,16 @@ export function refChanges(before: RefSnapshot, after: RefSnapshot, allowed: str
 export async function originFingerprint(originPath: string): Promise<string> {
   const h = createHash('sha256');
   const sym = await git(['symbolic-ref', '-q', 'HEAD'], originPath, { allowFail: true });
-  h.update(sym.code === 0 ? `ref:${sym.stdout.trim()}` : `detached:${(await git(['rev-parse', 'HEAD'], originPath, { allowFail: true })).stdout.trim()}`);
+  h.update(
+    sym.code === 0
+      ? `ref:${sym.stdout.trim()}`
+      : `detached:${(await git(['rev-parse', 'HEAD'], originPath, { allowFail: true })).stdout.trim()}`,
+  );
   const status = (await git(['status', '--porcelain=v1', '-z', '--untracked-files=all'], originPath)).stdout;
   h.update('\0status\0').update(status);
-  h.update('\0diff\0').update((await git(['diff', 'HEAD', '--binary', '--no-color', '--no-ext-diff'], originPath, { allowFail: true })).stdout);
+  h.update('\0diff\0').update(
+    (await git(['diff', 'HEAD', '--binary', '--no-color', '--no-ext-diff'], originPath, { allowFail: true })).stdout,
+  );
   const entries = splitZ(status);
   let budget = 256 * 1024 * 1024;
   for (const e of entries) {
@@ -194,7 +205,12 @@ export async function originFingerprint(originPath: string): Promise<string> {
 }
 
 /** 제출 SHA의 깨끗한 분리 worktree. 검증·검수용. 있으면 그 SHA로 되돌려 재사용. */
-export async function ensureDetachedWorktree(paths: ProjectPaths, kind: 'verify' | 'review', ticketId: string, sha: string): Promise<string> {
+export async function ensureDetachedWorktree(
+  paths: ProjectPaths,
+  kind: 'verify' | 'review',
+  ticketId: string,
+  sha: string,
+): Promise<string> {
   const parent = kind === 'verify' ? paths.verify : paths.review;
   const wtPath = path.join(parent, ticketId);
   if (!existsSync(wtPath)) {
@@ -226,14 +242,31 @@ async function fetchExactSha(originPath: string, paths: ProjectPaths, sha: strin
   await git(['config', 'uploadpack.allowAnySHA1InWant', 'true'], paths.mirror);
   await git(['fetch', '--no-tags', '--no-write-fetch-head', paths.mirror, sha], originPath);
   const ok = await git(['cat-file', '-e', `${sha}^{commit}`], originPath, { allowFail: true });
-  if (ok.code !== 0) throw new Error(tr(`승인된 커밋 ${sha.slice(0, 8)}을(를) 원본으로 가져오지 못했습니다.`, `Could not fetch approved commit ${sha.slice(0, 8)} into the original repository.`));
+  if (ok.code !== 0)
+    throw new Error(
+      tr(
+        `승인된 커밋 ${sha.slice(0, 8)}을(를) 원본으로 가져오지 못했습니다.`,
+        `Could not fetch approved commit ${sha.slice(0, 8)} into the original repository.`,
+      ),
+    );
 }
 
 /** manual: 원본 저장소에 ac/<ticket> 브랜치만 만든다. 대표가 직접 병합한다. */
-export async function integrateAsBranch(originPath: string, paths: ProjectPaths, ticketId: string, expectedHead: string): Promise<IntegrationResult> {
+export async function integrateAsBranch(
+  originPath: string,
+  paths: ProjectPaths,
+  ticketId: string,
+  expectedHead: string,
+): Promise<IntegrationResult> {
   const branch = ticketBranch(ticketId);
   const head = await headSha(paths.mirror, `refs/heads/${branch}`);
-  if (head !== expectedHead) throw new Error(tr(`승인 이후 브랜치가 바뀌었습니다(${expectedHead.slice(0, 8)} → ${head.slice(0, 8)}). 다시 승인이 필요합니다.`, `Branch changed after approval (${expectedHead.slice(0, 8)} → ${head.slice(0, 8)}). New approval is required.`));
+  if (head !== expectedHead)
+    throw new Error(
+      tr(
+        `승인 이후 브랜치가 바뀌었습니다(${expectedHead.slice(0, 8)} → ${head.slice(0, 8)}). 다시 승인이 필요합니다.`,
+        `Branch changed after approval (${expectedHead.slice(0, 8)} → ${head.slice(0, 8)}). New approval is required.`,
+      ),
+    );
   // 브랜치 이름이 아니라 승인된 SHA 자체를 가져와 원본 ref를 그 SHA로 설정한다.
   await fetchExactSha(originPath, paths, expectedHead);
   await git(['update-ref', '-m', `agent-company: ${ticketId} approved`, `refs/heads/${branch}`, expectedHead], originPath);
@@ -261,7 +294,10 @@ export async function integrateWithMerge(
   };
 
   const head = await headSha(paths.mirror, `refs/heads/${branch}`);
-  if (head !== expectedHead) throw new Error(tr('승인 이후 브랜치가 바뀌었습니다. 다시 승인이 필요합니다.', 'Branch changed after approval. New approval is required.'));
+  if (head !== expectedHead)
+    throw new Error(
+      tr('승인 이후 브랜치가 바뀌었습니다. 다시 승인이 필요합니다.', 'Branch changed after approval. New approval is required.'),
+    );
 
   const originBase = await syncMirror(originPath, paths, baseBranch);
   const tmp = path.join(paths.root, 'merge-tmp', ticketId);
@@ -271,10 +307,14 @@ export async function integrateWithMerge(
   let mergeSha: string;
   try {
     // 브랜치 이름이 아니라 승인된 SHA를 병합한다.
-    const merged = await git([...AGENT_IDENTITY, 'merge', '--no-ff', '--no-edit', '-m', `${ticketId}: ${title}`, expectedHead], tmp, { allowFail: true });
+    const merged = await git([...AGENT_IDENTITY, 'merge', '--no-ff', '--no-edit', '-m', `${ticketId}: ${title}`, expectedHead], tmp, {
+      allowFail: true,
+    });
     if (merged.code !== 0) {
       await git(['merge', '--abort'], tmp, { allowFail: true });
-      return await downgrade(tr('기준 브랜치와 충돌해 자동 병합할 수 없습니다.', 'Cannot auto-merge due to conflicts with the base branch.'));
+      return await downgrade(
+        tr('기준 브랜치와 충돌해 자동 병합할 수 없습니다.', 'Cannot auto-merge due to conflicts with the base branch.'),
+      );
     }
     mergeSha = await headSha(tmp);
   } finally {
@@ -290,13 +330,27 @@ export async function integrateWithMerge(
   const current = (await git(['symbolic-ref', '--short', '-q', 'HEAD'], originPath, { allowFail: true })).stdout.trim();
   if (current === baseBranch) {
     const dirty = (await git(['status', '--porcelain', '--untracked-files=no'], originPath)).stdout.trim();
-    if (dirty) return downgrade(tr('원본 저장소에 커밋하지 않은 변경이 있어 자동 병합하지 않았습니다.', 'Auto-merge skipped: the original repository has uncommitted changes.'));
+    if (dirty)
+      return downgrade(
+        tr(
+          '원본 저장소에 커밋하지 않은 변경이 있어 자동 병합하지 않았습니다.',
+          'Auto-merge skipped: the original repository has uncommitted changes.',
+        ),
+      );
     const ff = await git(['merge', '--ff-only', mergeSha], originPath, { allowFail: true });
-    if (ff.code !== 0) return downgrade(tr('fast-forward가 불가능해 자동 병합하지 않았습니다.', 'Auto-merge skipped: fast-forward is not possible.'));
+    if (ff.code !== 0)
+      return downgrade(tr('fast-forward가 불가능해 자동 병합하지 않았습니다.', 'Auto-merge skipped: fast-forward is not possible.'));
   } else {
     // 체크아웃되지 않은 기준 브랜치: 확인한 원래 값(originBase)일 때만 바꾸는 비교-교체.
-    const cas = await git(['update-ref', '-m', `agent-company: ${ticketId} merged`, `refs/heads/${baseBranch}`, mergeSha, originBase], originPath, { allowFail: true });
-    if (cas.code !== 0) return downgrade(tr('기준 브랜치가 그사이 바뀌어 자동 병합하지 않았습니다.', 'Auto-merge skipped: the base branch changed in the meantime.'));
+    const cas = await git(
+      ['update-ref', '-m', `agent-company: ${ticketId} merged`, `refs/heads/${baseBranch}`, mergeSha, originBase],
+      originPath,
+      { allowFail: true },
+    );
+    if (cas.code !== 0)
+      return downgrade(
+        tr('기준 브랜치가 그사이 바뀌어 자동 병합하지 않았습니다.', 'Auto-merge skipped: the base branch changed in the meantime.'),
+      );
   }
   return { kind: 'merged', baseBranch, mergeSha, previousBaseSha: originBase };
 }

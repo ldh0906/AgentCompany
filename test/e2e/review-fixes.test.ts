@@ -45,7 +45,12 @@ test('[P1-2] 한 요구사항의 대표 확인 증거를 다른 요구사항에 
 });
 
 test('[P1-3] 반영 중에는 취소할 수 없음', () => {
-  const r = applyTicketCommand({ id: 'T', status: 'integrating', hold: null } as never, { type: 'cancel', reason: 'x' }, { kind: 'ceo' }, 'now');
+  const r = applyTicketCommand(
+    { id: 'T', status: 'integrating', hold: null } as never,
+    { type: 'cancel', reason: 'x' },
+    { kind: 'ceo' },
+    'now',
+  );
   assert.equal(r.ok, false);
 });
 
@@ -61,7 +66,15 @@ test('[P2-10] 다른 프로젝트의 같은 경로 잠금은 서로 막지 않�
   const env = await setup(t);
   const p2 = env.company.registerProject({ name: 'other', originPath: env.origin });
   const a = newImplTicket(env);
-  const b = env.company.createTicket({ projectId: p2.id, type: 'impl', title: 'b', purpose: '', requirements: [{ text: 'r', evidenceType: 'inspection' }], doneCriteria: 'd', writeScope: ['src/**'] });
+  const b = env.company.createTicket({
+    projectId: p2.id,
+    type: 'impl',
+    title: 'b',
+    purpose: '',
+    requirements: [{ text: 'r', evidenceType: 'inspection' }],
+    doneCriteria: 'd',
+    writeScope: ['src/**'],
+  });
   const rec = new Records(env.store);
   assert.equal(rec.acquireLocks(a, [a, b]).ok, true);
   assert.equal(rec.acquireLocks(b, [a, b]).ok, true);
@@ -81,7 +94,14 @@ test('[P2-12] 감사 로그 끝부분 삭제도 탐지 (DB 밖 체크포인트)'
 
 test('[P2-9] 파일 변경 없는 조사 업무가 검수 단계에서 멈추지 않음', { timeout: 120_000 }, async (t) => {
   const env = await setup(t, { implementer: 'lazy' });
-  const tk = env.company.createTicket({ projectId: env.projectId, type: 'research', title: '조사', purpose: '자료 조사', requirements: [{ text: '보고서', evidenceType: 'inspection' }], doneCriteria: 'd' });
+  const tk = env.company.createTicket({
+    projectId: env.projectId,
+    type: 'research',
+    title: '조사',
+    purpose: '자료 조사',
+    requirements: [{ text: '보고서', evidenceType: 'inspection' }],
+    doneCriteria: 'd',
+  });
   const w = await driveUntil(env, tk.id, (x) => x.hold !== null || x.status === 'awaiting_approval' || x.status === 'changes_requested');
   assert.notEqual(w.status, 'in_review');
   if (w.status === 'awaiting_approval') {
@@ -97,14 +117,44 @@ test('[P1-5] 준비 중에 끊긴 실행(프로세스 기록 없음)은 복구 �
   env.company.applyTicket(tk.id, { type: 'analyze' }, { kind: 'orchestrator' });
   env.company.applyTicket(tk.id, { type: 'accept_to_backlog' }, { kind: 'orchestrator' });
   const emps = env.company.activeEmployees();
-  env.company.applyTicket(tk.id, { type: 'assign', assigneeId: emps[0]!.id, reviewerId: emps[1]!.id, activeEmployeeIds: emps.map((e) => e.id) }, { kind: 'orchestrator' });
+  env.company.applyTicket(
+    tk.id,
+    { type: 'assign', assigneeId: emps[0]!.id, reviewerId: emps[1]!.id, activeEmployeeIds: emps.map((e) => e.id) },
+    { kind: 'orchestrator' },
+  );
   env.company.applyTicket(tk.id, { type: 'start_work', dependenciesDone: true, locksAcquired: true }, { kind: 'orchestrator' });
   const rec = new Records(env.store);
   rec.saveRun({
-    id: 'R-prep', ticketId: tk.id, employeeId: emps[0]!.id, kind: 'work', nonce: 'n', status: 'prepared', pid: null, cliSessionId: null,
-    runDir: path.join(env.dataDir, 'runs', 'R-prep'), exitCode: null, failureClass: null, startedAt: new Date().toISOString(), endedAt: null,
-    round: 1, cli: 'fake', processStartMs: null, approvalDir: null, worktreePath: '', baseSha: null, headSha: null, changedPaths: [],
-    refViolations: [], originChanged: false, refsBefore: null, originBefore: null, postProcessed: false, report: null, reportError: null, finalText: null, summary: '',
+    id: 'R-prep',
+    ticketId: tk.id,
+    employeeId: emps[0]!.id,
+    kind: 'work',
+    nonce: 'n',
+    status: 'prepared',
+    pid: null,
+    cliSessionId: null,
+    runDir: path.join(env.dataDir, 'runs', 'R-prep'),
+    exitCode: null,
+    failureClass: null,
+    startedAt: new Date().toISOString(),
+    endedAt: null,
+    round: 1,
+    cli: 'fake',
+    processStartMs: null,
+    approvalDir: null,
+    worktreePath: '',
+    baseSha: null,
+    headSha: null,
+    changedPaths: [],
+    refViolations: [],
+    originChanged: false,
+    refsBefore: null,
+    originBefore: null,
+    postProcessed: false,
+    report: null,
+    reportError: null,
+    finalText: null,
+    summary: '',
   });
   const report = await env.orch.recover();
   assert.ok(report.orphaned.includes('R-prep'));
@@ -114,7 +164,14 @@ test('[P1-5] 준비 중에 끊긴 실행(프로세스 기록 없음)은 복구 �
 
 test('[P2-8] 검토 업무를 대표가 반려하면 새 회차에서 처음부터 다시 분석하고 반려 사유를 전달', { timeout: 240_000 }, async (t) => {
   const env = await setup(t);
-  const tk = env.company.createTicket({ projectId: env.projectId, type: 'review', title: '검토', purpose: 'p', requirements: [{ text: 'q', evidenceType: 'inspection' }], doneCriteria: 'd' });
+  const tk = env.company.createTicket({
+    projectId: env.projectId,
+    type: 'review',
+    title: '검토',
+    purpose: 'p',
+    requirements: [{ text: 'q', evidenceType: 'inspection' }],
+    doneCriteria: 'd',
+  });
   await driveUntil(env, tk.id, statusIs('awaiting_approval'), 200_000);
   const blind1 = env.orch.records.runsForTicket(tk.id).filter((r) => r.phase === 'blind').length;
   env.orch.decideIntegration(env.orch.records.pendingApprovalFor(tk.id, 'integrate')!.id, 'rejected', { reason: '근거가 약함' });

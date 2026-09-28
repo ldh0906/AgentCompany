@@ -12,12 +12,23 @@ function tempDb(t: { after: (fn: () => void) => void }): { path: string; open: (
   const opened: Store[] = [];
   t.after(() => {
     for (const s of opened) {
-      try { s.close(); } catch { /* 이미 닫힘 */ }
+      try {
+        s.close();
+      } catch {
+        /* 이미 닫힘 */
+      }
     }
     rmSync(dir, { recursive: true, force: true });
   });
   const path = join(dir, 'company.db');
-  return { path, open: () => { const s = new Store(path); opened.push(s); return s; } };
+  return {
+    path,
+    open: () => {
+      const s = new Store(path);
+      opened.push(s);
+      return s;
+    },
+  };
 }
 
 test('이벤트 해시 체인: 정상 검증과 수정·삭제 탐지', (t) => {
@@ -25,7 +36,7 @@ test('이벤트 해시 체인: 정상 검증과 수정·삭제 탐지', (t) => {
   for (let i = 0; i < 5; i++) store.appendEvent('ceo', 'x', `E${i}`, { i, 한글: '값' });
   assert.deepEqual(store.verifyEventChain(), { ok: true, count: 5 });
 
-  store.db.prepare("UPDATE events SET payload = '{\"i\":99}' WHERE seq = 3").run();
+  store.db.prepare('UPDATE events SET payload = \'{"i":99}\' WHERE seq = 3').run();
   const tampered = store.verifyEventChain();
   assert.equal(tampered.ok, false);
   if (!tampered.ok) assert.equal(tampered.brokenAt, 3);
@@ -61,7 +72,9 @@ test('트랜잭션 실패 시 상태와 이벤트 모두 롤백', (t) => {
 test('활성 직원 최대 4명, 비활성화 후 추가 가능', (t) => {
   const store = tempDb(t).open();
   const company = new Company(store);
-  const hired = [1, 2, 3, 4].map((n) => company.hireEmployee({ name: `직원${n}`, roles: ['implementer'], cli: 'codex', model: 'gpt-6-astra' }));
+  const hired = [1, 2, 3, 4].map((n) =>
+    company.hireEmployee({ name: `직원${n}`, roles: ['implementer'], cli: 'codex', model: 'gpt-6-astra' }),
+  );
   assert.throws(() => company.hireEmployee({ name: '다섯째', roles: ['qa'], cli: 'claude', model: null }), /최대 4명/);
   company.setEmployeeActive(hired[0]!.id, false);
   const fifth = company.hireEmployee({ name: '다섯째', roles: ['qa'], cli: 'claude', model: null });
@@ -111,5 +124,15 @@ test('재시작(저장소 다시 열기) 후 티켓·직원·이벤트 유지, �
   assert.equal(reloaded.assigneeId, a.id);
   assert.equal(c2.activeEmployees().length, 2);
   assert.equal(s2.verifyEventChain().ok, true);
-  assert.equal(c2.createTicket({ projectId: p.id, type: 'doc', title: '둘째', purpose: '', requirements: [{ text: 'x', evidenceType: 'human_attest' }], doneCriteria: 'd' }).id, 'T-2');
+  assert.equal(
+    c2.createTicket({
+      projectId: p.id,
+      type: 'doc',
+      title: '둘째',
+      purpose: '',
+      requirements: [{ text: 'x', evidenceType: 'human_attest' }],
+      doneCriteria: 'd',
+    }).id,
+    'T-2',
+  );
 });

@@ -172,7 +172,15 @@ export interface DraftPromptInput {
 
 /** 비서실장: 대표 요청을 티켓 초안으로 나눈다. 티켓을 직접 만들 권한은 없고, 대표가 초안을 확정한다. */
 export function buildDraftPrompt(i: DraftPromptInput): string {
-  const header: TaskHeader = { kind: 'drafts', ticketId: i.requestId, nonce: i.nonce, round: 1, writeScope: [], requirementIds: [], evidenceIds: [] };
+  const header: TaskHeader = {
+    kind: 'drafts',
+    ticketId: i.requestId,
+    nonce: i.nonce,
+    round: 1,
+    writeScope: [],
+    requirementIds: [],
+    evidenceIds: [],
+  };
   const fence = '```';
   return `${TASK_HEADER_PREFIX}${JSON.stringify(header)} -->
 You are "${i.employee.name}", chief of staff at an AI development company run by a human CEO.

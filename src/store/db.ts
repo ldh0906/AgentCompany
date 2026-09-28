@@ -48,7 +48,8 @@ export const GENESIS_HASH = '0'.repeat(64);
 
 type Row = Record<string, unknown>;
 
-export type EntityTable = 'projects' | 'employees' | 'tickets' | 'runs' | 'approvals' | 'evidence' | 'claims' | 'decisions' | 'messages' | 'requests';
+export type EntityTable =
+  'projects' | 'employees' | 'tickets' | 'runs' | 'approvals' | 'evidence' | 'claims' | 'decisions' | 'messages' | 'requests';
 
 export class Store {
   readonly db: DatabaseSync;
@@ -158,9 +159,14 @@ export class Store {
   put(table: EntityTable, id: string, data: unknown, columns: Record<string, string | number | null> = {}): void {
     const names = ['id', 'data', ...Object.keys(columns)];
     const values = [id, JSON.stringify(data), ...Object.values(columns)];
-    const updates = names.slice(1).map((n) => `${n} = excluded.${n}`).join(', ');
+    const updates = names
+      .slice(1)
+      .map((n) => `${n} = excluded.${n}`)
+      .join(', ');
     this.db
-      .prepare(`INSERT INTO ${table}(${names.join(', ')}) VALUES (${names.map(() => '?').join(', ')}) ON CONFLICT(id) DO UPDATE SET ${updates}`)
+      .prepare(
+        `INSERT INTO ${table}(${names.join(', ')}) VALUES (${names.map(() => '?').join(', ')}) ON CONFLICT(id) DO UPDATE SET ${updates}`,
+      )
       .run(...values);
   }
 
@@ -204,7 +210,8 @@ export class Store {
     }
     const cp = this.readCheckpoint();
     if (cp && cp.seq > count) return { ok: false, brokenAt: count + 1, reason: `로그 끝부분 삭제(체크포인트 #${cp.seq}, DB #${count})` };
-    if (cp && !this.checkpointMatchesDb()) return { ok: false, brokenAt: cp.seq, reason: `이벤트 #${cp.seq}가 체크포인트와 다름(삭제 후 다시 쓰였을 수 있음)` };
+    if (cp && !this.checkpointMatchesDb())
+      return { ok: false, brokenAt: cp.seq, reason: `이벤트 #${cp.seq}가 체크포인트와 다름(삭제 후 다시 쓰였을 수 있음)` };
     if (this.checkpointError) return { ok: false, brokenAt: count, reason: `체크포인트를 쓰지 못했습니다: ${this.checkpointError}` };
     return { ok: true, count };
   }

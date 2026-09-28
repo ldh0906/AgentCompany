@@ -17,7 +17,11 @@ export class GitError extends Error {
 
 const BASE_ARGS = ['-c', 'core.quotepath=false', '-c', 'core.longpaths=true', '-c', 'advice.detachedHead=false'];
 
-export function git(args: string[], cwd: string, opts: { allowFail?: boolean; env?: NodeJS.ProcessEnv } = {}): Promise<{ stdout: string; stderr: string; code: number }> {
+export function git(
+  args: string[],
+  cwd: string,
+  opts: { allowFail?: boolean; env?: NodeJS.ProcessEnv } = {},
+): Promise<{ stdout: string; stderr: string; code: number }> {
   const full = [...BASE_ARGS, ...args];
   return new Promise((resolve, reject) => {
     execFile(
@@ -31,7 +35,11 @@ export function git(args: string[], cwd: string, opts: { allowFail?: boolean; en
         env: { ...process.env, ...opts.env, GIT_TERMINAL_PROMPT: '0' },
       },
       (error, stdout, stderr) => {
-        const code = error ? (typeof (error as NodeJS.ErrnoException & { code?: unknown }).code === 'number' ? Number((error as { code?: unknown }).code) : 1) : 0;
+        const code = error
+          ? typeof (error as NodeJS.ErrnoException & { code?: unknown }).code === 'number'
+            ? Number((error as { code?: unknown }).code)
+            : 1
+          : 0;
         if (error && !opts.allowFail) return reject(new GitError(args, stderr || String(error), code));
         resolve({ stdout, stderr, code });
       },

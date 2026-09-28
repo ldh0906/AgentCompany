@@ -36,13 +36,21 @@ async function main(): Promise<void> {
   for await (const c of process.stdin) chunks.push(c as Buffer);
   const prompt = Buffer.concat(chunks).toString('utf8');
 
-  const codex = env.AC_CODEX_BIN ? { launch: { file: env.AC_CODEX_BIN, argsPrefix: JSON.parse(env.AC_CODEX_ARGS ?? '[]') as string[] } } : await locateExecutable('codex');
+  const codex = env.AC_CODEX_BIN
+    ? { launch: { file: env.AC_CODEX_BIN, argsPrefix: JSON.parse(env.AC_CODEX_ARGS ?? '[]') as string[] } }
+    : await locateExecutable('codex');
   if (!codex?.launch) {
     out({ type: 'error', message: 'codex 실행 파일을 찾지 못했습니다.' });
     process.exitCode = 1;
     return;
   }
-  const child = spawn(codex.launch.file, [...codex.launch.argsPrefix, 'app-server'], { cwd: env.AC_CODEX_CWD, env, windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = spawn(codex.launch.file, [...codex.launch.argsPrefix, 'app-server'], {
+    cwd: env.AC_CODEX_CWD,
+    env,
+    windowsHide: true,
+    shell: false,
+    stdio: ['pipe', 'pipe', 'inherit'],
+  });
   const pending = new Map<number, (m: { result?: unknown; error?: unknown }) => void>();
   let nextId = 1;
   let threadId: string | null = null;
@@ -80,7 +88,8 @@ async function main(): Promise<void> {
       out({ type: 'item.completed', item: { type: 'command_execution', command: m.params.item.command } });
     } else if (m.method === 'turn/completed' && m.params?.threadId === threadId) {
       const status = m.params.turn?.status;
-      if (status !== 'completed') out({ type: 'turn.failed', error: { message: `turn ${status}: ${JSON.stringify(m.params.turn?.error ?? '')}` } });
+      if (status !== 'completed')
+        out({ type: 'turn.failed', error: { message: `turn ${status}: ${JSON.stringify(m.params.turn?.error ?? '')}` } });
       else out({ type: 'turn.completed' });
       finished(status === 'completed');
     }
@@ -112,7 +121,10 @@ async function main(): Promise<void> {
     send({ id: m.id, result: { decision: d.decision === 'allow' ? (d.scope === 'ticket' ? 'acceptForSession' : 'accept') : 'decline' } });
   }
 
-  const init = await request('initialize', { clientInfo: { name: 'agent_company', title: 'Agent Company', version: '0.1.0' }, capabilities: null });
+  const init = await request('initialize', {
+    clientInfo: { name: 'agent_company', title: 'Agent Company', version: '0.1.0' },
+    capabilities: null,
+  });
   if (init.error) {
     out({ type: 'error', message: `initialize 실패: ${JSON.stringify(init.error)}` });
     child.kill();

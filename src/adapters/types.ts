@@ -59,10 +59,23 @@ export function obj(v: unknown): Record<string, unknown> | null {
 }
 
 const USAGE_PATTERNS = [/usage limit/i, /rate limit/i, /quota/i, /limit reached/i, /429/, /too many requests/i, /사용량/];
-const AUTH_PATTERNS = [/not logged in/i, /authentication required/i, /please log ?in/i, /unauthorized/i, /invalid api key/i, /\/login/i, /401/];
+const AUTH_PATTERNS = [
+  /not logged in/i,
+  /authentication required/i,
+  /please log ?in/i,
+  /unauthorized/i,
+  /invalid api key/i,
+  /\/login/i,
+  /401/,
+];
 
 /** 공통 실패 분류. 모르는 경우 unknown으로 두고 추측으로 재시도하지 않는다. */
-export function classifyCommon(input: { exitCode: number | null; timedOut: boolean; stderr: string; finalText: string | null }): FailureClass {
+export function classifyCommon(input: {
+  exitCode: number | null;
+  timedOut: boolean;
+  stderr: string;
+  finalText: string | null;
+}): FailureClass {
   if (input.timedOut) return 'timeout';
   const text = `${input.stderr}\n${input.finalText ?? ''}`;
   if (AUTH_PATTERNS.some((p) => p.test(text))) return 'auth_required';

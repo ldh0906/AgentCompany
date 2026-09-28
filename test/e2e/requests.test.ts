@@ -21,7 +21,12 @@ test('대표 요청 → 비서실장 초안(읽기 전용) → 대표 확정 →
   assert.notEqual(env.company.requireTicket(doc!.id).status, 'in_progress');
   env.orch.decideIntegration(env.orch.records.pendingApprovalFor(impl!.id, 'integrate')!.id, 'approved');
   await driveUntil(env, impl!.id, statusIs('done'));
-  const d = await driveUntil(env, doc!.id, (x) => x.status === 'awaiting_approval' || (x.hold !== null && x.hold.reason !== 'waiting_dependency'), 120_000);
+  const d = await driveUntil(
+    env,
+    doc!.id,
+    (x) => x.status === 'awaiting_approval' || (x.hold !== null && x.hold.reason !== 'waiting_dependency'),
+    120_000,
+  );
   assert.equal(d.status, 'awaiting_approval', `보류: ${d.hold?.note}`);
 });
 

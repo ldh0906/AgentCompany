@@ -105,33 +105,107 @@ export type Key = keyof (typeof dict)['ko'];
 
 export const STATUS: Record<Lang, Record<string, string>> = {
   ko: {
-    received: '접수', analyzing: '분석', backlog: '대기 목록', assigned: '배정', in_progress: '작업 중', verifying: '제출 검증',
-    in_review: '검수 중', changes_requested: '수정 요청', awaiting_approval: '대표 승인 대기', integrating: '반영', done: '완료', failed: '실패', cancelled: '취소',
+    received: '접수',
+    analyzing: '분석',
+    backlog: '대기 목록',
+    assigned: '배정',
+    in_progress: '작업 중',
+    verifying: '제출 검증',
+    in_review: '검수 중',
+    changes_requested: '수정 요청',
+    awaiting_approval: '대표 승인 대기',
+    integrating: '반영',
+    done: '완료',
+    failed: '실패',
+    cancelled: '취소',
   },
   en: {
-    received: 'Received', analyzing: 'Analyzing', backlog: 'Backlog', assigned: 'Assigned', in_progress: 'Working', verifying: 'Verifying',
-    in_review: 'In review', changes_requested: 'Changes requested', awaiting_approval: 'Awaiting CEO', integrating: 'Integrating', done: 'Done', failed: 'Failed', cancelled: 'Cancelled',
+    received: 'Received',
+    analyzing: 'Analyzing',
+    backlog: 'Backlog',
+    assigned: 'Assigned',
+    in_progress: 'Working',
+    verifying: 'Verifying',
+    in_review: 'In review',
+    changes_requested: 'Changes requested',
+    awaiting_approval: 'Awaiting CEO',
+    integrating: 'Integrating',
+    done: 'Done',
+    failed: 'Failed',
+    cancelled: 'Cancelled',
   },
 };
 
 export const HOLD: Record<Lang, Record<string, string>> = {
-  ko: { needs_decision: '대표 결정 필요', waiting_dependency: '선행 업무 대기', usage_limit: '사용량 한도', needs_permission: '권한 승인 필요', on_hold: '보류' },
-  en: { needs_decision: 'Needs CEO decision', waiting_dependency: 'Waiting on dependency', usage_limit: 'Usage limit', needs_permission: 'Needs permission', on_hold: 'On hold' },
+  ko: {
+    needs_decision: '대표 결정 필요',
+    waiting_dependency: '선행 업무 대기',
+    usage_limit: '사용량 한도',
+    needs_permission: '권한 승인 필요',
+    on_hold: '보류',
+  },
+  en: {
+    needs_decision: 'Needs CEO decision',
+    waiting_dependency: 'Waiting on dependency',
+    usage_limit: 'Usage limit',
+    needs_permission: 'Needs permission',
+    on_hold: 'On hold',
+  },
 };
 
 export const ROLE: Record<Lang, Record<string, string>> = {
-  ko: { 'chief-of-staff': '비서실장', planner: '기획', architect: '기술 설계', implementer: '구현', ux: 'UI·UX', qa: 'QA·반박', recorder: '문서·기록' },
-  en: { 'chief-of-staff': 'Chief of staff', planner: 'Planner', architect: 'Architect', implementer: 'Implementer', ux: 'UI/UX', qa: 'QA', recorder: 'Recorder' },
+  ko: {
+    'chief-of-staff': '비서실장',
+    planner: '기획',
+    architect: '기술 설계',
+    implementer: '구현',
+    ux: 'UI·UX',
+    qa: 'QA·반박',
+    recorder: '문서·기록',
+  },
+  en: {
+    'chief-of-staff': 'Chief of staff',
+    planner: 'Planner',
+    architect: 'Architect',
+    implementer: 'Implementer',
+    ux: 'UI/UX',
+    qa: 'QA',
+    recorder: 'Recorder',
+  },
 };
 
 export const ACCESS: Record<Lang, Record<string, string>> = {
-  ko: { 'read-only': '1 · 읽기 전용', 'write-ask': '2 · 쓰기, 명령은 매번 승인', 'write-allowlist': '3 · 허용 목록 명령 자동', 'full-auto': '4 · 전체 자동 (위험)' },
-  en: { 'read-only': '1 · Read only', 'write-ask': '2 · Write, ask for commands', 'write-allowlist': '3 · Allowlisted commands auto', 'full-auto': '4 · Full auto (risky)' },
+  ko: {
+    'read-only': '1 · 읽기 전용',
+    'write-ask': '2 · 쓰기, 명령은 매번 승인',
+    'write-allowlist': '3 · 허용 목록 명령 자동',
+    'full-auto': '4 · 전체 자동 (위험)',
+  },
+  en: {
+    'read-only': '1 · Read only',
+    'write-ask': '2 · Write, ask for commands',
+    'write-allowlist': '3 · Allowlisted commands auto',
+    'full-auto': '4 · Full auto (risky)',
+  },
 };
 
 export const EVIDENCE: Record<Lang, Record<string, string>> = {
-  ko: { mockup: '시안', inspection: '검수자 판단', static_check: '정적 검사', unit_test: '단위 테스트', runtime: '런타임', human_attest: '대표 직접 확인' },
-  en: { mockup: 'Mockup', inspection: 'Reviewer inspection', static_check: 'Static check', unit_test: 'Unit test', runtime: 'Runtime', human_attest: 'CEO attested' },
+  ko: {
+    mockup: '시안',
+    inspection: '검수자 판단',
+    static_check: '정적 검사',
+    unit_test: '단위 테스트',
+    runtime: '런타임',
+    human_attest: '대표 직접 확인',
+  },
+  en: {
+    mockup: 'Mockup',
+    inspection: 'Reviewer inspection',
+    static_check: 'Static check',
+    unit_test: 'Unit test',
+    runtime: 'Runtime',
+    human_attest: 'CEO attested',
+  },
 };
 
 export const LangContext = createContext<{ lang: Lang; setLang: (l: Lang) => void }>({ lang: 'ko', setLang: () => {} });

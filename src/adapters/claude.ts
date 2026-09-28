@@ -1,7 +1,7 @@
-import { tr } from '../core/i18n.ts';
 // Claude Code 어댑터.
 // 실측(2026-09-28, 2.1.202): -p + stream-json + --verbose, stdin 프롬프트, session_id, --resume <id>, 한글 경로·긴 한글 출력 정상.
 // --permission-prompt-tool 은 --help에 없음(숨김 옵션 추정). 권한 중계는 실측 전까지 '미검증'으로 표시한다.
+import { tr } from '../core/i18n.ts';
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,11 +45,22 @@ export const claudeAdapter: CliAdapter = {
     permissionRelay: true,
     resume: true,
     profileEnvVar: 'CLAUDE_CONFIG_DIR',
-    get notes() { return [
-      tr('실측: headless stream-json, ID 재개, 한글 경로·출력 정상 (2.1.202)', 'Verified: headless stream-json, resume by ID, Korean paths and output (2.1.202)'),
-      tr('미검증: --permission-prompt-tool 권한 중계 (도움말에 없는 숨김 옵션)', 'Unverified: --permission-prompt-tool permission relay (hidden option, absent from help)'),
-      tr('저장소의 .claude 설정(훅 등)이 실행되지 않도록 --setting-sources user 사용', 'Uses --setting-sources user to exclude repository .claude settings (including hooks)'),
-    ]; },
+    get notes() {
+      return [
+        tr(
+          '실측: headless stream-json, ID 재개, 한글 경로·출력 정상 (2.1.202)',
+          'Verified: headless stream-json, resume by ID, Korean paths and output (2.1.202)',
+        ),
+        tr(
+          '미검증: --permission-prompt-tool 권한 중계 (도움말에 없는 숨김 옵션)',
+          'Unverified: --permission-prompt-tool permission relay (hidden option, absent from help)',
+        ),
+        tr(
+          '저장소의 .claude 설정(훅 등)이 실행되지 않도록 --setting-sources user 사용',
+          'Uses --setting-sources user to exclude repository .claude settings (including hooks)',
+        ),
+      ];
+    },
   },
 
   buildInvocation(req: InvocationRequest): Invocation {
@@ -98,7 +109,10 @@ export const claudeAdapter: CliAdapter = {
   loginStatusArgs: ['auth', 'status', '--json'],
   loginInstructions(profileDir) {
     return profileDir
-      ? tr(`PowerShell에서 다음을 실행해 앱 전용 프로필로 로그인하세요:\n$env:CLAUDE_CONFIG_DIR='${profileDir}'; claude auth login`, `Run in PowerShell to log in with the app profile:\n$env:CLAUDE_CONFIG_DIR='${profileDir}'; claude auth login`)
+      ? tr(
+          `PowerShell에서 다음을 실행해 앱 전용 프로필로 로그인하세요:\n$env:CLAUDE_CONFIG_DIR='${profileDir}'; claude auth login`,
+          `Run in PowerShell to log in with the app profile:\n$env:CLAUDE_CONFIG_DIR='${profileDir}'; claude auth login`,
+        )
       : tr('터미널에서 claude auth login 을 실행하세요.', 'Run claude auth login in a terminal.');
   },
 };
