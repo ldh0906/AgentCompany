@@ -82,6 +82,8 @@ export async function waitForExit(runDir: string, shimPid: number | null, pollMs
       const late = await readExitRecord(runDir);
       if (late)
         return { exitCode: late.exitCode, signal: late.signal, timedOut: late.timedOut, killed: false, durationMs: late.durationMs };
+      // 셔틀만 죽고 CLI는 살아 있을 수 있다(Unix: 별도 프로세스 그룹). 끝났다고 보고하기 전에 CLI 그룹을 정리한다.
+      await terminateRun(runDir, null);
       return { exitCode: null, signal: null, timedOut: false, killed: true, durationMs: Date.now() - started };
     }
     await new Promise((r) => setTimeout(r, pollMs));
@@ -179,13 +181,17 @@ export async function terminateRun(runDir: string, shimPid: number | null): Prom
   const rec = await readFile(files.pid, 'utf8')
     .then((x) => JSON.parse(x) as { cliPid?: number | null; startedAtMs?: number })
     .catch(() => null);
-  if (rec?.cliPid && (await isSameProcessAlive(rec.cliPid, rec.startedAtMs ?? 0))) {
-    if (process.platform === 'win32') await killTree(rec.cliPid);
-    else {
+  if (rec?.cliPid) {
+    if (process.platform === 'win32') {
+      // Windows: 셔틀(Node)이 죽으면 그 자식은 libuv의 kill-on-close Job Object로 OS가 함께 종료한다.
+      // 셔틀이 살아 있거나 CLI가 아직 같은 프로세스로 살아 있을 때만 트리를 종료한다(PID 재사용 방지).
+      if (await isSameProcessAlive(rec.cliPid, rec.startedAtMs ?? 0)) await killTree(rec.cliPid);
+    } else {
+      // Unix: 그룹 리더(CLI)가 먼저 죽어도 그룹 구성원은 남을 수 있다. 리더 생존과 무관하게 그룹 전체에 보낸다.
       try {
         process.kill(-rec.cliPid, 'SIGKILL');
       } catch {
-        /* 이미 종료 */
+        /* 그룹이 이미 없음 */
       }
     }
   }

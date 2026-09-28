@@ -180,6 +180,8 @@ export class Orchestrator {
         );
       } else {
         report.ingestedAfterRestart.push(run.id);
+        // 종료 기록 없이 셔틀이 죽었다면 CLI가 남아 있을 수 있다: 재배정·재실행 전에 먼저 정리한다.
+        if (!finished) await abandonAndTerminate(run.runDir);
         const outcome = finished ? { exitCode: finished.exitCode, timedOut: finished.timedOut } : null;
         await this.completeRun(run.id, outcome);
         if (this.records.run(run.id)?.status === 'orphaned') report.orphaned.push(run.id);

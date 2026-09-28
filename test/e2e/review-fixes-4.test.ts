@@ -71,3 +71,53 @@ test('[P1] 복구가 포기 표시를 남긴 뒤 시작하는 셔틀은 CLI를 �
   const { existsSync } = await import('node:fs');
   assert.equal(existsSync(marker), false);
 });
+
+test('[P1] 셔틀만 비정상 종료돼도 CLI가 살아남지 않음 (Windows: Job Object, Unix: 그룹 정리)', { timeout: 30_000 }, async (t) => {
+  const d = tmp(t);
+  const script = 'console.log(process.pid); setInterval(()=>{},1000)';
+  const p = await startProcess({
+    file: process.execPath,
+    args: ['-e', script],
+    cwd: d,
+    env: process.env,
+    stdinText: null,
+    runDir: path.join(d, 'run'),
+    timeoutMs: 60_000,
+  });
+  const { readFileSync } = await import('node:fs');
+  let cliPid = 0;
+  for (let i = 0; i < 50 && !cliPid; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    cliPid = Number(readFileSync(p.stdoutPath, 'utf8').trim()) || 0;
+  }
+  assert.ok(cliPid > 0 && isAlive(cliPid));
+  process.kill(p.pid, 'SIGKILL'); // 셔틀만 강제 종료
+  const o = await p.done;
+  assert.equal(o.killed, true);
+  await new Promise((r) => setTimeout(r, 800));
+  assert.equal(isAlive(cliPid), false, 'CLI도 종료됨');
+});
+
+test('[P1] Unix: 그룹 리더가 먼저 죽어도 남은 그룹 구성원을 정리', { timeout: 30_000, skip: process.platform === 'win32' }, async (t) => {
+  const d = tmp(t);
+  const runDir = path.join(d, 'run');
+  mkdirSync(runDir);
+  // 리더가 자식을 만든 뒤 바로 죽는다 → 자식만 같은 그룹에 남음
+  const leader = spawn(
+    process.execPath,
+    [
+      '-e',
+      "const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});console.log(c.pid);c.unref();process.exit(0)",
+    ],
+    { detached: true, stdio: ['ignore', 'pipe', 'ignore'] },
+  );
+  let out = '';
+  leader.stdout!.on('data', (x) => (out += x));
+  await new Promise((r) => leader.once('close', r));
+  const orphan = Number(out.trim());
+  assert.ok(isAlive(orphan));
+  writeFileSync(path.join(runDir, 'pid.json'), JSON.stringify({ shimPid: 999_997, cliPid: leader.pid, startedAtMs: Date.now() }));
+  await abandonAndTerminate(runDir);
+  await new Promise((r) => setTimeout(r, 500));
+  assert.equal(isAlive(orphan), false, '리더 없는 그룹 구성원도 종료');
+});

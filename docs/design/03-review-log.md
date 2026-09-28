@@ -10,6 +10,7 @@ This project was built the same way: code written by Claude (and two Codex worke
 | 3 | not approvable | 4 partial, 5 new P1 | all fixed; tests in `test/e2e/review-fixes-3.test.ts` |
 | 4 | not approvable | 3 partial, 5 P1 in restart/kill race windows | all fixed; tests in `test/e2e/review-fixes-3.test.ts` |
 | 5 | not approvable | 3 partial, 4 P1 (one introduced by the round-4 fix itself) | all fixed; tests in `test/e2e/review-fixes-4.test.ts` |
+| 6 | not approvable | 1 partial, 2 P1 (Unix process-group cleanup) | fixed; Unix-only test runs in CI |
 
 The rounds are the product's own protocol, applied to itself: independent review → the author must answer every objection → no majority vote, the CEO decides what is acceptable.
 
