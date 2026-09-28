@@ -59,8 +59,25 @@
   - PATH에서 `codex`를 찾지 못합니다(B).
   - 결론: 직원 CLI의 샌드박스 환경은 부모 환경과 다르다는 점을 전제로 설계해야 합니다.
 
-## 5. 남은 실측 (사용자 PC에서 창이 떠도 괜찮은 시간에 실행)
+## 5. agy 제품 실측 (2026-09-29, agy 1.2.12)
 
-1. agy 기본 실측을 `--print=` 방식으로 다시 측정하고, stdin stream-json 메시지 형식을 확인합니다.
+임시 샘플 저장소에서 agy 직원(전체 자동)에게 실제 구현 업무 하나를 맡기고, 데모 QA가 검수했습니다.
+
+- **출력 형식(`--output-format stream-json`)은 추측과 달랐습니다.** 이벤트 키는 `type`이 아니라 `event`입니다.
+  - `{"event":"init","conversation_id":…,"init":{"permission_mode":…,"tools":[…]}}`
+  - `{"event":"step_update","step_update":{"step_type":"agent_response"|"tool",…,"text_delta":…}}`
+  - `{"event":"result","result":{"conversation_id":…,"status":"SUCCESS","response":"<최종 응답>"}}`
+  - 추측으로 만든 파서는 최종 응답을 찾지 못했습니다. 직원은 일을 제대로 했는데도 매번 실패로 판정되어 실행 예산 6회를 모두 썼습니다. → 파서를 실측 형식으로 고치고 `test/adapters/agy.test.ts`로 고정했습니다.
+- **수정 후 종단간:** 배정 → 작업(약 50초) → 검증(`node --test` 통과, 단위 테스트 증거) → 검수 → 대표 승인 대기까지 **55초**. 원본 저장소는 바뀌지 않았습니다.
+- **전체 자동(`--dangerously-skip-permissions`):** `permission_mode`가 `always-proceed`입니다. 도구 목록에 브라우저 조작, 웹 검색, 메시지 보내기, 일정 등록까지 들어 있습니다. 전체 자동 등급은 이 모든 도구를 묻지 않고 허용한다는 뜻입니다.
+- **읽기 전용(`--sandbox`):** `permission_mode`가 `request-review`입니다.
+  - 파일 읽기(`view_file`)는 됩니다.
+  - 명령 실행·파일 쓰기처럼 권한이 필요한 도구는 **화면 없는 실행에서 자동 거부**됩니다. 파일은 만들어지지 않았습니다.
+  - 이때 결과는 `status: "SUCCESS"`에 **빈 응답**이고, 사유는 stderr에 나옵니다(`a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied`). 어댑터는 빈 응답을 "최종 응답 없음"으로 처리하고, 실행 기록에 stderr를 남깁니다.
+- 앱 전용 프로필 분리 수단은 여전히 없습니다. agy는 사용자의 기본 로그인을 씁니다.
+
+## 6. 남은 실측 (사용자 PC에서 창이 떠도 괜찮은 시간에 실행)
+
+1. ~~agy 기본 실측을 `--print=` 방식으로 다시 측정~~ → 5절에서 완료. stdin stream-json 입력 형식은 확인하지 않았습니다(어댑터가 쓰지 않음).
 2. 권한 실측 A·B·C를 CLI 3종에 대해 실행합니다(agy B·C는 제외).
 3. 앱 전용 프로필 로그인(대표가 직접) 후, 누출 비교를 두 프로필에서 실행합니다.

@@ -80,7 +80,8 @@ This project separates **measured facts** from assumptions ([details](docs/desig
 - ✅ Measured on Windows 11: headless JSON, session resume by ID, Korean paths and long Korean output for Claude Code 2.1.x and Codex 0.153.x.
 - ✅ Measured: Antigravity `agy -p` takes the prompt as a value and ignores stdin (the adapter uses `--print=`).
 - ✅ Tested: crash/restart continuity with a real daemon kill, scope violations, ref tampering, lazy completion, verify-failure budgets, concurrent tickets, auto-merge safety.
-- ⏳ Not yet measured end-to-end with real subscriptions: Claude `--permission-prompt-tool` relay, Codex app-server approvals, Antigravity permission behavior in headless mode.
+- ✅ Measured end-to-end with a real Antigravity employee: implement → verify (`node --test`) → review → awaiting CEO in 55 s. Headless `--sandbox` can read files, and tools that need permission are auto-denied.
+- ⏳ Not yet measured end-to-end with real subscriptions: Claude `--permission-prompt-tool` relay, Codex app-server approvals.
 
 ## Built the way it tells you to build
 

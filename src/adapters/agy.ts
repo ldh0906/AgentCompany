@@ -2,6 +2,7 @@
 // 실측(2026-09-28, 1.2.12): -p/--print는 값을 받는 옵션이라 stdin 프롬프트를 무시하고 exit 2.
 // → 프롬프트를 --print=<값>으로 넘긴다. Windows 명령줄 한계(약 32K자) 때문에 프롬프트 길이를 제한한다.
 // 권한 옵션은 --sandbox, --dangerously-skip-permissions 뿐. 실행 중 권한 중계 수단은 없다.
+// 실측(2026-09-29): 출력은 {"event":…} 형식, 최종 응답은 {"event":"result","result":{"status","response"}}.
 // 앱 전용 프로필 폴더 환경변수는 확인하지 못했다.
 import { tr } from '../core/i18n.ts';
 
@@ -26,8 +27,8 @@ export const agyAdapter: CliAdapter = {
         ),
         tr('프롬프트 길이 제한 약 28,000자(Windows 명령줄 한계)', 'Prompt limit: about 28,000 characters (Windows command-line limit)'),
         tr(
-          '읽기 전용은 --sandbox + 권한 자동 승인 없음(헤드리스에서 도구 권한이 거부되는지 실측 전)',
-          'Read-only uses --sandbox without auto-approval (headless tool permission denial not yet verified)',
+          '실측: 읽기 전용(--sandbox)은 파일 읽기만 되고, 권한이 필요한 도구는 헤드리스에서 자동 거부',
+          'Verified: read-only (--sandbox) can read files; tools that need permission are auto-denied headless',
         ),
         tr('앱 전용 프로필 분리 수단 미확인', 'App profile isolation is unverified'),
       ];
@@ -63,6 +64,15 @@ export const agyAdapter: CliAdapter = {
         if (!sessionId && typeof e[k] === 'string') sessionId = e[k] as string;
       }
       if (e.type === 'result' && typeof e.result === 'string') finalText = e.result;
+      // 실측(1.2.12): {"event":"result","result":{"conversation_id","status":"SUCCESS","response"}}
+      const result = e.event === 'result' ? obj(e.result) : null;
+      if (result) {
+        if (!sessionId && typeof result.conversation_id === 'string') sessionId = result.conversation_id;
+        // 헤드리스(--sandbox)에서 권한이 필요한 도구는 자동 거부되고, 빈 응답의 SUCCESS가 온다(사유는 stderr).
+        if (result.status === 'SUCCESS' && typeof result.response === 'string' && result.response.trim()) finalText = result.response;
+        else errorText = `agy result: ${String(result.status ?? 'unknown')}${result.status === 'SUCCESS' ? ' (empty response)' : ''}`;
+      }
+      if (e.event === 'error') errorText = String(obj(e.error)?.message ?? e.message ?? 'error');
       const msg = obj(e.message);
       if ((e.type === 'assistant' || msg?.role === 'assistant') && finalText === null) {
         const content = msg?.content ?? e.content;
