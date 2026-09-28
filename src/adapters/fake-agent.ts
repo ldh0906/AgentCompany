@@ -9,6 +9,9 @@ import { randomUUID } from 'node:crypto';
 import { parseTaskHeader, type TaskHeader } from '../agents/prompt.ts';
 
 const behavior = process.env.FAKE_BEHAVIOR ?? 'diligent';
+let english = false;
+/** 프롬프트가 영어 출력을 요구하면(language "en") 영어로 답한다. */
+const L = (ko: string, en: string): string => (english ? en : ko);
 const sessionId = process.env.FAKE_RESUME_ID || `fake-${randomUUID()}`;
 
 function emit(event: object): void {
@@ -36,11 +39,11 @@ async function work(h: TaskHeader): Promise<string> {
     const file = targetFile(h);
     mkdirSync(path.dirname(file), { recursive: true });
     const prev = existsSync(file) ? readFileSync(file, 'utf8') : '';
-    writeFileSync(file, `${prev}# ${h.ticketId} round ${h.round}\n\n작업 결과입니다. 요구사항: ${h.requirementIds.join(', ')}\n`);
-    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: `${file} 파일을 작성했습니다.` }] } });
+    writeFileSync(file, `${prev}# ${h.ticketId} round ${h.round}\n\n${L('작업 결과입니다. 요구사항', 'Work result. Requirements')}: ${h.requirementIds.join(', ')}\n`);
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: L(`${file} 파일을 작성했습니다.`, `Wrote ${file}.`) }] } });
   }
   if (behavior === 'rogue') {
-    writeFileSync('README.md', '범위 밖 수정 (rogue 직원)\n');
+    writeFileSync('README.md', L('범위 밖 수정 (rogue 직원)\n', 'Out-of-scope edit (rogue employee)\n'));
   }
   if (behavior === 'tamper') {
     execFileSync('git', ['branch', '-f', 'sneaky-branch', 'HEAD'], { windowsHide: true, stdio: 'ignore' });
@@ -50,11 +53,11 @@ async function work(h: TaskHeader): Promise<string> {
       nonce: h.nonce,
       kind: 'work',
       status: 'done',
-      summary: lazyNow ? '완료했습니다.' : '요구사항을 구현했습니다.',
+      summary: lazyNow ? L('완료했습니다.', 'Done.') : L('요구사항을 구현했습니다.', 'Implemented the requirements.'),
       requirements: h.requirementIds.map((id) => ({ id, claim: 'met', notes: '' })),
       questions: [],
     },
-    lazyNow ? '모든 작업을 완료했습니다!' : '작업을 마쳤습니다.',
+    lazyNow ? L('모든 작업을 완료했습니다!', 'All done!') : L('작업을 마쳤습니다.', 'Work finished.'),
   );
 }
 
@@ -63,7 +66,7 @@ function review(h: TaskHeader, prompt: string): string {
   const nothingChanged = /\(none\)/.test(changedBlock);
   const failed = /FAILED/.test(prompt.split('### System-generated evidence')[1]?.split('DATA>>>')[0] ?? '');
   const approve = !nothingChanged && !failed;
-  const reason = nothingChanged ? '변경된 파일이 없습니다. 완료 주장과 달리 실제 작업이 없습니다.' : failed ? '시스템 검증이 실패했습니다.' : 'diff와 증거가 요구사항을 충족합니다.';
+  const reason = nothingChanged ? L('변경된 파일이 없습니다. 완료 주장과 달리 실제 작업이 없습니다.', 'No files changed. The claimed work is not there.') : failed ? L('시스템 검증이 실패했습니다.', 'System verification failed.') : L('diff와 증거가 요구사항을 충족합니다.', 'The diff and evidence satisfy the requirements.');
   return finalWith(
     {
       nonce: h.nonce,
@@ -72,7 +75,7 @@ function review(h: TaskHeader, prompt: string): string {
       summary: reason,
       requirements: h.requirementIds.map((id) => ({ id, met: approve, evidenceIds: approve ? h.evidenceIds : [], reason })),
     },
-    approve ? '검수 결과: 승인' : '검수 결과: 수정 요청',
+    approve ? L('검수 결과: 승인', 'Review: approve') : L('검수 결과: 수정 요청', 'Review: request changes'),
   );
 }
 
@@ -82,14 +85,14 @@ function drafts(h: TaskHeader, prompt: string): string {
     {
       nonce: h.nonce,
       kind: 'drafts',
-      summary: `요청을 구현과 문서 두 업무로 나눴습니다: ${request.slice(0, 60)}`,
+      summary: L(`요청을 구현과 문서 두 업무로 나눴습니다: ${request.slice(0, 60)}`, `Split into an implementation ticket and a documentation ticket.`),
       tickets: [
-        { type: 'impl', title: `${request.slice(0, 40)} 구현`, purpose: request, requirements: [{ text: '기능 구현과 단위 테스트', evidenceType: 'unit_test' }], doneCriteria: '단위 테스트 통과', writeScope: ['src/**', 'test/**'], dependsOn: [] },
-        { type: 'doc', title: `${request.slice(0, 40)} 문서화`, purpose: '설계 문서 반영', requirements: [{ text: '설계 문서 갱신', evidenceType: 'inspection' }], doneCriteria: '검수자 확인', writeScope: ['docs/**'], dependsOn: [0] },
+        { type: 'impl', title: `${L('구현', 'Implement')}: ${request.slice(0, 50)}`, purpose: request, requirements: [{ text: L('기능 구현과 단위 테스트', 'Implementation with unit tests'), evidenceType: 'unit_test' }], doneCriteria: L('단위 테스트 통과', 'Unit tests pass'), writeScope: ['src/**', 'test/**'], dependsOn: [] },
+        { type: 'doc', title: `${L('문서화', 'Document')}: ${request.slice(0, 50)}`, purpose: L('설계 문서 반영', 'Reflect it in the design doc'), requirements: [{ text: L('설계 문서 갱신', 'Update the design doc'), evidenceType: 'inspection' }], doneCriteria: L('검수자 확인', 'Reviewer confirms'), writeScope: ['docs/**'], dependsOn: [0] },
       ],
-      questions: ['수치가 필요한 부분은 대표 결정이 필요합니다.'],
+      questions: [L('수치가 필요한 부분은 대표 결정이 필요합니다.', 'The actual fatigue numbers need a CEO decision.')],
     },
-    '업무 초안을 만들었습니다.',
+    L('업무 초안을 만들었습니다.', 'Drafted tickets.'),
   );
 }
 
@@ -103,24 +106,29 @@ function claims(h: TaskHeader): string {
       nonce: h.nonce,
       kind: 'claims',
       claims: [
-        { text: `[${who}] 파티 최대 인원이 설계 문서에 정해져 있지 않다`, impact: 'high', confidence: 0.9, sources: [{ doc: 'docs/design.md', loc: '## 파티 규칙' }] },
-        { text: `[${who}] 파티 해산 규칙이 문서에 없다`, impact: 'medium', confidence: 0.6, sources: [{ doc: 'docs/design.md', loc: '전체' }] },
+        { text: `[${who}] ${L('파티 최대 인원이 설계 문서에 정해져 있지 않다', 'The design doc never defines the maximum party size')}`, impact: 'high', confidence: 0.9, sources: [{ doc: 'docs/design.md', loc: L('## 파티 규칙', '## Party rules') }] },
+        { text: `[${who}] ${L('파티 해산 규칙이 문서에 없다', 'There is no rule for disbanding a party')}`, impact: 'medium', confidence: 0.6, sources: [{ doc: 'docs/design.md', loc: L('전체', 'whole file') }] },
       ],
     },
-    '독립 분석을 마쳤습니다.',
+    L('독립 분석을 마쳤습니다.', 'Independent analysis done.'),
   );
 }
 
-function verdicts(h: DelibHeader): string {
+function verdicts(h: DelibHeader, prompt: string): string {
   const ids = h.claimIds ?? [];
+  const textOf = (id: string) => prompt.split('\n').find((l) => l.startsWith(`[${id}]`)) ?? '';
   return finalWith(
     {
       nonce: h.nonce,
       kind: 'verdicts',
-      // 첫 주장에는 동의, 나머지는 근거 부족으로 판정해 재답변 단계를 거치게 한다.
-      verdicts: ids.map((id, i) => ({ claimId: id, verdict: i === 0 ? 'agree' : 'insufficient', reason: i === 0 ? '문서에서 확인됨' : '출처 위치가 너무 넓어 확인할 수 없음' })),
+      // 게으른 직원의 주장에는 반대(→ 작성자가 유지하면 대표에게 상신), 나머지는 첫 주장 동의·나머지 근거 부족.
+      verdicts: ids.map((id, i) =>
+        textOf(id).includes('[lazy]')
+          ? { claimId: id, verdict: 'disagree', reason: L('설계 문서 3절에 이미 규칙이 있어 주장과 다름', 'Section 3 of the design doc already defines this') }
+          : { claimId: id, verdict: i === 0 ? 'agree' : 'insufficient', reason: i === 0 ? L('문서에서 확인됨', 'Confirmed in the doc') : L('출처 위치가 너무 넓어 확인할 수 없음', 'The cited location is too broad to check') },
+      ),
     },
-    '교차 판정을 마쳤습니다.',
+    L('교차 판정을 마쳤습니다.', 'Cross-verdicts done.'),
   );
 }
 
@@ -131,9 +139,9 @@ function responses(h: DelibHeader): string {
       nonce: h.nonce,
       kind: 'responses',
       // 게으른 성격은 끝까지 유지(→ 대표에게 상신), 나머지는 범위를 좁힌다.
-      responses: ids.map((id) => ({ claimId: id, response: behavior === 'lazy' ? 'keep' : 'narrow', text: behavior === 'lazy' ? '주장을 유지합니다.' : '해산 규칙 중 보상 처리만 빠져 있다고 좁힙니다.' })),
+      responses: ids.map((id) => ({ claimId: id, response: behavior === 'lazy' ? 'keep' : 'narrow', text: behavior === 'lazy' ? L('주장을 유지합니다.', 'I keep my claim.') : L('해산 규칙 중 보상 처리만 빠져 있다고 좁힙니다.', 'Narrowed: only reward handling on disband is missing.') })),
     },
-    '재답변을 마쳤습니다.',
+    L('재답변을 마쳤습니다.', 'Rebuttal done.'),
   );
 }
 
@@ -141,6 +149,7 @@ async function main(): Promise<void> {
   const chunks: Buffer[] = [];
   for await (const c of process.stdin) chunks.push(c as Buffer);
   const prompt = Buffer.concat(chunks).toString('utf8');
+  english = /language "en"/.test(prompt);
   emit({ type: 'system', subtype: 'init', model: `fake:${behavior}` });
   const h = parseTaskHeader(prompt);
   if (!h) {
@@ -154,7 +163,7 @@ async function main(): Promise<void> {
     kind === 'work' ? await work(h)
     : kind === 'drafts' ? drafts(h, prompt)
     : kind === 'claims' ? claims(h)
-    : kind === 'verdicts' ? verdicts(h)
+    : kind === 'verdicts' ? verdicts(h, prompt)
     : kind === 'responses' ? responses(h)
     : review(h, prompt);
   emit({ type: 'result', result: text, is_error: false });

@@ -34,9 +34,21 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
     case 'employee.hired': return ko ? `직원 추가: ${p.name}` : `Hired ${p.name}`;
     case 'approval.requested': return ko ? `승인 요청: ${p.summary}` : `Approval requested: ${p.summary}`;
     case 'orchestrator.recovered': return ko ? '재시작 복구 완료' : 'Recovered after restart';
+    case 'approval.approved': return ko ? `대표 승인: ${p.ticketId ?? ''}` : `CEO approved ${p.ticketId ?? ''}`;
+    case 'approval.rejected': return ko ? `대표 반려: ${p.ticketId ?? ''}` : `CEO rejected ${p.ticketId ?? ''}`;
+    case 'approval.consumed': return ko ? `승인 사용 완료: ${p.ticketId ?? ''}` : `Approval used for ${p.ticketId ?? ''}`;
+    case 'approval.expired': return ko ? `승인 만료: ${p.ticketId ?? ''}` : `Approval expired for ${p.ticketId ?? ''}`;
+    case 'ticket.integration_result': return ko ? `${e.entityId} 원본 반영: ${p.kind === 'merged' ? '병합' : '브랜치 ' + String(p.branch ?? '')}` : `${e.entityId} integrated: ${p.kind === 'merged' ? 'merged' : 'branch ' + String(p.branch ?? '')}`;
+    case 'decision.recorded': return ko ? `결정 기록: ${String(p.text ?? '').slice(0, 60)}` : `Decision: ${String(p.text ?? '').slice(0, 60)}`;
+    case 'project.registered': return ko ? `프로젝트 등록: ${p.name}` : `Project registered: ${p.name}`;
     default:
       if (e.type.startsWith('deliberation.')) return `${e.entityId} ${who(e.actor)} ${e.type.split('.')[1]} ${p.summary ?? ''}${p.error ? ` ✗ ${p.error}` : ''}`;
-      if (e.type.startsWith('run.')) return `${e.entityId} ${e.type.replace('run.', '')}${p.failureClass ? ` (${p.failureClass})` : ''}`;
+      if (e.type.startsWith('run.')) {
+        const [, kind, st] = e.type.split('.');
+        const kindLabel = ko ? ({ work: '작업', review: '검수', analysis: '분석' } as Record<string, string>)[kind!] ?? kind : kind;
+        const stLabel = ko ? ({ prepared: '시작', succeeded: '성공', failed: '실패', orphaned: '고아' } as Record<string, string>)[st!] ?? st : st;
+        return `${e.entityId} ${who(e.actor)} ${kindLabel} ${stLabel}${p.failureClass ? ` (${p.failureClass})` : ''}`;
+      }
       return `${e.type} ${e.entityId}`;
   }
 }
@@ -62,7 +74,9 @@ export function ApprovalItem({ a }: { a: Approval }) {
           <div className="meta">
             {a.kind === 'tool_permission'
               ? `${empName(state?.employees ?? [], a.requestedBy)} · ${String(d.tool)}`
-              : `${lang === 'ko' ? '반영 방식' : 'Mode'}: ${d.mode === 'auto_after_approval' ? (lang === 'ko' ? '승인 후 자동 병합' : 'auto merge') : lang === 'ko' ? '브랜치만 생성' : 'branch only'}`}{' '}
+              : d.mode === 'review'
+                ? lang === 'ko' ? '검토 결과 확인 (반영할 코드 없음)' : 'Acknowledge review (no code to merge)'
+                : `${lang === 'ko' ? '반영 방식' : 'Mode'}: ${d.mode === 'auto_after_approval' ? (lang === 'ko' ? '승인 후 자동 병합' : 'auto merge') : lang === 'ko' ? '브랜치만 생성' : 'branch only'}`}{' '}
             · {when(a.createdAt)}
           </div>
         </div>

@@ -17,7 +17,7 @@ import { seedDemo } from './demo.ts';
 const HELP = `Agent Company — 로컬 AI 개발 조직
 
 사용법:
-  agent-company start [--port 4777] [--data-dir DIR] [--no-open] [--user-profiles]
+  agent-company start [--port 4777] [--data-dir DIR] [--no-open] [--user-profiles] [--language ko|en]
   agent-company demo  [--port 4777] [--no-open]      구독 없이 가짜 직원으로 체험
   agent-company doctor [--data-dir DIR]               CLI 설치·로그인 상태 점검
   agent-company info   [--data-dir DIR]               설치 위치·용량·생성 파일
@@ -72,6 +72,7 @@ async function start(argv: string[], demo: boolean): Promise<void> {
     },
   });
   const dataDir = path.resolve(values['data-dir'] ?? defaultDataDir(demo));
+  const language = values.language ?? (Intl.DateTimeFormat().resolvedOptions().locale.startsWith('ko') ? 'ko' : 'en');
   mkdirSync(dataDir, { recursive: true });
   const existing = readLock(dataDir);
   if (existing) {
@@ -85,12 +86,12 @@ async function start(argv: string[], demo: boolean): Promise<void> {
   let broadcast: (kind: string, id: string) => void = () => {};
   const orch = new Orchestrator(company, {
     dataDir,
-    language: values.language ?? 'ko',
+    language,
     profileRoot: values['user-profiles'] ? null : profileRoot(dataDir),
     onChange: (k, id) => broadcast(k, id),
   });
   const recovery = await orch.recover();
-  if (demo) await seedDemo(company, orch, dataDir);
+  if (demo) await seedDemo(company, orch, dataDir, language);
 
   const server = await startServer({ api: new Api(orch, dataDir), port: Number(values.port ?? (demo ? 4778 : 4777)), webRoot: webRoot() });
   broadcast = server.broadcast;
