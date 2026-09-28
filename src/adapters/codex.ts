@@ -1,27 +1,54 @@
 // Codex CLI 어댑터 (exec 경로).
 // 실측(2026-09-28, 0.153.4): exec --json, stdin 프롬프트('-'), thread.started.thread_id, exec resume <id>, 한글 정상.
 // 실행 중 권한 중계는 app-server(JSON-RPC)가 필요하다: 메서드명은 로컬 generate-ts로 확인했으나 실사용 실측 전.
-// 그래서 exec 경로는 읽기 전용과 '샌드박스 안 자동'만 제공한다.
+// 그래서 읽기 전용·전체 자동은 exec, 승인 중계가 필요한 등급(2·3)은 codex-relay(app-server) 경로를 쓴다.
 
+import path from 'node:path';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { classifyCommon, obj, type CliAdapter, type Invocation, type InvocationRequest, type ParsedRun } from './types.ts';
+
+function relayScript(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const ts = path.join(here, 'codex-relay.ts');
+  return existsSync(ts) ? ts : path.join(here, 'codex-relay.js');
+}
 
 export const codexAdapter: CliAdapter = {
   kind: 'codex',
   displayName: 'Codex',
   executable: 'codex',
   capabilities: {
-    accessLevels: ['read-only', 'full-auto'],
-    permissionRelay: false,
+    accessLevels: ['read-only', 'write-ask', 'write-allowlist', 'full-auto'],
+    permissionRelay: true,
     resume: true,
     profileEnvVar: 'CODEX_HOME',
     notes: [
       '실측: exec --json, stdin 프롬프트, ID 재개, 한글 정상 (0.153.4)',
       '전체 자동은 workspace-write 샌드박스 안에서만 동작(네트워크 차단, 작업공간 밖 쓰기 차단)',
-      '권한 중계(app-server)는 다음 버전: 메서드명 확인됨, 실측 전',
+      '등급 2·3은 app-server 중계(메서드명은 로컬 스키마로 확인, 실제 구독 실측 전)',
+      '허용 목록 자동 승인은 셸 메타문자(; & | $ < > 등)가 없는 명령만',
     ],
   },
 
   buildInvocation(req: InvocationRequest): Invocation {
+    if ((req.accessLevel === 'write-ask' || req.accessLevel === 'write-allowlist') && !req.resumeSessionId) {
+      return {
+        file: process.execPath,
+        args: ['--no-warnings', relayScript()],
+        env: {
+          ...process.env,
+          ...req.profileEnv,
+          AC_CODEX_CWD: req.cwd,
+          AC_CODEX_POLICY: 'untrusted',
+          AC_APPROVAL_DIR: req.approvalDir ?? '',
+          AC_ALLOWED_COMMANDS: JSON.stringify(req.accessLevel === 'write-allowlist' ? req.allowedCommands : []),
+          ...(req.model ? { AC_CODEX_MODEL: req.model } : {}),
+        },
+        stdinText: req.prompt,
+        files: [],
+      };
+    }
     const model = req.model ? ['-m', req.model] : [];
     let args: string[];
     if (req.resumeSessionId) {

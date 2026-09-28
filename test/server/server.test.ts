@@ -51,8 +51,8 @@ test('서버: 토큰·Host·Origin 검사와 API 흐름', { timeout: 60_000 }, a
   assert.ok(p.id);
   const e1 = await post('/api/employees', { name: '구현', roles: ['implementer'], cli: 'fake', model: 'diligent' });
   assert.equal(e1.status, 200);
-  const bad = await post('/api/employees', { name: 'x', roles: ['qa'], cli: 'codex', model: null, accessLevel: 'write-ask' });
-  assert.equal(bad.status, 400, 'Codex exec는 write-ask 미지원 → 거부');
+  const bad = await post('/api/employees', { name: 'x', roles: ['qa'], cli: 'agy', model: null, accessLevel: 'write-ask' });
+  assert.equal(bad.status, 400, 'Antigravity는 실행 중 승인 중계 수단이 없어 write-ask 거부');
   assert.match(JSON.parse(bad.body).error, /지원하지 않습니다/);
   const tk = await post('/api/tickets', { projectId: p.id, type: 'impl', title: '기능', requirements: [{ text: 'r', evidenceType: 'unit_test' }], doneCriteria: 'd', writeScope: ['src/**'] });
   assert.equal(tk.status, 200);

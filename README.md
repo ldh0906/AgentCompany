@@ -59,8 +59,8 @@ By default employees run in **app-only CLI profiles** (`CLAUDE_CONFIG_DIR`, `COD
 | Level | Meaning | Claude Code | Codex | Antigravity |
 |---|---|---|---|---|
 | 1 Read only | read files | ✅ | ✅ `-s read-only` | ✅ `--sandbox` |
-| 2 Write, ask for commands | edits allowed, each command asks **you** in the dashboard | ✅ (permission relay, see status) | planned (app-server) | — |
-| 3 Allowlisted commands | your allowlist runs, others ask | ✅ | planned | — |
+| 2 Write, ask for commands | edits allowed, each command asks **you** in the dashboard | ✅ `--permission-prompt-tool` relay | ✅ app-server relay | — |
+| 3 Allowlisted commands | your allowlist runs (no shell metacharacters), others ask | ✅ | ✅ | — |
 | 4 Full auto | nothing asks (post-run checks still apply) | ✅ | ✅ workspace-write sandbox | ✅ |
 
 Levels a CLI cannot enforce are greyed out instead of silently degraded.
@@ -108,7 +108,7 @@ No services, scheduled tasks or autostart entries are ever created.
 ## Development
 
 ```bash
-npm test          # 47 tests: state machine properties, git workspace, e2e with fake agents, crash/restart
+npm test          # 56 tests: state machine properties, git workspace, e2e with fake agents, crash/restart
 npm run typecheck
 npm run dev       # demo daemon from source
 npm run dev:web   # Vite dev server for the dashboard (proxy to :4777)
