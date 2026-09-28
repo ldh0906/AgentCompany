@@ -63,11 +63,26 @@ export function TicketPage({ id }: { id: string }) {
         <div className="card">
           <h2>{t('requirements')} × {t('evidence')}</h2>
           <table>
-            <thead><tr><th>ID</th><th>{t('requirements')}</th><th>{ko ? '필요 증거' : 'Needs'}</th></tr></thead>
+            <thead><tr><th>ID</th><th>{t('requirements')}</th><th>{ko ? '필요 증거' : 'Needs'}</th><th /></tr></thead>
             <tbody>
-              {tk.requirements.map((r) => (
-                <tr key={r.id}><td className="mono">{r.id}</td><td>{r.text}</td><td><span className="chip">{evLabel(r.evidenceType)}</span></td></tr>
-              ))}
+              {tk.requirements.map((r) => {
+                const attested = detail.evidence.some((e) => e.type === 'human_attest' && e.requirementId === r.id && e.headSha === latestHead);
+                return (
+                  <tr key={r.id}>
+                    <td className="mono">{r.id}</td>
+                    <td>{r.text}</td>
+                    <td><span className="chip">{evLabel(r.evidenceType)}</span></td>
+                    <td>
+                      {attested ? <span className="chip ok">✓ {ko ? '대표 확인' : 'Attested'}</span> : latestHead && ['in_review', 'awaiting_approval', 'verifying'].includes(tk.status) && (
+                        <button className="btn small" disabled={busy} onClick={() => {
+                          const note = prompt(ko ? `${r.id}을(를) 직접 확인했습니다. 확인 내용을 남겨 주세요 (현재 제출 커밋 ${latestHead.slice(0, 8)}에 묶입니다):` : `Attest ${r.id} for commit ${latestHead.slice(0, 8)}. Note:`);
+                          if (note !== null) void run(() => api(`tickets/${tk.id}/attest`, { body: { requirementId: r.id, note } }), 'OK').then(reload);
+                        }}>{ko ? '직접 확인' : 'Attest'}</button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           <div className="body">

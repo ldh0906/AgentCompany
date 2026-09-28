@@ -125,3 +125,23 @@ test('쓰기 범위가 겹치는 업무는 오류 없이 순서를 기다리고,
   assert.equal(evs.filter((e) => e.type === 'ticket.waiting_lock').length, 1);
   assert.equal(evs.filter((e) => e.type === 'orchestrator.error').length, 0);
 });
+
+test('대표 직접 확인이 필요한 요구사항: 검수 승인만으로는 통과 불가 → 대표 확인 후 승인 대기', { timeout: 120_000 }, async (t) => {
+  const env = await setup(t);
+  const ticket = env.company.createTicket({
+    projectId: env.projectId,
+    type: 'impl',
+    title: '화면 연출',
+    purpose: '런타임에서 눈으로 확인해야 하는 기능',
+    requirements: [{ text: '게임 화면에서 연출이 자연스럽게 보인다', evidenceType: 'human_attest' }],
+    doneCriteria: '대표가 직접 확인',
+    writeScope: ['src/**'],
+  });
+  const held = await driveUntil(env, ticket.id, (x) => x.hold !== null || x.status === 'awaiting_approval');
+  assert.equal(held.status, 'in_review');
+  assert.equal(held.hold?.reason, 'needs_decision');
+  assert.match(held.hold!.note, /human_attest/);
+  env.orch.attest(ticket.id, 'R1', '에디터에서 직접 플레이해 확인');
+  const ok = await driveUntil(env, ticket.id, (x) => x.status === 'awaiting_approval' || x.hold !== null);
+  assert.equal(ok.status, 'awaiting_approval', `보류: ${ok.hold?.note}`);
+});

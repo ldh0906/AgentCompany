@@ -555,7 +555,11 @@ export class Orchestrator {
       const checks = rr.requirements.map((r) => ({
         requirementId: r.id,
         met: r.met,
-        verifiedEvidence: r.evidenceIds.map((id) => evidence.find((e) => e.id === id && e.passed)?.type).filter((x): x is Evidence['type'] => Boolean(x)),
+        verifiedEvidence: [
+          ...r.evidenceIds.map((id) => evidence.find((e) => e.id === id && e.passed)?.type),
+          // 대표의 직접 확인은 검수자가 인용하지 않아도 그 요구사항의 증거가 된다.
+          ...evidence.filter((e) => e.type === 'human_attest' && e.passed && e.requirementId === r.id).map((e) => e.type),
+        ].filter((x): x is Evidence['type'] => Boolean(x)),
       }));
       try {
         this.apply(ticket.id, { type: 'review_approve', checks }, reviewer);
@@ -821,6 +825,37 @@ export class Orchestrator {
   }
 
   // ======================= 대표 조작 =======================
+
+  /**
+   * 대표 직접 확인: 자동 검증할 수 없는 요구(런타임 플레이, 시각 검수 등)를 대표가 확인한다.
+   * 현재 제출 커밋에 묶인다. 검수 중 증거 부족으로 보류된 업무면 보류를 풀고 검수를 다시 돌린다.
+   */
+  attest(ticketId: string, requirementId: string, note: string): Evidence {
+    const t = this.company.requireTicket(ticketId);
+    if (!t.requirements.some((r) => r.id === requirementId)) throw new DomainError(`요구사항 ${requirementId}이(가) 없습니다.`);
+    const sub = this.records.latestSubmission(t);
+    if (!sub?.headSha) throw new DomainError('확인할 제출물이 아직 없습니다.');
+    const e: Evidence = {
+      id: newId('EV'),
+      ticketId,
+      round: t.round,
+      headSha: sub.headSha,
+      type: 'human_attest',
+      label: '대표 직접 확인',
+      argv: null,
+      exitCode: null,
+      passed: true,
+      outputPath: null,
+      summary: note || '대표가 직접 확인했습니다.',
+      requirementId,
+      createdAt: new Date().toISOString(),
+    };
+    this.records.saveEvidence(e, sub.id);
+    this.company.store.appendEvent('ceo', 'evidence.attested', ticketId, { requirementId, headSha: sub.headSha, note });
+    if (t.hold?.reason === 'needs_decision' && t.status === 'in_review') this.releaseHold(ticketId);
+    this.changed('ticket', ticketId);
+    return e;
+  }
 
   releaseHold(ticketId: string): Ticket {
     return this.apply(ticketId, { type: 'release_hold' }, CEO);

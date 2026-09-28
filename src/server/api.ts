@@ -161,6 +161,8 @@ export class Api {
       }
       case 'POST tickets/:id/assign':
         return this.orch.assign(id!, str(b, 'assigneeId'), str(b, 'reviewerId'));
+      case 'POST tickets/:id/attest':
+        return this.orch.attest(id!, str(b, 'requirementId'), str(b, 'note', { optional: true, max: 2000 }));
       case 'POST tickets/:id/release':
         return this.orch.releaseHold(id!);
       case 'POST tickets/:id/cancel':

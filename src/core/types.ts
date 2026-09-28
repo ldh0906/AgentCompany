@@ -201,6 +201,8 @@ export interface Evidence {
   passed: boolean;
   outputPath: string | null;
   summary: string;
+  /** 특정 요구사항에만 해당하는 증거(대표 직접 확인 등). 없으면 티켓 전체. */
+  requirementId?: string;
   createdAt: string;
 }
 
