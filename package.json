@@ -1,0 +1,29 @@
+{
+  "name": "agent-company",
+  "version": "0.1.0",
+  "description": "Run Claude Code, Codex and Antigravity as a local AI dev team: tickets, independent review, evidence-gated completion and human approval. No API keys.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "agent-company": "dist/cli/main.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "node --watch src/cli/main.ts start --dev",
+    "start": "node src/cli/main.ts start",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json && vite build web"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2"
+  }
+}
