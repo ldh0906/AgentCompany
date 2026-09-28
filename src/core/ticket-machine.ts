@@ -29,6 +29,7 @@ export type TicketCommand =
   | { type: 'assign'; assigneeId: string; reviewerId: string; activeEmployeeIds: string[] }
   | { type: 'start_work'; dependenciesDone: boolean; locksAcquired: boolean }
   | { type: 'submit' }
+  | { type: 'run_aborted'; reason: string; hold?: { reason: HoldReason; note: string } }
   | { type: 'verification_passed' }
   | { type: 'verification_failed'; reason: string }
   | { type: 'scope_violation'; paths: string[] }
@@ -165,6 +166,18 @@ export function applyTicketCommand(
       const bad = expect('in_progress');
       if (bad) return reject(bad);
       return next({ status: 'verifying' }, 'ticket.verifying');
+    }
+
+    case 'run_aborted': {
+      // 실행이 정상 보고 없이 끝남(시간 초과·사용량 한도·보고서 불량 등). 실행 예산은 이미 소모됐다.
+      if (!isOrchestrator(actor)) return reject('실행 중단 처리는 오케스트레이터만 할 수 있습니다.');
+      const bad = expect('in_progress');
+      if (bad) return reject(bad);
+      return next(
+        { status: 'assigned', hold: cmd.hold ? hold(cmd.hold.reason, 'assigned', now, cmd.hold.note) : null },
+        'ticket.run_aborted',
+        { reason: cmd.reason, ...(cmd.hold ? { hold: cmd.hold.reason } : {}) },
+      );
     }
 
     case 'verification_passed': {

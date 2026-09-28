@@ -15,6 +15,7 @@ import {
   type RoleTemplate,
   type Ticket,
   type TicketType,
+  type VerifyCommand,
 } from '../core/types.ts';
 
 export class DomainError extends Error {}
@@ -38,7 +39,7 @@ export interface NewProject {
   baseBranch?: string;
   integrationMode?: Project['integrationMode'];
   protectedPaths?: string[];
-  verifyCommands?: string[][];
+  verifyCommands?: VerifyCommand[];
   docRules?: string;
 }
 

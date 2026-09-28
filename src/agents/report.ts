@@ -1,0 +1,121 @@
+// 직원 보고서: 실행 마지막에 nonce가 들어간 JSON을 내야 한다. 형식은 코드로 검증한다.
+// 보고서는 "주장"일 뿐이다. 완료 판정은 오케스트레이터가 만든 증거로 한다.
+
+export interface WorkReport {
+  kind: 'work';
+  nonce: string;
+  status: 'done' | 'blocked' | 'needs_decision';
+  summary: string;
+  requirements: { id: string; claim: 'met' | 'partial' | 'not_met'; notes: string }[];
+  questions: string[];
+}
+
+export interface ReviewReport {
+  kind: 'review';
+  nonce: string;
+  verdict: 'approve' | 'request_changes';
+  summary: string;
+  requirements: { id: string; met: boolean; evidenceIds: string[]; reason: string }[];
+}
+
+export type AgentReport = WorkReport | ReviewReport;
+
+export type ReportParse =
+  | { ok: true; report: AgentReport }
+  | { ok: false; reason: 'no_json' | 'schema_invalid' | 'nonce_mismatch'; detail: string };
+
+/** 최종 텍스트에서 마지막 JSON 객체를 찾는다(```json 블록 우선). */
+export function extractLastJson(text: string): unknown | null {
+  const fenced = [...text.matchAll(/```(?:json)?\s*\n([\s\S]*?)\n```/g)].map((m) => m[1]!);
+  for (const block of fenced.reverse()) {
+    try {
+      return JSON.parse(block);
+    } catch {
+      /* 다음 후보 */
+    }
+  }
+  // 코드 블록이 없으면 마지막 '{'부터 균형 잡힌 객체를 찾는다.
+  for (let start = text.lastIndexOf('{'); start >= 0; start = text.lastIndexOf('{', start - 1)) {
+    const candidate = balancedObject(text, start);
+    if (candidate) {
+      try {
+        return JSON.parse(candidate);
+      } catch {
+        /* 계속 */
+      }
+    }
+    if (start === 0) break;
+  }
+  return null;
+}
+
+function balancedObject(text: string, start: number): string | null {
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+const isStr = (v: unknown): v is string => typeof v === 'string';
+const isArr = Array.isArray;
+
+export function parseReport(finalText: string | null, expected: { kind: 'work' | 'review'; nonce: string; requirementIds: string[] }): ReportParse {
+  if (!finalText) return { ok: false, reason: 'no_json', detail: '최종 응답이 없습니다.' };
+  const raw = extractLastJson(finalText);
+  if (!raw || typeof raw !== 'object') return { ok: false, reason: 'no_json', detail: '최종 응답에서 JSON 보고서를 찾지 못했습니다.' };
+  const r = raw as Record<string, unknown>;
+  if (r.nonce !== expected.nonce) {
+    return { ok: false, reason: 'nonce_mismatch', detail: `보고서 nonce 불일치(기대 ${expected.nonce}, 받음 ${String(r.nonce)}). 다른 실행의 결과이거나 지시를 따르지 않았습니다.` };
+  }
+  const bad = (detail: string): ReportParse => ({ ok: false, reason: 'schema_invalid', detail });
+  if (!isStr(r.summary)) return bad('summary가 문자열이 아닙니다.');
+  if (!isArr(r.requirements)) return bad('requirements가 배열이 아닙니다.');
+  const ids = new Set<string>();
+
+  if (expected.kind === 'work') {
+    if (!['done', 'blocked', 'needs_decision'].includes(String(r.status))) return bad('status 값이 잘못되었습니다.');
+    const reqs: WorkReport['requirements'] = [];
+    for (const x of r.requirements as unknown[]) {
+      const q = x as Record<string, unknown>;
+      if (!isStr(q?.id) || !['met', 'partial', 'not_met'].includes(String(q.claim))) return bad('requirements 항목 형식이 잘못되었습니다.');
+      ids.add(q.id);
+      reqs.push({ id: q.id, claim: q.claim as WorkReport['requirements'][number]['claim'], notes: isStr(q.notes) ? q.notes : '' });
+    }
+    const missing = expected.requirementIds.filter((id) => !ids.has(id));
+    if (missing.length) return bad(`보고서에 요구사항 ${missing.join(', ')}이(가) 없습니다.`);
+    const questions = isArr(r.questions) ? (r.questions as unknown[]).filter(isStr) : [];
+    return { ok: true, report: { kind: 'work', nonce: expected.nonce, status: r.status as WorkReport['status'], summary: r.summary, requirements: reqs, questions } };
+  }
+
+  if (!['approve', 'request_changes'].includes(String(r.verdict))) return bad('verdict 값이 잘못되었습니다.');
+  const reqs: ReviewReport['requirements'] = [];
+  for (const x of r.requirements as unknown[]) {
+    const q = x as Record<string, unknown>;
+    if (!isStr(q?.id) || typeof q.met !== 'boolean') return bad('requirements 항목 형식이 잘못되었습니다.');
+    ids.add(q.id);
+    reqs.push({
+      id: q.id,
+      met: q.met,
+      evidenceIds: isArr(q.evidenceIds) ? (q.evidenceIds as unknown[]).filter(isStr) : [],
+      reason: isStr(q.reason) ? q.reason : '',
+    });
+  }
+  const missing = expected.requirementIds.filter((id) => !ids.has(id));
+  if (missing.length) return bad(`판정에 요구사항 ${missing.join(', ')}이(가) 없습니다.`);
+  return { ok: true, report: { kind: 'review', nonce: expected.nonce, verdict: r.verdict as ReviewReport['verdict'], summary: r.summary, requirements: reqs } };
+}

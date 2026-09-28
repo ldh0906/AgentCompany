@@ -35,6 +35,13 @@ export interface Employee {
 
 export type IntegrationMode = 'manual' | 'auto_after_approval';
 
+export interface VerifyCommand {
+  label: string;
+  argv: string[];
+  evidenceType: EvidenceType;   // 이 명령이 통과하면 만들어지는 증거 등급
+  timeoutMs?: number;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -42,7 +49,7 @@ export interface Project {
   baseBranch: string;
   integrationMode: IntegrationMode;
   protectedPaths: string[];    // glob. 어떤 직원도 대표 승인 없이 수정 불가
-  verifyCommands: string[][];  // 대표가 승인한 검증 명령 (argv 배열, shell 없음)
+  verifyCommands: VerifyCommand[];  // 대표가 승인한 검증 명령 (argv 배열, shell 없음)
   docRules: string;            // 직원 컨텍스트에 주입할 프로젝트별 문서 권한 규칙
   createdAt: string;
 }
@@ -83,6 +90,7 @@ export interface Hold {
 
 export type EvidenceType =
   | 'mockup'        // 시안 (가장 약함)
+  | 'inspection'    // 검수자가 diff를 읽고 판단
   | 'static_check'
   | 'unit_test'
   | 'runtime'
@@ -90,6 +98,7 @@ export type EvidenceType =
 
 export const EVIDENCE_STRENGTH: Record<EvidenceType, number> = {
   mockup: 0,
+  inspection: 0,
   static_check: 1,
   unit_test: 2,
   runtime: 3,
@@ -179,6 +188,21 @@ export type ApprovalKind =
   | 'cleanup';           // 작업공간·브랜치 정리
 
 export type ApprovalState = 'pending' | 'approved' | 'rejected' | 'expired' | 'consumed';
+
+export interface Evidence {
+  id: string;
+  ticketId: string;
+  round: number;
+  headSha: string;
+  type: EvidenceType;
+  label: string;
+  argv: string[] | null;
+  exitCode: number | null;
+  passed: boolean;
+  outputPath: string | null;
+  summary: string;
+  createdAt: string;
+}
 
 export interface Approval {
   id: string;

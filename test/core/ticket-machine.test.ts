@@ -152,6 +152,17 @@ test('선행 업무 미완료면 대기 보류, 오케스트레이터가 해제 
   if (released.ok) assert.equal(released.ticket.status, 'assigned');
 });
 
+test('실행 중단 시 배정 상태로 돌아가고 예산은 소모된 채 유지', () => {
+  const t = run(ticket(), TO_REVIEW.slice(0, 4));
+  const r = applyTicketCommand(t, { type: 'run_aborted', reason: '사용량 한도', hold: { reason: 'usage_limit', note: '5시간 후 재개' } }, ORCH, NOW);
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.equal(r.ticket.status, 'assigned');
+  assert.equal(r.ticket.runCount, 1);
+  assert.equal(r.ticket.hold?.reason, 'usage_limit');
+  assert.equal(applyTicketCommand(t, { type: 'run_aborted', reason: 'x' }, IMPL, NOW).ok, false);
+});
+
 test('경로 잠금 실패 시 작업 시작 거부', () => {
   const t = run(ticket(), TO_REVIEW.slice(0, 3));
   assert.equal(applyTicketCommand(t, { type: 'start_work', dependenciesDone: true, locksAcquired: false }, ORCH, NOW).ok, false);
@@ -208,6 +219,8 @@ const COMMANDS: TicketCommand[] = [
   { type: 'start_work', dependenciesDone: true, locksAcquired: true },
   { type: 'start_work', dependenciesDone: false, locksAcquired: true },
   { type: 'submit' },
+  { type: 'run_aborted', reason: 'x' },
+  { type: 'run_aborted', reason: 'x', hold: { reason: 'usage_limit', note: 'x' } },
   { type: 'verification_passed' },
   { type: 'verification_failed', reason: 'x' },
   { type: 'scope_violation', paths: ['x'] },
