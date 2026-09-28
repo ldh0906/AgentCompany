@@ -75,7 +75,10 @@ export async function waitForExit(runDir: string, shimPid: number | null, pollMs
   const started = Date.now();
   for (;;) {
     const rec = await readExitRecord(runDir);
-    if (rec) return { exitCode: rec.exitCode, signal: rec.signal, timedOut: rec.timedOut, killed: false, durationMs: rec.durationMs };
+    if (rec) {
+      await reapGroup(runDir);
+      return { exitCode: rec.exitCode, signal: rec.signal, timedOut: rec.timedOut, killed: false, durationMs: rec.durationMs };
+    }
     if (shimPid !== null && !isAlive(shimPid)) {
       // 셔틀이 기록 없이 사라짐(강제 종료 등). 잠깐 더 기다렸다가 판정.
       await new Promise((r) => setTimeout(r, pollMs));
@@ -169,33 +172,45 @@ export async function startProcess(spec: ProcessSpec): Promise<RunningProcess> {
 export async function terminateRun(runDir: string, shimPid: number | null): Promise<void> {
   const files = runFilePaths(runDir);
   await writeFile(path.join(runDir, 'abandoned'), new Date().toISOString()).catch(() => {});
-  if (shimPid !== null && process.platform !== 'win32') {
-    try {
-      process.kill(shimPid, 'SIGTERM');
-    } catch {
-      /* 이미 종료 */
-    }
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  // 셔틀이 이미 죽었어도 CLI는 남아 있을 수 있다(Unix에서는 별도 프로세스 그룹): 셔틀 생존과 무관하게 정리한다.
   const rec = await readFile(files.pid, 'utf8')
-    .then((x) => JSON.parse(x) as { cliPid?: number | null; startedAtMs?: number })
+    .then((x) => JSON.parse(x) as { shimPid?: number; pgid?: number | null; cliPid?: number | null; startedAtMs?: number })
     .catch(() => null);
-  if (rec?.cliPid) {
-    if (process.platform === 'win32') {
-      // Windows: 셔틀(Node)이 죽으면 그 자식은 libuv의 kill-on-close Job Object로 OS가 함께 종료한다.
-      // 셔틀이 살아 있거나 CLI가 아직 같은 프로세스로 살아 있을 때만 트리를 종료한다(PID 재사용 방지).
-      if (await isSameProcessAlive(rec.cliPid, rec.startedAtMs ?? 0)) await killTree(rec.cliPid);
-    } else {
-      // Unix: 그룹 리더(CLI)가 먼저 죽어도 그룹 구성원은 남을 수 있다. 리더 생존과 무관하게 그룹 전체에 보낸다.
+  if (process.platform !== 'win32') {
+    // Unix: CLI와 자손은 셔틀의 그룹(그룹 번호 = 셔틀 pid)에 있다. 셔틀 생존과 무관하게 그룹 전체를 끝낸다.
+    const pgid = rec?.pgid ?? rec?.shimPid ?? shimPid;
+    if (pgid) {
       try {
-        process.kill(-rec.cliPid, 'SIGKILL');
+        process.kill(pgid, 'SIGTERM'); // 셔틀이 살아 있으면 종료 기록을 남기게
       } catch {
-        /* 그룹이 이미 없음 */
+        /* 셔틀 없음 */
+      }
+      await new Promise((r) => setTimeout(r, 300));
+      try {
+        process.kill(-pgid, 'SIGKILL');
+      } catch {
+        /* 그룹 없음 */
       }
     }
+    return;
   }
+  // Windows: 셔틀이 끝나면 Job Object가 CLI와 자손을 종료한다. 셔틀이 살아 있으면 트리째 종료한다.
   if (shimPid !== null) await killTree(shimPid);
+  else if (rec?.cliPid && (await isSameProcessAlive(rec.cliPid, rec.startedAtMs ?? 0))) await killTree(rec.cliPid);
+}
+
+/** Unix: 종료 기록이 있어도 그룹에 남은 자손이 있을 수 있다(셔틀이 정리 전에 죽은 경우). */
+export async function reapGroup(runDir: string): Promise<void> {
+  if (process.platform === 'win32') return;
+  const rec = await readFile(runFilePaths(runDir).pid, 'utf8')
+    .then((x) => JSON.parse(x) as { shimPid?: number; pgid?: number | null })
+    .catch(() => null);
+  const pgid = rec?.pgid ?? rec?.shimPid;
+  if (!pgid) return;
+  try {
+    process.kill(-pgid, 'SIGKILL');
+  } catch {
+    /* 그룹 없음 */
+  }
 }
 
 /**

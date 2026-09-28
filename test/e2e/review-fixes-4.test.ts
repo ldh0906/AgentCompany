@@ -116,8 +116,34 @@ test('[P1] Unix: 그룹 리더가 먼저 죽어도 남은 그룹 구성원을 �
   await new Promise((r) => leader.once('close', r));
   const orphan = Number(out.trim());
   assert.ok(isAlive(orphan));
-  writeFileSync(path.join(runDir, 'pid.json'), JSON.stringify({ shimPid: 999_997, cliPid: leader.pid, startedAtMs: Date.now() }));
+  writeFileSync(
+    path.join(runDir, 'pid.json'),
+    JSON.stringify({ shimPid: 999_997, pgid: leader.pid, cliPid: leader.pid, startedAtMs: Date.now() }),
+  );
   await abandonAndTerminate(runDir);
   await new Promise((r) => setTimeout(r, 500));
   assert.equal(isAlive(orphan), false, '리더 없는 그룹 구성원도 종료');
+});
+
+test('[P1] CLI가 자식(빌드·서버)을 남기고 끝나도 그 자식은 살아남지 않음', { timeout: 30_000 }, async (t) => {
+  const d = tmp(t);
+  const script =
+    "const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});" +
+    'console.log(c.pid);c.unref();setTimeout(()=>process.exit(0),200)';
+  const p = await startProcess({
+    file: process.execPath,
+    args: ['-e', script],
+    cwd: d,
+    env: process.env,
+    stdinText: null,
+    runDir: path.join(d, 'run'),
+    timeoutMs: 60_000,
+  });
+  const o = await p.done;
+  assert.equal(o.exitCode, 0);
+  const { readFileSync } = await import('node:fs');
+  const orphan = Number(readFileSync(p.stdoutPath, 'utf8').trim());
+  assert.ok(orphan > 0);
+  await new Promise((r) => setTimeout(r, 800));
+  assert.equal(isAlive(orphan), false, 'CLI가 남긴 자식도 정리됨');
 });

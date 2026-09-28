@@ -31,51 +31,54 @@ function writeAtomic(path: string, data: unknown): void {
 
 const spec = JSON.parse(readFileSync(process.argv[2]!, 'utf8')) as ShimSpec;
 const started = Date.now();
-// 시작하자마자 자기 pid를 남긴다(데몬이 기록 전에 죽어도 복구가 찾을 수 있게).
-writeAtomic(spec.pidPath, { shimPid: process.pid, cliPid: null, startedAtMs: started });
+// 프로세스 그룹 설계:
+// - Unix: 셔틀은 데몬이 detached(setsid)로 띄워 자기 그룹의 리더다(그룹 번호 = 셔틀 pid). CLI와 그 자손은 같은 그룹에 둔다.
+//   그룹 번호가 시작 순간부터 알려져 있으므로 "CLI pid 기록 전" 공백이 없다. 끝낼 때는 종료 기록을 쓴 뒤 그룹 전체를 정리한다.
+// - Windows: 셔틀(Node)의 자식은 libuv의 kill-on-close Job Object에 들어간다. 셔틀이 끝나면 OS가 CLI와 그 자손을 모두 종료한다.
+const IS_WIN = process.platform === 'win32';
+
+/** 종료 기록을 남기고, 남은 자손까지 정리하며 끝낸다. */
+function finish(record: Record<string, unknown>): never {
+  writeAtomic(spec.exitPath, { ...record, durationMs: Date.now() - started });
+  if (!IS_WIN) {
+    try {
+      process.kill(-process.pid, 'SIGKILL'); // 자기 그룹 전체(셔틀 자신 포함): CLI가 남긴 빌드·서버 자식까지
+    } catch {
+      /* 그룹 없음 */
+    }
+  }
+  process.exit(0); // Windows: Job Object가 남은 자손을 종료
+}
+
+// 시작하자마자 자기 pid(= Unix 그룹 번호)를 남긴다(데몬이 기록 전에 죽어도 복구가 찾을 수 있게).
+writeAtomic(spec.pidPath, { shimPid: process.pid, pgid: IS_WIN ? null : process.pid, cliPid: null, startedAtMs: started });
 // 복구가 이 실행을 포기했으면 CLI를 띄우지 않는다(중복 실행 방지).
 if (existsSync(path.join(path.dirname(spec.pidPath), 'abandoned'))) {
   writeAtomic(spec.exitPath, { exitCode: null, signal: null, timedOut: false, abandoned: true, durationMs: 0 });
   process.exit(0);
 }
-// 종료 요청 처리기는 CLI를 띄우기 전에 설치한다(자식 생성 직후의 종료 요청도 놓치지 않게).
-// JS는 한 스레드라 신호 처리기는 문장 사이에만 실행된다: 아래 spawn 직후 child가 이미 채워져 있다.
-let child: ChildProcess | null = null;
-process.on('SIGTERM', () => {
-  if (child?.pid && process.platform !== 'win32') {
-    try {
-      process.kill(-child.pid, 'SIGKILL');
-    } catch {
-      /* 이미 종료 */
-    }
-  }
-  writeAtomic(spec.exitPath, { exitCode: null, signal: 'SIGTERM', timedOut: false, killed: true, durationMs: Date.now() - started });
-  process.exit(0);
-});
+// 종료 요청 처리기는 CLI를 띄우기 전에 설치한다.
+process.on('SIGTERM', () => finish({ exitCode: null, signal: 'SIGTERM', timedOut: false, killed: true }));
 
 const outFd = openSync(spec.stdoutPath, 'a');
 const errFd = openSync(spec.stderrPath, 'a');
-child = spawn(spec.file, spec.args, {
+const child: ChildProcess = spawn(spec.file, spec.args, {
   cwd: spec.cwd,
   env: process.env,
   windowsHide: true,
   shell: false,
-  // Unix: 별도 프로세스 그룹 → 시간 초과 시 하위 프로세스(셸·빌드)까지 함께 종료. Windows는 taskkill /T가 트리를 종료한다.
-  detached: process.platform !== 'win32',
+  detached: false, // 셔틀과 같은 그룹(Unix) / 같은 Job(Windows)
   stdio: [spec.stdinPath ? 'pipe' : 'ignore', outFd, errFd],
 });
 closeSync(outFd);
 closeSync(errFd);
-// CLI pid를 생성 직후 동기적으로 기록한다('spawn' 이벤트를 기다리지 않음).
-if (child.pid) writeAtomic(spec.pidPath, { shimPid: process.pid, cliPid: child.pid, startedAtMs: started });
+if (child.pid)
+  writeAtomic(spec.pidPath, { shimPid: process.pid, pgid: IS_WIN ? null : process.pid, cliPid: child.pid, startedAtMs: started });
 
 let timedOut = false;
-child.once('error', (error) => {
-  writeAtomic(spec.exitPath, { exitCode: null, signal: null, timedOut: false, error: String(error), durationMs: Date.now() - started });
-  process.exit(1);
-});
+child.once('error', (error) => finish({ exitCode: null, signal: null, timedOut: false, error: String(error) }));
 child.once('spawn', () => {
-  if (spec.stdinPath && child?.stdin) {
+  if (spec.stdinPath && child.stdin) {
     child.stdin.on('error', () => {});
     child.stdin.end(readFileSync(spec.stdinPath));
   }
@@ -83,19 +86,15 @@ child.once('spawn', () => {
 
 const timer = setTimeout(() => {
   timedOut = true;
-  if (!child?.pid) return;
-  if (process.platform === 'win32') execFile('taskkill', ['/T', '/F', '/PID', String(child.pid)], { windowsHide: true }, () => {});
-  else {
-    try {
-      process.kill(-child.pid, 'SIGKILL');
-    } catch {
-      child.kill('SIGKILL');
-    }
+  if (IS_WIN) {
+    if (child.pid) execFile('taskkill', ['/T', '/F', '/PID', String(child.pid)], { windowsHide: true }, () => {});
+  } else {
+    finish({ exitCode: null, signal: 'SIGKILL', timedOut: true });
   }
 }, spec.timeoutMs);
 
+// CLI가 끝나면(자손을 남겼더라도) 종료 기록 후 그룹·Job 전체를 정리한다.
 child.once('close', (exitCode: number | null, signal: NodeJS.Signals | null) => {
   clearTimeout(timer);
-  writeAtomic(spec.exitPath, { exitCode, signal, timedOut, durationMs: Date.now() - started });
-  process.exit(0);
+  finish({ exitCode, signal, timedOut });
 });

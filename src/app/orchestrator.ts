@@ -25,7 +25,7 @@ import type { Claim, Employee, Evidence, FailureClass, Project, Ticket, TicketSt
 import { DEFAULT_BUDGET, TERMINAL_STATUSES } from '../core/types.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
 import { locateExecutable } from '../runner/locate.ts';
-import { abandonAndTerminate, isSameProcessAlive, readExitRecord, startProcess, waitForExit } from '../runner/process.ts';
+import { abandonAndTerminate, isSameProcessAlive, readExitRecord, reapGroup, startProcess, waitForExit } from '../runner/process.ts';
 import { git } from '../workspace/git.ts';
 import {
   changedPaths,
@@ -181,7 +181,9 @@ export class Orchestrator {
       } else {
         report.ingestedAfterRestart.push(run.id);
         // 종료 기록 없이 셔틀이 죽었다면 CLI가 남아 있을 수 있다: 재배정·재실행 전에 먼저 정리한다.
+        // 종료 기록이 있어도 Unix 그룹에 자손이 남았을 수 있다.
         if (!finished) await abandonAndTerminate(run.runDir);
+        else await reapGroup(run.runDir);
         const outcome = finished ? { exitCode: finished.exitCode, timedOut: finished.timedOut } : null;
         await this.completeRun(run.id, outcome);
         if (this.records.run(run.id)?.status === 'orphaned') report.orphaned.push(run.id);
