@@ -1,13 +1,13 @@
 // 직원 CLI 프로세스 실행기.
 // - 출력은 파이프가 아니라 파일로 받는다: 데몬이 죽어도 출력이 남고, 재시작 후 이어 읽는다.
-// - Windows에서는 detached를 쓰지 않는다: 콘솔 없는 프로세스의 하위 프로세스(git·셸)가 새 콘솔 창을 띄우기 때문.
-//   Windows는 부모 종료 시 자식을 죽이지 않으므로 detached 없이도 실행은 계속된다.
+// - 실제 CLI는 실행 셔틀(shim.ts)을 거쳐 띄운다. 이유는 shim.ts 상단 주석 참고(Windows Job Object와 콘솔 창 문제).
 // - shell은 절대 쓰지 않는다. argv 배열만.
 
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { closeSync, openSync } from 'node:fs';
-import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export interface ProcessSpec {
   file: string;
@@ -28,6 +28,7 @@ export interface ProcessOutcome {
 }
 
 export interface RunningProcess {
+  /** 셔틀 프로세스 pid. 트리 종료는 이 pid 기준. */
   pid: number;
   startedAtMs: number;
   stdoutPath: string;
@@ -45,9 +46,45 @@ async function writeJsonAtomic(file: string, data: unknown): Promise<void> {
 export function runFilePaths(runDir: string) {
   return {
     meta: path.join(runDir, 'run.json'),
+    spec: path.join(runDir, 'shim-spec.json'),
+    stdin: path.join(runDir, 'stdin.txt'),
     stdout: path.join(runDir, 'stdout.log'),
     stderr: path.join(runDir, 'stderr.log'),
+    pid: path.join(runDir, 'pid.json'),
+    exit: path.join(runDir, 'exit.json'),
   };
+}
+
+function shimScript(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const ts = path.join(here, 'shim.ts');
+  return existsSync(ts) ? ts : path.join(here, 'shim.js');
+}
+
+/** exit.json(셔틀이 남긴 종료 기록)을 읽는다. 아직 없으면 null. */
+export async function readExitRecord(runDir: string): Promise<(Omit<ProcessOutcome, 'killed'> & { error?: string }) | null> {
+  try {
+    return JSON.parse(await readFile(runFilePaths(runDir).exit, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** 재시작 후에도 쓸 수 있는 종료 대기: exit.json이 생기거나 셔틀이 사라질 때까지. */
+export async function waitForExit(runDir: string, shimPid: number | null, pollMs = 250): Promise<ProcessOutcome> {
+  const started = Date.now();
+  for (;;) {
+    const rec = await readExitRecord(runDir);
+    if (rec) return { exitCode: rec.exitCode, signal: rec.signal, timedOut: rec.timedOut, killed: false, durationMs: rec.durationMs };
+    if (shimPid !== null && !isAlive(shimPid)) {
+      // 셔틀이 기록 없이 사라짐(강제 종료 등). 잠깐 더 기다렸다가 판정.
+      await new Promise((r) => setTimeout(r, pollMs));
+      const late = await readExitRecord(runDir);
+      if (late) return { exitCode: late.exitCode, signal: late.signal, timedOut: late.timedOut, killed: false, durationMs: late.durationMs };
+      return { exitCode: null, signal: null, timedOut: false, killed: true, durationMs: Date.now() - started };
+    }
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
 }
 
 export async function startProcess(spec: ProcessSpec): Promise<RunningProcess> {
@@ -55,74 +92,47 @@ export async function startProcess(spec: ProcessSpec): Promise<RunningProcess> {
   await mkdir(spec.runDir, { recursive: true });
   const files = runFilePaths(spec.runDir);
   const startedAtMs = Date.now();
-  const base = { file: spec.file, args: spec.args, cwd: spec.cwd, startedAt: new Date(startedAtMs).toISOString() };
-  const record = (data: object) => writeJsonAtomic(files.meta, { ...base, ...data });
-  await record({ state: 'starting' });
-
-  const outFd = openSync(files.stdout, 'a');
-  const errFd = openSync(files.stderr, 'a');
-  let child: ChildProcess;
-  try {
-    child = spawn(spec.file, spec.args, {
-      cwd: spec.cwd,
-      env: spec.env,
-      detached: process.platform !== 'win32',
-      windowsHide: true,
-      shell: false,
-      stdio: ['pipe', outFd, errFd],
-    });
-  } finally {
-    closeSync(outFd);
-    closeSync(errFd);
-  }
-
-  const closed = new Promise<{ exitCode: number | null; signal: string | null }>((resolve) =>
-    child.once('close', (exitCode, signal) => resolve({ exitCode, signal })),
-  );
-  child.stdin?.on('error', () => {
-    /* 조기 종료로 인한 EPIPE는 종료 결과로 판단한다 */
+  if (spec.stdinText !== null) await writeFile(files.stdin, spec.stdinText, 'utf8');
+  await writeJsonAtomic(files.spec, {
+    file: spec.file,
+    args: spec.args,
+    cwd: spec.cwd,
+    stdinPath: spec.stdinText !== null ? files.stdin : null,
+    stdoutPath: files.stdout,
+    stderrPath: files.stderr,
+    pidPath: files.pid,
+    exitPath: files.exit,
+    timeoutMs: spec.timeoutMs,
   });
-  try {
-    await new Promise<void>((resolve, reject) => {
-      child.once('spawn', resolve);
-      child.once('error', reject);
-    });
-  } catch (error) {
-    await record({ state: 'exited', exitCode: null, error: String(error), durationMs: Date.now() - startedAtMs });
-    throw error;
-  }
+  await writeJsonAtomic(files.meta, { file: spec.file, args: spec.args, cwd: spec.cwd, startedAt: new Date(startedAtMs).toISOString(), state: 'starting' });
 
-  const pid = child.pid!;
-  let timedOut = false;
+  // 셔틀은 detached: 데몬의 Job Object 밖에서 살아남는다. 셔틀 자신은 창을 만들지 않는다.
+  const shim: ChildProcess = spawn(process.execPath, ['--no-warnings', shimScript(), files.spec], {
+    cwd: spec.cwd,
+    env: spec.env,
+    detached: true,
+    windowsHide: true,
+    shell: false,
+    stdio: 'ignore',
+  });
+  await new Promise<void>((resolve, reject) => {
+    shim.once('spawn', resolve);
+    shim.once('error', reject);
+  });
+  shim.unref();
+  const pid = shim.pid!;
+  await writeJsonAtomic(files.meta, { file: spec.file, args: spec.args, cwd: spec.cwd, startedAt: new Date(startedAtMs).toISOString(), state: 'running', shimPid: pid });
+
   let killed = false;
-  let finished = false;
-  let termination: Promise<void> | undefined;
-  const kill = (): Promise<void> => {
-    if (finished) return Promise.resolve();
+  const kill = async () => {
     killed = true;
-    termination ??= killTree(pid);
-    return termination;
+    await killTree(pid);
   };
-
-  await record({ state: 'running', pid });
-  const timer = setTimeout(() => {
-    timedOut = true;
-    void kill().catch(() => {});
-  }, spec.timeoutMs);
-
-  const done = (async (): Promise<ProcessOutcome> => {
-    const r = await closed;
-    clearTimeout(timer);
-    await termination?.catch(() => {});
-    finished = true;
-    const outcome: ProcessOutcome = { ...r, timedOut, killed, durationMs: Date.now() - startedAtMs };
-    await record({ state: 'exited', pid, ...outcome });
+  const done = waitForExit(spec.runDir, pid).then(async (o) => {
+    const outcome = { ...o, killed: o.killed || killed };
+    await writeJsonAtomic(files.meta, { file: spec.file, args: spec.args, cwd: spec.cwd, startedAt: new Date(startedAtMs).toISOString(), state: 'exited', shimPid: pid, ...outcome });
     return outcome;
-  })();
-
-  if (spec.stdinText !== null) child.stdin?.end(spec.stdinText, 'utf8');
-  else child.stdin?.end();
-
+  });
   return { pid, startedAtMs, stdoutPath: files.stdout, stderrPath: files.stderr, done, kill };
 }
 

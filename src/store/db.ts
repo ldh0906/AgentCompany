@@ -84,7 +84,7 @@ export class Store {
   }
 
   close(): void {
-    this.db.close();
+    if (this.db.isOpen) this.db.close();
   }
 
   // ---- 설정 ----
