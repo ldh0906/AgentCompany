@@ -7,7 +7,7 @@
 //
 // 환경변수는 파일에 쓰지 않는다(비밀값이 있을 수 있음). 셔틀의 환경이 그대로 CLI로 넘어간다.
 
-import { spawn, execFile } from 'node:child_process';
+import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { closeSync, existsSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -38,36 +38,11 @@ if (existsSync(path.join(path.dirname(spec.pidPath), 'abandoned'))) {
   writeAtomic(spec.exitPath, { exitCode: null, signal: null, timedOut: false, abandoned: true, durationMs: 0 });
   process.exit(0);
 }
-const outFd = openSync(spec.stdoutPath, 'a');
-const errFd = openSync(spec.stderrPath, 'a');
-const child = spawn(spec.file, spec.args, {
-  cwd: spec.cwd,
-  env: process.env,
-  windowsHide: true,
-  shell: false,
-  // Unix: 별도 프로세스 그룹 → 시간 초과 시 하위 프로세스(셸·빌드)까지 함께 종료. Windows는 taskkill /T가 트리를 종료한다.
-  detached: process.platform !== 'win32',
-  stdio: [spec.stdinPath ? 'pipe' : 'ignore', outFd, errFd],
-});
-closeSync(outFd);
-closeSync(errFd);
-
-let timedOut = false;
-child.once('error', (error) => {
-  writeAtomic(spec.exitPath, { exitCode: null, signal: null, timedOut: false, error: String(error), durationMs: Date.now() - started });
-  process.exit(1);
-});
-child.once('spawn', () => {
-  writeAtomic(spec.pidPath, { shimPid: process.pid, cliPid: child.pid, startedAtMs: started });
-  if (spec.stdinPath && child.stdin) {
-    child.stdin.on('error', () => {});
-    child.stdin.end(readFileSync(spec.stdinPath));
-  }
-});
-
-// Unix: 데몬의 종료 요청(SIGTERM)을 받으면 CLI 프로세스 그룹부터 끝낸다.
+// 종료 요청 처리기는 CLI를 띄우기 전에 설치한다(자식 생성 직후의 종료 요청도 놓치지 않게).
+// JS는 한 스레드라 신호 처리기는 문장 사이에만 실행된다: 아래 spawn 직후 child가 이미 채워져 있다.
+let child: ChildProcess | null = null;
 process.on('SIGTERM', () => {
-  if (child.pid && process.platform !== 'win32') {
+  if (child?.pid && process.platform !== 'win32') {
     try {
       process.kill(-child.pid, 'SIGKILL');
     } catch {
@@ -78,9 +53,37 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
+const outFd = openSync(spec.stdoutPath, 'a');
+const errFd = openSync(spec.stderrPath, 'a');
+child = spawn(spec.file, spec.args, {
+  cwd: spec.cwd,
+  env: process.env,
+  windowsHide: true,
+  shell: false,
+  // Unix: 별도 프로세스 그룹 → 시간 초과 시 하위 프로세스(셸·빌드)까지 함께 종료. Windows는 taskkill /T가 트리를 종료한다.
+  detached: process.platform !== 'win32',
+  stdio: [spec.stdinPath ? 'pipe' : 'ignore', outFd, errFd],
+});
+closeSync(outFd);
+closeSync(errFd);
+// CLI pid를 생성 직후 동기적으로 기록한다('spawn' 이벤트를 기다리지 않음).
+if (child.pid) writeAtomic(spec.pidPath, { shimPid: process.pid, cliPid: child.pid, startedAtMs: started });
+
+let timedOut = false;
+child.once('error', (error) => {
+  writeAtomic(spec.exitPath, { exitCode: null, signal: null, timedOut: false, error: String(error), durationMs: Date.now() - started });
+  process.exit(1);
+});
+child.once('spawn', () => {
+  if (spec.stdinPath && child?.stdin) {
+    child.stdin.on('error', () => {});
+    child.stdin.end(readFileSync(spec.stdinPath));
+  }
+});
+
 const timer = setTimeout(() => {
   timedOut = true;
-  if (!child.pid) return;
+  if (!child?.pid) return;
   if (process.platform === 'win32') execFile('taskkill', ['/T', '/F', '/PID', String(child.pid)], { windowsHide: true }, () => {});
   else {
     try {
@@ -91,7 +94,7 @@ const timer = setTimeout(() => {
   }
 }, spec.timeoutMs);
 
-child.once('close', (exitCode, signal) => {
+child.once('close', (exitCode: number | null, signal: NodeJS.Signals | null) => {
   clearTimeout(timer);
   writeAtomic(spec.exitPath, { exitCode, signal, timedOut, durationMs: Date.now() - started });
   process.exit(0);

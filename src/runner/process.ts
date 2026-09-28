@@ -140,27 +140,7 @@ export async function startProcess(spec: ProcessSpec): Promise<RunningProcess> {
   let killed = false;
   const kill = async () => {
     killed = true;
-    if (process.platform !== 'win32') {
-      // 먼저 셔틀에게 정중히 요청한다: 셔틀이 CLI 그룹을 끝내고 나간다(CLI pid가 아직 기록되지 않은 경쟁도 셔틀이 처리).
-      try {
-        process.kill(pid, 'SIGTERM');
-      } catch {
-        /* 이미 종료 */
-      }
-      await new Promise((r) => setTimeout(r, 500));
-      // CLI는 셔틀과 다른 프로세스 그룹이다: CLI 그룹부터 종료한다.
-      const rec = await readFile(files.pid, 'utf8')
-        .then((x) => JSON.parse(x) as { cliPid?: number })
-        .catch(() => null);
-      if (rec?.cliPid) {
-        try {
-          process.kill(-rec.cliPid, 'SIGKILL');
-        } catch {
-          /* 이미 종료 */
-        }
-      }
-    }
-    await killTree(pid);
+    await terminateRun(spec.runDir, pid);
   };
   const done = waitForExit(spec.runDir, pid).then(async (o) => {
     const outcome = { ...o, killed: o.killed || killed };
@@ -176,6 +156,37 @@ export async function startProcess(spec: ProcessSpec): Promise<RunningProcess> {
     return outcome;
   });
   return { pid, startedAtMs, stdoutPath: files.stdout, stderrPath: files.stderr, done, kill };
+}
+
+/**
+ * 실행 종료(재시작 후 남은 실행 정리에도 사용).
+ * - 아직 셔틀이 CLI를 띄우기 전이면 포기 표시로 막는다.
+ * - Unix: 셔틀에 SIGTERM → 셔틀이 CLI 그룹을 끝낸다. 이어서 pid.json의 CLI 그룹과 셔틀을 강제 종료한다.
+ * - Windows: 셔틀 트리 전체를 종료한다(CLI는 셔틀의 자식).
+ */
+export async function terminateRun(runDir: string, shimPid: number | null): Promise<void> {
+  const files = runFilePaths(runDir);
+  await writeFile(path.join(runDir, 'abandoned'), new Date().toISOString()).catch(() => {});
+  if (shimPid === null) return;
+  if (process.platform !== 'win32') {
+    try {
+      process.kill(shimPid, 'SIGTERM');
+    } catch {
+      /* 이미 종료 */
+    }
+    await new Promise((r) => setTimeout(r, 500));
+    const rec = await readFile(files.pid, 'utf8')
+      .then((x) => JSON.parse(x) as { cliPid?: number })
+      .catch(() => null);
+    if (rec?.cliPid) {
+      try {
+        process.kill(-rec.cliPid, 'SIGKILL');
+      } catch {
+        /* 이미 종료 */
+      }
+    }
+  }
+  await killTree(shimPid);
 }
 
 /** 프로세스 트리 종료. */

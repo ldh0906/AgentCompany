@@ -1,6 +1,7 @@
 import { setLanguage, tr } from '../core/i18n.ts';
 import { execFile } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -71,22 +72,36 @@ interface Lock {
   startedAt: string;
 }
 
-/** 데이터 폴더당 데몬 하나: 복구·서버 시작 전에 잠금 파일을 배타적으로 만든다(동시 시작 경쟁 방지). */
+let lockDb: DatabaseSync | null = null;
+
+/**
+ * 데이터 폴더당 데몬 하나. SQLite 배타 잠금을 잡고 종료할 때까지 놓지 않는다.
+ * 프로세스가 죽으면 OS가 잠금을 자동으로 풀어 주므로 "죽은 잠금 회수" 경합이 없다.
+ */
 export function acquireLock(dataDir: string): boolean {
-  const file = path.join(dataDir, 'daemon.lock');
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const fd = openSync(file, 'wx', 0o600);
-      writeFileSync(fd, JSON.stringify({ pid: process.pid, url: '', startedAt: new Date().toISOString() }));
-      closeSync(fd);
-      return true;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      if (readLock(dataDir)) return false; // 살아 있는 데몬이 있다
-      rmSync(file, { force: true }); // 죽은 데몬의 잠금
-    }
+  const db = new DatabaseSync(path.join(dataDir, 'daemon.lockdb'));
+  try {
+    db.exec('PRAGMA busy_timeout = 0; PRAGMA locking_mode = EXCLUSIVE; BEGIN EXCLUSIVE;');
+  } catch {
+    db.close();
+    return false;
   }
-  return false;
+  lockDb = db;
+  writeFileSync(path.join(dataDir, 'daemon.lock'), JSON.stringify({ pid: process.pid, url: '', startedAt: new Date().toISOString() }), {
+    mode: 0o600,
+  });
+  return true;
+}
+
+export function releaseLock(): void {
+  if (!lockDb) return;
+  try {
+    lockDb.exec('ROLLBACK');
+  } catch {
+    /* 무시 */
+  }
+  lockDb.close();
+  lockDb = null;
 }
 
 function readLock(dataDir: string): Lock | null {
@@ -183,6 +198,7 @@ async function start(argv: string[], demo: boolean): Promise<void> {
     await server.close();
     rmSync(path.join(dataDir, 'daemon.lock'), { force: true });
     store.close();
+    releaseLock();
     process.exit(0);
   };
   process.on('SIGINT', () => void shutdown());

@@ -25,7 +25,7 @@ import type { Claim, Employee, Evidence, FailureClass, Project, Ticket, TicketSt
 import { DEFAULT_BUDGET, TERMINAL_STATUSES } from '../core/types.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
 import { locateExecutable } from '../runner/locate.ts';
-import { isSameProcessAlive, killTree, readExitRecord, startProcess, waitForExit } from '../runner/process.ts';
+import { isSameProcessAlive, readExitRecord, startProcess, terminateRun, waitForExit } from '../runner/process.ts';
 import { git } from '../workspace/git.ts';
 import {
   changedPaths,
@@ -864,14 +864,9 @@ export class Orchestrator {
       const paths = projectPaths(this.opts.dataDir, project.id);
       const vwt = await ensureDetachedWorktree(paths, 'verify', ticketId, sub.headSha);
       // 검증 명령은 제출된 코드를 실행한다(CI와 같음). 실행 전후로 원본 저장소와 미러 ref를 비교해 부작용을 잡는다.
-      // 스냅샷과 판정은 같은 프로젝트 잠금 안에서 한다(다른 티켓의 정상 반영과 경쟁하지 않게).
-      const before = await this.withProjectLock(project.id, async () => ({
-        origin: await originFingerprint(project.originPath),
-        refs: await snapshotRefs(paths.mirror),
-        originRefs: await snapshotRefs(project.originPath),
-        seq: this.records.currentMoveSeq(),
-      }));
+      // 남은 이전 검증부터 끝낸다. 기준 스냅샷은 DB에 남겨, 검증 중 재시작해도 "이미 바뀐 원본"을 새 기준으로 삼지 않는다.
       await this.stopLeftoverVerify(ticketId);
+      const before = await this.verifyBaseline(`verify_base:${ticketId}`, project, paths);
       try {
         for (const [i, vc] of project.verifyCommands.entries()) {
           const ev = await this.runVerifyCommand(vc, vwt, path.join(sub.runDir, 'verify', String(i)), ticketId);
@@ -906,6 +901,7 @@ export class Orchestrator {
             out.push(tr(`검증 중 원본 ref:${r}`, `Original ref during verification:${r}`));
           return out;
         });
+        this.company.store.setSetting(`verify_base:${ticketId}`, '');
         if (violations.length) {
           this.apply(ticketId, { type: 'scope_violation', paths: violations });
           return;
@@ -921,12 +917,35 @@ export class Orchestrator {
     else this.apply(ticketId, { type: 'verification_passed' });
   }
 
-  /** 이전 데몬이 남긴 검증 프로세스가 살아 있으면 먼저 종료한다(같은 작업 트리에서 중복 실행 방지). */
+  /** 검증 기준 스냅샷: 중단된 이전 시도의 기준이 남아 있으면 그것을 쓴다(가장 이른 기준). */
+  private async verifyBaseline(
+    key: string,
+    project: Project,
+    paths: ReturnType<typeof projectPaths>,
+    lock = true,
+  ): Promise<{ origin: string; refs: Record<string, string>; originRefs: Record<string, string>; seq: number }> {
+    const saved = this.company.store.getSetting(key);
+    if (saved) return JSON.parse(saved);
+    const take = async () => ({
+      origin: await originFingerprint(project.originPath),
+      refs: await snapshotRefs(paths.mirror),
+      originRefs: await snapshotRefs(project.originPath),
+      seq: this.records.currentMoveSeq(),
+    });
+    // 반영 중(이미 프로젝트 잠금 안)에는 잠금을 다시 잡지 않는다.
+    const snap = lock ? await this.withProjectLock(project.id, take) : await take();
+    this.company.store.setSetting(key, JSON.stringify(snap));
+    return snap;
+  }
+
+  /** 이전 데몬이 남긴 검증 실행을 끝낸다: 셔틀 기록을 찾아 CLI 그룹까지 종료하고, 아직 시작 전이면 포기 표시로 막는다. */
   private async stopLeftoverVerify(ticketId: string): Promise<void> {
     const raw = this.company.store.getSetting(`verify_proc:${ticketId}`);
     if (!raw) return;
-    const rec = JSON.parse(raw) as { pid: number; startedAtMs: number };
-    if (await isSameProcessAlive(rec.pid, rec.startedAtMs)) await killTree(rec.pid);
+    const rec = JSON.parse(raw) as { runDir: string };
+    const shim = await findShim(rec.runDir);
+    const alive = shim ? await isSameProcessAlive(shim.pid, shim.startedAtMs ?? 0) : false;
+    await terminateRun(rec.runDir, alive && shim ? shim.pid : null);
     this.company.store.setSetting(`verify_proc:${ticketId}`, '');
   }
 
@@ -938,6 +957,8 @@ export class Orchestrator {
   ): Promise<{ exitCode: number | null; passed: boolean; outputPath: string | null; summary: string }> {
     // 시도마다 고유 폴더: 이전 시도의 exit.json을 새 실행의 결과로 착각하지 않는다.
     const runDir = `${baseRunDir}-${Date.now()}-${randomBytes(3).toString('hex')}`;
+    // 프로세스를 띄우기 전에 실행 폴더를 먼저 기록한다(띄운 직후 죽어도 복구가 셔틀 기록을 찾을 수 있게).
+    if (ticketId) this.company.store.setSetting(`verify_proc:${ticketId}`, JSON.stringify({ runDir }));
     const [cmd, ...rest] = vc.argv;
     const located = cmd ? await locateExecutable(cmd) : null;
     if (!located?.launch)
@@ -1172,11 +1193,13 @@ export class Orchestrator {
         mode === 'auto_after_approval'
           ? await integrateWithMerge(project.originPath, paths, t.id, project.baseBranch, sub.headSha, t.title, async (mergeSha) => {
               if (!project.verifyCommands.length) return { ok: true };
+              await this.stopLeftoverVerify(t.id);
               const vwt = await ensureDetachedWorktree(paths, 'verify', t.id, mergeSha);
-              const fp = await originFingerprint(project.originPath);
-              const originRefs = await snapshotRefs(project.originPath);
-              const mirrorRefs = await snapshotRefs(paths.mirror);
-              const seq = this.records.currentMoveSeq();
+              const base = await this.verifyBaseline(`mergeverify_base:${t.id}`, project, paths, false);
+              const fp = base.origin;
+              const originRefs = base.originRefs;
+              const mirrorRefs = base.refs;
+              const seq = base.seq;
               let failed: string | null = null;
               try {
                 for (const [i, vc] of project.verifyCommands.entries()) {
@@ -1191,6 +1214,7 @@ export class Orchestrator {
                   (await originFingerprint(project.originPath)) !== fp ||
                   this.unexplained(project, 'origin', originRefs, await snapshotRefs(project.originPath), seq).length > 0 ||
                   this.unexplained(project, 'mirror', mirrorRefs, await snapshotRefs(paths.mirror), seq).length > 0;
+                this.company.store.setSetting(`mergeverify_base:${t.id}`, '');
                 // 정책 위반은 일반 테스트 실패와 다르다: 브랜치 반영으로 강등하지 않고 반영 자체를 멈춘다.
                 if (touched)
                   throw new Error(

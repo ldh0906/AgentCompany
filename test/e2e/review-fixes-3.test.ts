@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Store } from '../../src/store/db.ts';
 import { Records } from '../../src/app/records.ts';
-import { acquireLock } from '../../src/cli/commands.ts';
+import { acquireLock, releaseLock } from '../../src/cli/commands.ts';
 import { git, gitOut } from '../../src/workspace/git.ts';
 import {
   commitWorktree,
@@ -49,12 +49,15 @@ test('[P2] 같은 Store 실행 중 끝부분 삭제 뒤 추가해도 탐지 유�
   assert.equal(r.ok, false);
 });
 
-test('[P1] 데몬 잠금은 원자적: 살아 있는 소유자가 있으면 두 번째 시작 거부', (t) => {
+test('[P1] 데몬 잠금: OS 배타 잠금이라 두 번째 시작은 거부되고, 소유자가 놓으면 다시 얻을 수 있음', (t) => {
   const d = tmp(t);
   assert.equal(acquireLock(d), true);
   assert.equal(acquireLock(d), false, '같은 데이터 폴더로 두 번째 데몬 불가');
   writeFileSync(path.join(d, 'daemon.lock'), JSON.stringify({ pid: 999_999, url: '', startedAt: '' }));
-  assert.equal(acquireLock(d), true, '죽은 데몬의 잠금은 회수');
+  assert.equal(acquireLock(d), false, '정보용 잠금 파일을 조작해도 실제 잠금은 유지');
+  releaseLock();
+  assert.equal(acquireLock(d), true, '소유자가 놓으면(프로세스 종료 포함) 다시 얻음');
+  releaseLock();
 });
 
 test('[P1] 원본의 다른 worktree가 기준 브랜치를 체크아웃 중이면 자동 병합하지 않고, 체크아웃된 브랜치는 갱신 거부', async (t) => {
@@ -112,4 +115,22 @@ test('[P1] 병합 재검증이 원본을 건드리면 브랜치 반영으로 강
   assert.equal(r.hold?.reason, 'needs_decision');
   assert.ok(existsSync(path.join(env.origin, 'pwn-merge.txt')));
   assert.equal((await git(['branch', '--list', 'ac/*'], env.origin)).stdout.trim(), '', '브랜치도 반영하지 않음');
+});
+
+test('[P1] 검증 중 재시작해도 기준 스냅샷이 남아, 중단 전의 원본 변경을 새 기준으로 받아들이지 않음', { timeout: 120_000 }, async (t) => {
+  const env = await setup(t);
+  const project = env.company.requireProject(env.projectId);
+  const paths = projectPaths(env.dataDir, env.projectId);
+  await syncMirror(env.origin, paths, 'main');
+  // 1차 검증 시도가 기준을 남긴 뒤 원본을 바꾸고 데몬이 죽었다고 가정
+  await (env.orch as unknown as { verifyBaseline: (...a: unknown[]) => Promise<unknown> }).verifyBaseline(
+    'verify_base:T-1',
+    project,
+    paths,
+  );
+  writeFileSync(path.join(env.origin, 'left-by-interrupted-verify.txt'), 'x');
+  const tk = newImplTicket(env);
+  const r = await driveUntil(env, tk.id, (x) => x.hold !== null || x.status === 'awaiting_approval');
+  assert.equal(r.hold?.reason, 'needs_permission');
+  assert.match(r.hold!.note, /검증 명령 실행 중 원본 저장소 변경/);
 });
