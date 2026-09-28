@@ -82,7 +82,7 @@ This project separates **measured facts** from assumptions ([details](docs/desig
 
 ## Built the way it tells you to build
 
-Every change in this repository was reviewed by a different model (Codex, read-only) and every objection had to be answered with a fix **and** a regression test. Three review rounds found 15 P1 defects the tests had missed — including a way for verify commands to modify your repository before approval and a time-of-check/time-of-use bug in integration. The full log: [docs/design/03-review-log.md](docs/design/03-review-log.md).
+Every change in this repository was reviewed by a different model (Codex, read-only) and every objection had to be answered with a fix **and** a regression test. Five review rounds found 24 P1 defects the tests had missed — including a way for verify commands to modify your repository before approval and a time-of-check/time-of-use bug in integration. The full log: [docs/design/03-review-log.md](docs/design/03-review-log.md).
 
 ## How a ticket moves
 
@@ -146,7 +146,7 @@ No services, scheduled tasks or autostart entries are ever created.
 ## Development
 
 ```bash
-npm test          # 82 tests: state machine properties, git workspace, e2e with fake agents, crash/restart
+npm test          # 85 tests: state machine properties, git workspace, e2e with fake agents, crash/restart
 npm run typecheck
 npm run dev       # demo daemon from source
 npm run dev:web   # Vite dev server for the dashboard (proxy to :4777)

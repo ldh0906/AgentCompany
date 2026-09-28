@@ -8,7 +8,8 @@ This project was built the same way: code written by Claude (and two Codex worke
 | 1 | not approvable | 7 P1, 5 P2 | all fixed; tests in `test/e2e/review-fixes.test.ts` |
 | 2 | not approvable | 6 of 12 only partially fixed, 4 regressions introduced by the fixes | all fixed; tests in `test/e2e/review-fixes-2.test.ts` |
 | 3 | not approvable | 4 partial, 5 new P1 | all fixed; tests in `test/e2e/review-fixes-3.test.ts` |
-| 4 | see below | | |
+| 4 | not approvable | 3 partial, 5 P1 in restart/kill race windows | all fixed; tests in `test/e2e/review-fixes-3.test.ts` |
+| 5 | not approvable | 3 partial, 4 P1 (one introduced by the round-4 fix itself) | all fixed; tests in `test/e2e/review-fixes-4.test.ts` |
 
 The rounds are the product's own protocol, applied to itself: independent review → the author must answer every objection → no majority vote, the CEO decides what is acceptable.
 
@@ -37,6 +38,12 @@ The rounds are the product's own protocol, applied to itself: independent review
 - A failed post-run check was treated as a normal submission.
 - Integration could move a branch checked out in a *linked* worktree of your repository.
 - The single-instance daemon lock was not atomic.
+
+**Rounds 4–5**
+- The stale-lock reclaim could delete another daemon's fresh lock. → The daemon holds a SQLite `EXCLUSIVE` lock for its lifetime; the OS releases it on death.
+- A crash in the middle of verification lost the "before" snapshot, so a restarted verification accepted the already-modified repository as the new baseline. → Baselines are persisted and cleared only in the same transaction that records the verdict.
+- Recovery killed the shim but not the CLI's separate process group on Unix, and could race a shim that started just before the "abandoned" marker. → Marker first, wait, then terminate both.
+- The round-4 fix overwrote the recovery record with a format recovery could not read (found by the reviewer, not by tests).
 
 ## Also found by tests and dogfooding (not by the reviewer)
 

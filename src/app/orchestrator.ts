@@ -25,7 +25,7 @@ import type { Claim, Employee, Evidence, FailureClass, Project, Ticket, TicketSt
 import { DEFAULT_BUDGET, TERMINAL_STATUSES } from '../core/types.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
 import { locateExecutable } from '../runner/locate.ts';
-import { isSameProcessAlive, readExitRecord, startProcess, terminateRun, waitForExit } from '../runner/process.ts';
+import { abandonAndTerminate, isSameProcessAlive, readExitRecord, startProcess, waitForExit } from '../runner/process.ts';
 import { git } from '../workspace/git.ts';
 import {
   changedPaths,
@@ -901,20 +901,26 @@ export class Orchestrator {
             out.push(tr(`검증 중 원본 ref:${r}`, `Original ref during verification:${r}`));
           return out;
         });
-        this.company.store.setSetting(`verify_base:${ticketId}`, '');
         if (violations.length) {
-          this.apply(ticketId, { type: 'scope_violation', paths: violations });
+          // 기준 삭제와 격리 기록은 같은 트랜잭션: 사이에서 죽어도 "기준 없음 + 판정 없음" 상태가 남지 않는다.
+          this.company.store.transact(() => {
+            this.company.store.setSetting(`verify_base:${ticketId}`, '');
+            this.apply(ticketId, { type: 'scope_violation', paths: violations });
+          });
           return;
         }
       }
     }
     this.changed('ticket', ticketId);
-    if (failures.length)
-      this.apply(ticketId, {
-        type: 'verification_failed',
-        reason: tr(`시스템 검증 실패:\n${failures.join('\n\n')}`, `System verification failed:\n${failures.join('\n\n')}`),
-      });
-    else this.apply(ticketId, { type: 'verification_passed' });
+    this.company.store.transact(() => {
+      this.company.store.setSetting(`verify_base:${ticketId}`, '');
+      if (failures.length)
+        this.apply(ticketId, {
+          type: 'verification_failed',
+          reason: tr(`시스템 검증 실패:\n${failures.join('\n\n')}`, `System verification failed:\n${failures.join('\n\n')}`),
+        });
+      else this.apply(ticketId, { type: 'verification_passed' });
+    });
   }
 
   /** 검증 기준 스냅샷: 중단된 이전 시도의 기준이 남아 있으면 그것을 쓴다(가장 이른 기준). */
@@ -942,10 +948,8 @@ export class Orchestrator {
   private async stopLeftoverVerify(ticketId: string): Promise<void> {
     const raw = this.company.store.getSetting(`verify_proc:${ticketId}`);
     if (!raw) return;
-    const rec = JSON.parse(raw) as { runDir: string };
-    const shim = await findShim(rec.runDir);
-    const alive = shim ? await isSameProcessAlive(shim.pid, shim.startedAtMs ?? 0) : false;
-    await terminateRun(rec.runDir, alive && shim ? shim.pid : null);
+    const rec = JSON.parse(raw) as { runDir?: string };
+    if (rec.runDir) await abandonAndTerminate(rec.runDir);
     this.company.store.setSetting(`verify_proc:${ticketId}`, '');
   }
 
@@ -977,8 +981,6 @@ export class Orchestrator {
       runDir,
       timeoutMs: vc.timeoutMs ?? 15 * 60_000,
     });
-    if (ticketId)
-      this.company.store.setSetting(`verify_proc:${ticketId}`, JSON.stringify({ pid: proc.pid, startedAtMs: proc.startedAtMs }));
     const o = await proc.done;
     if (ticketId) this.company.store.setSetting(`verify_proc:${ticketId}`, '');
     const tail = async (f: string) => (await readFile(f, 'utf8').catch(() => '')).slice(-1500);
@@ -1214,7 +1216,6 @@ export class Orchestrator {
                   (await originFingerprint(project.originPath)) !== fp ||
                   this.unexplained(project, 'origin', originRefs, await snapshotRefs(project.originPath), seq).length > 0 ||
                   this.unexplained(project, 'mirror', mirrorRefs, await snapshotRefs(paths.mirror), seq).length > 0;
-                this.company.store.setSetting(`mergeverify_base:${t.id}`, '');
                 // 정책 위반은 일반 테스트 실패와 다르다: 브랜치 반영으로 강등하지 않고 반영 자체를 멈춘다.
                 if (touched)
                   throw new Error(
@@ -1239,10 +1240,14 @@ export class Orchestrator {
         else this.records.recordRefMove(project.id, 'origin', `refs/heads/${result.branch}`, originBranchBefore, result.sha);
         this.records.setApprovalState(approval.id, 'consumed', 'orchestrator', { result });
         this.company.store.appendEvent('orchestrator', 'ticket.integration_result', ticketId, result);
+        this.company.store.setSetting(`mergeverify_base:${ticketId}`, '');
         this.apply(ticketId, { type: 'integrated', commitSha: commit });
       });
     } catch (error) {
-      this.apply(ticketId, { type: 'integration_failed', reason: String((error as Error).message ?? error) });
+      this.company.store.transact(() => {
+        this.company.store.setSetting(`mergeverify_base:${ticketId}`, '');
+        this.apply(ticketId, { type: 'integration_failed', reason: String((error as Error).message ?? error) });
+      });
     }
   }
 

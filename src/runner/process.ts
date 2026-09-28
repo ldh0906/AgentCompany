@@ -167,18 +167,21 @@ export async function startProcess(spec: ProcessSpec): Promise<RunningProcess> {
 export async function terminateRun(runDir: string, shimPid: number | null): Promise<void> {
   const files = runFilePaths(runDir);
   await writeFile(path.join(runDir, 'abandoned'), new Date().toISOString()).catch(() => {});
-  if (shimPid === null) return;
-  if (process.platform !== 'win32') {
+  if (shimPid !== null && process.platform !== 'win32') {
     try {
       process.kill(shimPid, 'SIGTERM');
     } catch {
       /* 이미 종료 */
     }
     await new Promise((r) => setTimeout(r, 500));
-    const rec = await readFile(files.pid, 'utf8')
-      .then((x) => JSON.parse(x) as { cliPid?: number })
-      .catch(() => null);
-    if (rec?.cliPid) {
+  }
+  // 셔틀이 이미 죽었어도 CLI는 남아 있을 수 있다(Unix에서는 별도 프로세스 그룹): 셔틀 생존과 무관하게 정리한다.
+  const rec = await readFile(files.pid, 'utf8')
+    .then((x) => JSON.parse(x) as { cliPid?: number | null; startedAtMs?: number })
+    .catch(() => null);
+  if (rec?.cliPid && (await isSameProcessAlive(rec.cliPid, rec.startedAtMs ?? 0))) {
+    if (process.platform === 'win32') await killTree(rec.cliPid);
+    else {
       try {
         process.kill(-rec.cliPid, 'SIGKILL');
       } catch {
@@ -186,7 +189,24 @@ export async function terminateRun(runDir: string, shimPid: number | null): Prom
       }
     }
   }
-  await killTree(shimPid);
+  if (shimPid !== null) await killTree(shimPid);
+}
+
+/**
+ * 재시작 후 남은 실행 정리: 포기 표시를 "먼저" 남기고 잠시 기다린 뒤 셔틀 기록을 찾는다.
+ * 셔틀은 pid를 기록한 직후 포기 표시를 확인하므로, 표시 이후 시작하는 셔틀은 스스로 멈추고
+ * 표시 이전에 시작한 셔틀은 이 시점에 pid 기록이 있어 종료 대상이 된다.
+ */
+export async function abandonAndTerminate(runDir: string): Promise<void> {
+  await mkdir(runDir, { recursive: true }).catch(() => {});
+  await writeFile(path.join(runDir, 'abandoned'), new Date().toISOString()).catch(() => {});
+  await new Promise((r) => setTimeout(r, 1500));
+  const files = runFilePaths(runDir);
+  const pidRec = await readFile(files.pid, 'utf8')
+    .then((x) => JSON.parse(x) as { shimPid?: number; startedAtMs?: number })
+    .catch(() => null);
+  const shimAlive = pidRec?.shimPid ? await isSameProcessAlive(pidRec.shimPid, pidRec.startedAtMs ?? 0) : false;
+  await terminateRun(runDir, shimAlive && pidRec?.shimPid ? pidRec.shimPid : null);
 }
 
 /** 프로세스 트리 종료. */
