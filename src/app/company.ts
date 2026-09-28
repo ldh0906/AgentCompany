@@ -1,3 +1,4 @@
+import { tr } from '../core/i18n.ts';
 // 회사 서비스: 저장소 위에서 직원·프로젝트·티켓을 다룬다.
 // 티켓 상태 변경은 반드시 applyTicketCommand를 거치고, 결과와 이벤트를 한 트랜잭션에 저장한다.
 
@@ -76,16 +77,16 @@ export class Company {
   }
 
   hireEmployee(input: NewEmployee, actor: Actor = { kind: 'ceo' }): Employee {
-    if (actor.kind !== 'ceo') throw new DomainError('직원 추가는 대표만 할 수 있습니다.');
-    if (!input.name.trim()) throw new DomainError('직원 이름이 비어 있습니다.');
-    if (input.roles.length === 0) throw new DomainError('역할을 하나 이상 골라야 합니다.');
+    if (actor.kind !== 'ceo') throw new DomainError(tr('직원 추가는 대표만 할 수 있습니다.', 'Only the CEO can add employees.'));
+    if (!input.name.trim()) throw new DomainError(tr('직원 이름이 비어 있습니다.', 'Employee name is empty.'));
+    if (input.roles.length === 0) throw new DomainError(tr('역할을 하나 이상 골라야 합니다.', 'Select at least one role.'));
     const accessLevel = input.accessLevel ?? 'write-ask';
     if (accessLevel === 'full-auto') {
-      throw new DomainError('전체 자동 등급은 직원을 만든 뒤 대표 승인 절차로만 올릴 수 있습니다.');
+      throw new DomainError(tr('전체 자동 등급은 직원을 만든 뒤 대표 승인 절차로만 올릴 수 있습니다.', 'Full-auto access requires CEO approval after creating the employee.'));
     }
     return this.store.transact(() => {
       if (this.activeEmployees().length >= MAX_ACTIVE_EMPLOYEES) {
-        throw new DomainError(`활성 직원은 최대 ${MAX_ACTIVE_EMPLOYEES}명입니다. 다른 직원을 비활성화한 뒤 추가하세요.`);
+        throw new DomainError(tr(`활성 직원은 최대 ${MAX_ACTIVE_EMPLOYEES}명입니다. 다른 직원을 비활성화한 뒤 추가하세요.`, `At most ${MAX_ACTIVE_EMPLOYEES} employees can be active. Deactivate another employee first.`));
       }
       const employee: Employee = {
         id: `E-${randomUUID().slice(0, 8)}`,
@@ -105,11 +106,11 @@ export class Company {
   }
 
   setEmployeeActive(id: string, active: boolean, actor: Actor = { kind: 'ceo' }): Employee {
-    if (actor.kind !== 'ceo') throw new DomainError('직원 활성 상태는 대표만 바꿀 수 있습니다.');
+    if (actor.kind !== 'ceo') throw new DomainError(tr('직원 활성 상태는 대표만 바꿀 수 있습니다.', 'Only the CEO can change employee active status.'));
     return this.store.transact(() => {
       const e = this.requireEmployee(id);
       if (active && !e.active && this.activeEmployees().length >= MAX_ACTIVE_EMPLOYEES) {
-        throw new DomainError(`활성 직원은 최대 ${MAX_ACTIVE_EMPLOYEES}명입니다.`);
+        throw new DomainError(tr(`활성 직원은 최대 ${MAX_ACTIVE_EMPLOYEES}명입니다.`, `At most ${MAX_ACTIVE_EMPLOYEES} employees can be active.`));
       }
       const updated = { ...e, active };
       this.saveEmployee(updated);
@@ -120,7 +121,7 @@ export class Company {
 
   /** 접근 등급 변경. full-auto로 올리는 것은 승인 절차(approvals)에서만 호출된다. */
   setAccessLevel(id: string, level: AccessLevel, actor: Actor): Employee {
-    if (actor.kind !== 'ceo') throw new DomainError('접근 등급은 대표만 바꿀 수 있습니다.');
+    if (actor.kind !== 'ceo') throw new DomainError(tr('접근 등급은 대표만 바꿀 수 있습니다.', 'Only the CEO can change access levels.'));
     return this.store.transact(() => {
       const e = this.requireEmployee(id);
       const updated = { ...e, accessLevel: level };
@@ -132,7 +133,7 @@ export class Company {
 
   requireEmployee(id: string): Employee {
     const e = this.store.get<Employee>('employees', id);
-    if (!e) throw new DomainError(`직원 ${id}을(를) 찾을 수 없습니다.`);
+    if (!e) throw new DomainError(tr(`직원 ${id}을(를) 찾을 수 없습니다.`, `Employee ${id} not found.`));
     return e;
   }
 
@@ -177,7 +178,7 @@ export class Company {
 
   requireProject(id: string): Project {
     const p = this.store.get<Project>('projects', id);
-    if (!p) throw new DomainError(`프로젝트 ${id}을(를) 찾을 수 없습니다.`);
+    if (!p) throw new DomainError(tr(`프로젝트 ${id}을(를) 찾을 수 없습니다.`, `Project ${id} not found.`));
     return p;
   }
 
@@ -191,17 +192,17 @@ export class Company {
 
   requireTicket(id: string): Ticket {
     const t = this.store.get<Ticket>('tickets', id);
-    if (!t) throw new DomainError(`티켓 ${id}을(를) 찾을 수 없습니다.`);
+    if (!t) throw new DomainError(tr(`티켓 ${id}을(를) 찾을 수 없습니다.`, `Ticket ${id} not found.`));
     return t;
   }
 
   createTicket(input: NewTicket, actor: Actor = { kind: 'ceo' }): Ticket {
     if (actor.kind === 'employee') {
       // 직원(비서실장 포함)은 티켓을 직접 만들지 않는다. 초안을 내면 오케스트레이터가 검증해 만든다.
-      throw new DomainError('직원은 티켓을 직접 만들 수 없습니다. 티켓 초안을 제출하세요.');
+      throw new DomainError(tr('직원은 티켓을 직접 만들 수 없습니다. 티켓 초안을 제출하세요.', 'Employees cannot create tickets directly. Submit ticket drafts instead.'));
     }
     this.requireProject(input.projectId);
-    if (!input.title.trim()) throw new DomainError('티켓 제목이 비어 있습니다.');
+    if (!input.title.trim()) throw new DomainError(tr('티켓 제목이 비어 있습니다.', 'Ticket title is empty.'));
     const now = this.clock();
     return this.store.transact(() => {
     const ticket: Ticket = {

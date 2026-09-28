@@ -1,3 +1,4 @@
+import { tr } from '../core/i18n.ts';
 // 로컬 대시보드 서버. 127.0.0.1에만 열고, 세션 토큰과 Host 헤더를 검사한다(DNS 리바인딩 방어). CORS 없음.
 
 import http from 'node:http';
@@ -45,14 +46,14 @@ async function readBody(req: http.IncomingMessage, limit = 2_000_000): Promise<u
   let size = 0;
   for await (const c of req) {
     size += (c as Buffer).length;
-    if (size > limit) throw new ApiError(413, '요청 본문이 너무 큽니다.');
+    if (size > limit) throw new ApiError(413, tr('요청 본문이 너무 큽니다.', 'Request body is too large.'));
     chunks.push(c as Buffer);
   }
   if (!chunks.length) return {};
   try {
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } catch {
-    throw new ApiError(400, 'JSON 형식이 잘못되었습니다.');
+    throw new ApiError(400, tr('JSON 형식이 잘못되었습니다.', 'Invalid JSON.'));
   }
 }
 
@@ -85,13 +86,13 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
         // 브라우저가 다른 사이트에서 보내는 요청 차단(Origin이 있으면 같은 출처여야 함)
         const origin = req.headers.origin;
         if (origin && origin !== `http://127.0.0.1:${port}` && origin !== `http://localhost:${port}`) {
-          send(res, 403, { error: '다른 출처의 요청은 허용하지 않습니다.' });
+          send(res, 403, { error: tr('다른 출처의 요청은 허용하지 않습니다.', 'Requests from other origins are not allowed.') });
           return;
         }
         const header = req.headers.authorization?.replace(/^Bearer\s+/i, '') ?? '';
         const supplied = url.pathname === '/api/stream' ? (url.searchParams.get('token') ?? '') : header;
         if (!safeEqual(supplied, token)) {
-          send(res, 401, { error: '인증 토큰이 필요합니다. 터미널에 표시된 주소로 다시 여세요.' });
+          send(res, 401, { error: tr('인증 토큰이 필요합니다. 터미널에 표시된 주소로 다시 여세요.', 'Authentication token required. Reopen the URL shown in the terminal.') });
           return;
         }
         if (url.pathname === '/api/stream') {
@@ -146,7 +147,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
 async function serveStatic(res: http.ServerResponse, pathname: string, webRoot: string | null): Promise<void> {
   if (!webRoot || !existsSync(webRoot)) {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    res.end('<!doctype html><meta charset="utf-8"><title>Agent Company</title><p>대시보드가 빌드되지 않았습니다. <code>npm run build</code>를 실행하세요.</p>');
+    res.end(tr('<!doctype html><meta charset="utf-8"><title>Agent Company</title><p>대시보드가 빌드되지 않았습니다. <code>npm run build</code>를 실행하세요.</p>', '<!doctype html><meta charset="utf-8"><title>Agent Company</title><p>The dashboard has not been built. Run <code>npm run build</code>.</p>'));
     return;
   }
   const rel = decodeURIComponent(pathname).replace(/^\/+/, '');

@@ -1,3 +1,4 @@
+import { tr } from '../core/i18n.ts';
 // 블라인드 교차 검토 프로토콜의 프롬프트와 보고서 형식.
 // 1) 블라인드 분석: 다른 직원의 결과를 보지 않고 주장을 낸다.
 // 2) 교차 판정: 작성자를 가린 주장을 다른 직원이 판정한다(동의·부분 동의·반대·근거 부족).
@@ -93,16 +94,16 @@ const RESPONSES: ClaimResponse[] = ['keep', 'narrow', 'revise', 'withdraw', 'use
 
 function base(text: string | null, nonce: string, kind: string): Record<string, unknown> | Fail {
   const raw = text ? (extractLastJson(text) as Record<string, unknown> | null) : null;
-  if (!raw || typeof raw !== 'object') return { ok: false, detail: 'JSON 보고서를 찾지 못했습니다.' };
-  if (raw.nonce !== nonce) return { ok: false, detail: 'nonce 불일치' };
-  if (raw.kind !== kind) return { ok: false, detail: `kind가 ${kind}가 아닙니다.` };
+  if (!raw || typeof raw !== 'object') return { ok: false, detail: tr('JSON 보고서를 찾지 못했습니다.', 'No JSON report found.') };
+  if (raw.nonce !== nonce) return { ok: false, detail: tr('nonce 불일치', 'nonce mismatch') };
+  if (raw.kind !== kind) return { ok: false, detail: tr(`kind가 ${kind}가 아닙니다.`, `kind must be ${kind}.`) };
   return raw;
 }
 
 export function parseClaims(text: string | null, nonce: string): { ok: true; claims: Pick<Claim, 'text' | 'impact' | 'confidence' | 'sources'>[] } | Fail {
   const r = base(text, nonce, 'claims');
   if ('ok' in r) return r as Fail;
-  if (!Array.isArray(r.claims) || r.claims.length === 0 || r.claims.length > 12) return { ok: false, detail: 'claims는 1~12개여야 합니다.' };
+  if (!Array.isArray(r.claims) || r.claims.length === 0 || r.claims.length > 12) return { ok: false, detail: tr('claims는 1~12개여야 합니다.', 'claims must contain 1–12 items.') };
   const claims = (r.claims as Record<string, unknown>[])
     .filter((c) => typeof c?.text === 'string' && c.text.trim())
     .map((c) => ({
@@ -113,7 +114,7 @@ export function parseClaims(text: string | null, nonce: string): { ok: true; cla
         ? (c.sources as Record<string, unknown>[]).map((s) => ({ doc: String(s?.doc ?? ''), loc: String(s?.loc ?? '') })).filter((s) => s.doc)
         : [],
     }));
-  return claims.length ? { ok: true, claims } : { ok: false, detail: '유효한 주장이 없습니다.' };
+  return claims.length ? { ok: true, claims } : { ok: false, detail: tr('유효한 주장이 없습니다.', 'No valid claims.') };
 }
 
 export function parseVerdicts(text: string | null, nonce: string, claimIds: string[]): { ok: true; verdicts: { claimId: string; verdict: ClaimVerdict; reason: string }[] } | Fail {
@@ -124,7 +125,7 @@ export function parseVerdicts(text: string | null, nonce: string, claimIds: stri
     .filter((v) => claimIds.includes(String(v?.claimId)) && VERDICTS.includes(v.verdict as ClaimVerdict))
     .map((v) => ({ claimId: String(v.claimId), verdict: v.verdict as ClaimVerdict, reason: String(v.reason ?? '').slice(0, 3000) }));
   const missing = claimIds.filter((id) => !out.some((v) => v.claimId === id));
-  return missing.length ? { ok: false, detail: `판정 누락: ${missing.join(', ')}` } : { ok: true, verdicts: out };
+  return missing.length ? { ok: false, detail: tr(`판정 누락: ${missing.join(', ')}`, `Missing verdicts: ${missing.join(', ')}`) } : { ok: true, verdicts: out };
 }
 
 export function parseResponses(text: string | null, nonce: string, claimIds: string[]): { ok: true; responses: { claimId: string; response: ClaimResponse; text: string }[] } | Fail {
@@ -135,7 +136,7 @@ export function parseResponses(text: string | null, nonce: string, claimIds: str
     .filter((v) => claimIds.includes(String(v?.claimId)) && RESPONSES.includes(v.response as ClaimResponse))
     .map((v) => ({ claimId: String(v.claimId), response: v.response as ClaimResponse, text: String(v.text ?? '').slice(0, 3000) }));
   const missing = claimIds.filter((id) => !out.some((v) => v.claimId === id));
-  return missing.length ? { ok: false, detail: `재답변 누락: ${missing.join(', ')}` } : { ok: true, responses: out };
+  return missing.length ? { ok: false, detail: tr(`재답변 누락: ${missing.join(', ')}`, `Missing responses: ${missing.join(', ')}`) } : { ok: true, responses: out };
 }
 
 /**

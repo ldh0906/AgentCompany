@@ -1,3 +1,4 @@
+import { tr } from '../core/i18n.ts';
 // Antigravity CLI(agy) 어댑터.
 // 실측(2026-09-28, 1.2.12): -p/--print는 값을 받는 옵션이라 stdin 프롬프트를 무시하고 exit 2.
 // → 프롬프트를 --print=<값>으로 넘긴다. Windows 명령줄 한계(약 32K자) 때문에 프롬프트 길이를 제한한다.
@@ -17,17 +18,17 @@ export const agyAdapter: CliAdapter = {
     permissionRelay: false,
     resume: true,
     profileEnvVar: null,
-    notes: [
-      '실측: -p는 값을 받는 옵션(stdin 무시) → --print=<프롬프트> 사용',
-      '프롬프트 길이 제한 약 28,000자(Windows 명령줄 한계)',
-      '읽기 전용은 --sandbox + 권한 자동 승인 없음(헤드리스에서 도구 권한이 거부되는지 실측 전)',
-      '앱 전용 프로필 분리 수단 미확인',
-    ],
+    get notes() { return [
+      tr('실측: -p는 값을 받는 옵션(stdin 무시) → --print=<프롬프트> 사용', 'Verified: -p requires a value (ignores stdin); uses --print=<prompt>'),
+      tr('프롬프트 길이 제한 약 28,000자(Windows 명령줄 한계)', 'Prompt limit: about 28,000 characters (Windows command-line limit)'),
+      tr('읽기 전용은 --sandbox + 권한 자동 승인 없음(헤드리스에서 도구 권한이 거부되는지 실측 전)', 'Read-only uses --sandbox without auto-approval (headless tool permission denial not yet verified)'),
+      tr('앱 전용 프로필 분리 수단 미확인', 'App profile isolation is unverified'),
+    ]; },
   },
 
   buildInvocation(req: InvocationRequest): Invocation {
     if (req.prompt.length > AGY_MAX_PROMPT_CHARS) {
-      throw new Error(`agy는 프롬프트를 명령줄로 받아 ${AGY_MAX_PROMPT_CHARS}자를 넘길 수 없습니다(현재 ${req.prompt.length}자).`);
+      throw new Error(tr(`agy는 프롬프트를 명령줄로 받아 ${AGY_MAX_PROMPT_CHARS}자를 넘길 수 없습니다(현재 ${req.prompt.length}자).`, `agy takes prompts on the command line: limit ${AGY_MAX_PROMPT_CHARS} characters (current: ${req.prompt.length}).`));
     }
     const args = ['--output-format', 'stream-json'];
     if (req.accessLevel === 'read-only') args.push('--sandbox');
@@ -66,6 +67,6 @@ export const agyAdapter: CliAdapter = {
   classifyFailure: classifyCommon,
   loginStatusArgs: null,
   loginInstructions() {
-    return '터미널에서 agy 를 한 번 실행해 로그인하세요(헤드리스 실행은 캐시된 로그인만 사용합니다).';
+    return tr('터미널에서 agy 를 한 번 실행해 로그인하세요(헤드리스 실행은 캐시된 로그인만 사용합니다).', 'Run agy once in a terminal to log in (headless runs use cached login only).');
   },
 };
