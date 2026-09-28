@@ -1,3 +1,4 @@
+import { tr } from '../core/i18n.ts';
 // 작업공간: 원본 저장소 → (bare 미러) → 티켓 worktree / 검증 worktree → 승인 후 원본 반영.
 // 직원은 원본 저장소를 절대 직접 만지지 않는다.
 
@@ -94,7 +95,7 @@ export async function changedPaths(repo: string, baseSha: string, head: string):
 
 export async function diffText(repo: string, baseSha: string, head: string, maxBytes = 2_000_000): Promise<string> {
   const out = (await git(['diff', '--find-renames', `${baseSha}..${head}`], repo)).stdout;
-  return out.length > maxBytes ? out.slice(0, maxBytes) + '\n... (잘림)' : out;
+  return out.length > maxBytes ? out.slice(0, maxBytes) + tr('\n... (잘림)', '\n... (truncated)') : out;
 }
 
 export interface ScopeCheck {
@@ -225,14 +226,14 @@ async function fetchExactSha(originPath: string, paths: ProjectPaths, sha: strin
   await git(['config', 'uploadpack.allowAnySHA1InWant', 'true'], paths.mirror);
   await git(['fetch', '--no-tags', '--no-write-fetch-head', paths.mirror, sha], originPath);
   const ok = await git(['cat-file', '-e', `${sha}^{commit}`], originPath, { allowFail: true });
-  if (ok.code !== 0) throw new Error(`승인된 커밋 ${sha.slice(0, 8)}을(를) 원본으로 가져오지 못했습니다.`);
+  if (ok.code !== 0) throw new Error(tr(`승인된 커밋 ${sha.slice(0, 8)}을(를) 원본으로 가져오지 못했습니다.`, `Could not fetch approved commit ${sha.slice(0, 8)} into the original repository.`));
 }
 
 /** manual: 원본 저장소에 ac/<ticket> 브랜치만 만든다. 대표가 직접 병합한다. */
 export async function integrateAsBranch(originPath: string, paths: ProjectPaths, ticketId: string, expectedHead: string): Promise<IntegrationResult> {
   const branch = ticketBranch(ticketId);
   const head = await headSha(paths.mirror, `refs/heads/${branch}`);
-  if (head !== expectedHead) throw new Error(`승인 이후 브랜치가 바뀌었습니다(${expectedHead.slice(0, 8)} → ${head.slice(0, 8)}). 다시 승인이 필요합니다.`);
+  if (head !== expectedHead) throw new Error(tr(`승인 이후 브랜치가 바뀌었습니다(${expectedHead.slice(0, 8)} → ${head.slice(0, 8)}). 다시 승인이 필요합니다.`, `Branch changed after approval (${expectedHead.slice(0, 8)} → ${head.slice(0, 8)}). New approval is required.`));
   // 브랜치 이름이 아니라 승인된 SHA 자체를 가져와 원본 ref를 그 SHA로 설정한다.
   await fetchExactSha(originPath, paths, expectedHead);
   await git(['update-ref', '-m', `agent-company: ${ticketId} approved`, `refs/heads/${branch}`, expectedHead], originPath);
@@ -260,7 +261,7 @@ export async function integrateWithMerge(
   };
 
   const head = await headSha(paths.mirror, `refs/heads/${branch}`);
-  if (head !== expectedHead) throw new Error('승인 이후 브랜치가 바뀌었습니다. 다시 승인이 필요합니다.');
+  if (head !== expectedHead) throw new Error(tr('승인 이후 브랜치가 바뀌었습니다. 다시 승인이 필요합니다.', 'Branch changed after approval. New approval is required.'));
 
   const originBase = await syncMirror(originPath, paths, baseBranch);
   const tmp = path.join(paths.root, 'merge-tmp', ticketId);
@@ -273,7 +274,7 @@ export async function integrateWithMerge(
     const merged = await git([...AGENT_IDENTITY, 'merge', '--no-ff', '--no-edit', '-m', `${ticketId}: ${title}`, expectedHead], tmp, { allowFail: true });
     if (merged.code !== 0) {
       await git(['merge', '--abort'], tmp, { allowFail: true });
-      return await downgrade('기준 브랜치와 충돌해 자동 병합할 수 없습니다.');
+      return await downgrade(tr('기준 브랜치와 충돌해 자동 병합할 수 없습니다.', 'Cannot auto-merge due to conflicts with the base branch.'));
     }
     mergeSha = await headSha(tmp);
   } finally {
@@ -282,20 +283,20 @@ export async function integrateWithMerge(
 
   if (verifyMerge) {
     const v = await verifyMerge(mergeSha);
-    if (!v.ok) return downgrade(`병합 결과 재검증 실패: ${v.reason ?? ''}`);
+    if (!v.ok) return downgrade(tr(`병합 결과 재검증 실패: ${v.reason ?? ''}`, `Merge re-verification failed: ${v.reason ?? ''}`));
   }
 
   await fetchExactSha(originPath, paths, mergeSha);
   const current = (await git(['symbolic-ref', '--short', '-q', 'HEAD'], originPath, { allowFail: true })).stdout.trim();
   if (current === baseBranch) {
     const dirty = (await git(['status', '--porcelain', '--untracked-files=no'], originPath)).stdout.trim();
-    if (dirty) return downgrade('원본 저장소에 커밋하지 않은 변경이 있어 자동 병합하지 않았습니다.');
+    if (dirty) return downgrade(tr('원본 저장소에 커밋하지 않은 변경이 있어 자동 병합하지 않았습니다.', 'Auto-merge skipped: the original repository has uncommitted changes.'));
     const ff = await git(['merge', '--ff-only', mergeSha], originPath, { allowFail: true });
-    if (ff.code !== 0) return downgrade('fast-forward가 불가능해 자동 병합하지 않았습니다.');
+    if (ff.code !== 0) return downgrade(tr('fast-forward가 불가능해 자동 병합하지 않았습니다.', 'Auto-merge skipped: fast-forward is not possible.'));
   } else {
     // 체크아웃되지 않은 기준 브랜치: 확인한 원래 값(originBase)일 때만 바꾸는 비교-교체.
     const cas = await git(['update-ref', '-m', `agent-company: ${ticketId} merged`, `refs/heads/${baseBranch}`, mergeSha, originBase], originPath, { allowFail: true });
-    if (cas.code !== 0) return downgrade('기준 브랜치가 그사이 바뀌어 자동 병합하지 않았습니다.');
+    if (cas.code !== 0) return downgrade(tr('기준 브랜치가 그사이 바뀌어 자동 병합하지 않았습니다.', 'Auto-merge skipped: the base branch changed in the meantime.'));
   }
   return { kind: 'merged', baseBranch, mergeSha, previousBaseSha: originBase };
 }

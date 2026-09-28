@@ -1,3 +1,4 @@
+import { tr } from '../core/i18n.ts';
 // 실행·증거·승인·결정·경로 잠금 저장. 상태 변경은 이벤트와 함께 기록한다.
 
 import { createHash, randomUUID } from 'node:crypto';
@@ -152,7 +153,7 @@ export class Records {
   setApprovalState(id: string, state: ApprovalState, actor: string, extra: Record<string, unknown> = {}): Approval {
     return this.store.transact(() => {
       const a = this.approval(id);
-      if (!a) throw new Error(`승인 ${id} 없음`);
+      if (!a) throw new Error(tr(`승인 ${id} 없음`, `Approval ${id} not found`));
       const now = new Date().toISOString();
       const updated: Approval = { ...a, state, decidedAt: now, detail: { ...(a.detail as object), ...extra } };
       this.store.put('approvals', id, updated, { ticket_id: a.ticketId, state, created_at: a.createdAt });
@@ -173,7 +174,7 @@ export class Records {
   }
   setDecisionStatus(id: string, status: DecisionStatus): void {
     const d = this.store.get<Decision>('decisions', id);
-    if (!d) throw new Error(`결정 ${id} 없음`);
+    if (!d) throw new Error(tr(`결정 ${id} 없음`, `Decision ${id} not found`));
     this.store.transact(() => {
       this.store.put('decisions', id, { ...d, status }, { project_id: d.projectId, status, created_at: d.createdAt });
       this.store.appendEvent('ceo', 'decision.status', id, { from: d.status, to: status });
