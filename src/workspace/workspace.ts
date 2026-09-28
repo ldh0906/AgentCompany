@@ -237,6 +237,23 @@ export type IntegrationResult =
   | { kind: 'merged'; baseBranch: string; mergeSha: string; previousBaseSha: string }
   | { kind: 'downgraded'; branch: string; sha: string; reason: string };
 
+/** 원본 저장소의 모든 worktree(주 작업 트리 포함)가 체크아웃한 브랜치 → 경로. */
+export async function checkedOutBranches(originPath: string): Promise<Map<string, string>> {
+  const out = (await git(['worktree', 'list', '--porcelain'], originPath)).stdout;
+  const map = new Map<string, string>();
+  let wt = '';
+  for (const line of out.split('\n')) {
+    if (line.startsWith('worktree ')) wt = line.slice('worktree '.length).trim();
+    else if (line.startsWith('branch ')) map.set(line.slice('branch '.length).trim(), wt);
+  }
+  return map;
+}
+
+function samePath(a: string, b: string): boolean {
+  const n = (p: string) => path.resolve(p).replaceAll('\\', '/').replace(/\/$/, '');
+  return CASE_INSENSITIVE_FS ? n(a).toLowerCase() === n(b).toLowerCase() : n(a) === n(b);
+}
+
 /** 미러에서 정확한 커밋 SHA를 원본으로 가져온다(브랜치 이름·임시 ref를 거치지 않음). */
 async function fetchExactSha(originPath: string, paths: ProjectPaths, sha: string): Promise<void> {
   await git(['config', 'uploadpack.allowAnySHA1InWant', 'true'], paths.mirror);
@@ -267,6 +284,9 @@ export async function integrateAsBranch(
         `Branch changed after approval (${expectedHead.slice(0, 8)} → ${head.slice(0, 8)}). New approval is required.`,
       ),
     );
+  // 체크아웃된 브랜치의 ref만 옮기면 그 작업 트리의 파일과 어긋난다: 거부한다.
+  const where = (await checkedOutBranches(originPath)).get(`refs/heads/${branch}`);
+  if (where) throw new Error(`원본의 작업 트리(${where})가 ${branch}를 체크아웃하고 있어 브랜치를 갱신하지 않았습니다.`);
   // 브랜치 이름이 아니라 승인된 SHA 자체를 가져와 원본 ref를 그 SHA로 설정한다.
   await fetchExactSha(originPath, paths, expectedHead);
   await git(['update-ref', '-m', `agent-company: ${ticketId} approved`, `refs/heads/${branch}`, expectedHead], originPath);
@@ -327,6 +347,11 @@ export async function integrateWithMerge(
   }
 
   await fetchExactSha(originPath, paths, mergeSha);
+  const holder = (await checkedOutBranches(originPath)).get(`refs/heads/${baseBranch}`);
+  if (holder && !samePath(holder, originPath)) {
+    // 다른 연결 worktree가 기준 브랜치를 체크아웃 중: ref만 옮기면 그 작업 트리가 어긋난다.
+    return downgrade(`다른 작업 트리(${holder})가 ${baseBranch}를 체크아웃하고 있어 자동 병합하지 않았습니다.`);
+  }
   const current = (await git(['symbolic-ref', '--short', '-q', 'HEAD'], originPath, { allowFail: true })).stdout.trim();
   if (current === baseBranch) {
     const dirty = (await git(['status', '--porcelain', '--untracked-files=no'], originPath)).stdout.trim();

@@ -1,6 +1,6 @@
 import { setLanguage, tr } from '../core/i18n.ts';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -71,6 +71,24 @@ interface Lock {
   startedAt: string;
 }
 
+/** 데이터 폴더당 데몬 하나: 복구·서버 시작 전에 잠금 파일을 배타적으로 만든다(동시 시작 경쟁 방지). */
+export function acquireLock(dataDir: string): boolean {
+  const file = path.join(dataDir, 'daemon.lock');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = openSync(file, 'wx', 0o600);
+      writeFileSync(fd, JSON.stringify({ pid: process.pid, url: '', startedAt: new Date().toISOString() }));
+      closeSync(fd);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (readLock(dataDir)) return false; // 살아 있는 데몬이 있다
+      rmSync(file, { force: true }); // 죽은 데몬의 잠금
+    }
+  }
+  return false;
+}
+
 function readLock(dataDir: string): Lock | null {
   try {
     const lock = JSON.parse(readFileSync(path.join(dataDir, 'daemon.lock'), 'utf8')) as Lock;
@@ -95,15 +113,15 @@ async function start(argv: string[], demo: boolean): Promise<void> {
   const language = values.language ?? (Intl.DateTimeFormat().resolvedOptions().locale.startsWith('ko') ? 'ko' : 'en');
   setLanguage(language === 'en' ? 'en' : 'ko');
   mkdirSync(dataDir, { recursive: true });
-  const existing = readLock(dataDir);
-  if (existing) {
+  if (!acquireLock(dataDir)) {
+    const existing = readLock(dataDir);
     console.log(
       tr(
-        `이미 실행 중입니다 (pid ${existing.pid}).\n대시보드: ${existing.url}`,
-        `Already running (pid ${existing.pid}).\nDashboard: ${existing.url}`,
+        `이미 실행 중입니다 (pid ${existing?.pid ?? '?'}).\n대시보드: ${existing?.url || '(시작 중)'}`,
+        `Already running (pid ${existing?.pid ?? '?'}).\nDashboard: ${existing?.url || '(starting)'}`,
       ),
     );
-    if (!values['no-open']) openBrowser(existing.url);
+    if (existing?.url && !values['no-open']) openBrowser(existing.url);
     return;
   }
 

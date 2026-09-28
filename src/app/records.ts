@@ -24,6 +24,8 @@ export interface RunRecord extends Run {
   refsBefore: Record<string, string> | null;
   originBefore: string | null;
   originRefsBefore?: Record<string, string> | null;
+  /** 스냅샷 시점의 ref 전이 기록 번호. 이후에 기록된 오케스트레이터 이동만 면제한다. */
+  moveSeqBefore?: number;
   postProcessed: boolean;
   /** 검토형 업무의 단계와 이번 실행이 다루는 주장. */
   phase?: DeliberationPhase | null;
@@ -48,6 +50,13 @@ export interface CeoRequest {
   error: string | null;
   ticketIds: string[];
   createdAt: string;
+}
+
+interface RefMove {
+  seq: number;
+  ref: string;
+  from: string | null;
+  to: string | null;
 }
 
 export function newId(prefix: string): string {
@@ -213,19 +222,33 @@ export class Records {
       : this.store.list<Decision>('decisions', 'WHERE project_id = ? ORDER BY created_at', projectId);
   }
 
-  // ---- 오케스트레이터가 직접 바꾼 ref 기록 (직원의 ref 조작과 구분) ----
-  setExpectedRef(projectId: string, ref: string, sha: string): void {
-    this.store.setSetting(`xref:${projectId}:${ref}`, sha);
+  // ---- ref 전이 기록: 오케스트레이터가 직접 만든 이동(from → to)만 면제한다 ----
+  // 과거의 "마지막 예상값"과 같다는 이유로 면제하면, 직원이 ref를 과거 값으로 되돌려 변경을 숨길 수 있다.
+  currentMoveSeq(): number {
+    return Number(this.store.getSetting('ref_move_seq') ?? '0');
   }
-  expectedRef(projectId: string, ref: string): string | null {
-    return this.store.getSetting(`xref:${projectId}:${ref}`);
+  recordRefMove(projectId: string, scope: 'mirror' | 'origin', ref: string, from: string | null, to: string | null): void {
+    if (from === to) return;
+    const seq = this.currentMoveSeq() + 1;
+    this.store.setSetting('ref_move_seq', String(seq));
+    const key = `moves:${scope}:${projectId}`;
+    const list = JSON.parse(this.store.getSetting(key) ?? '[]') as RefMove[];
+    list.push({ seq, ref, from, to });
+    this.store.setSetting(key, JSON.stringify(list.slice(-2000)));
   }
-  /** 원본 저장소에서 오케스트레이터가 반영으로 바꾼 ref. */
-  setExpectedOriginRef(projectId: string, ref: string, sha: string): void {
-    this.store.setSetting(`xoref:${projectId}:${ref}`, sha);
-  }
-  expectedOriginRef(projectId: string, ref: string): string | null {
-    return this.store.getSetting(`xoref:${projectId}:${ref}`);
+  /** before → after 변화가 windowSeq 이후 기록된 오케스트레이터 이동만으로 설명되는지. */
+  explainedByMoves(
+    projectId: string,
+    scope: 'mirror' | 'origin',
+    ref: string,
+    before: string | undefined,
+    after: string | undefined,
+    windowSeq: number,
+  ): boolean {
+    const list = JSON.parse(this.store.getSetting(`moves:${scope}:${projectId}`) ?? '[]') as RefMove[];
+    let cur: string | null = before ?? null;
+    for (const m of list) if (m.seq > windowSeq && m.ref === ref && m.from === cur) cur = m.to;
+    return cur === (after ?? null);
   }
 
   // ---- 경로 잠금 ----

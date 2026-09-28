@@ -182,6 +182,8 @@ export class Store {
       this.db
         .prepare('INSERT INTO events(seq, ts, actor, type, entity_id, payload, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
         .run(seq, ts, actor, type, entityId, payloadJson, prevHash, hash);
+      // 실행 중에 끝부분이 지워졌을 수도 있다: 추가할 때마다 기존 체크포인트와 DB가 맞는지 확인하고, 어긋나면 영구 동결.
+      if (!this.checkpointFrozen && !this.pendingCheckpoint && !this.checkpointMatchesDb()) this.checkpointFrozen = true;
       if (!this.checkpointFrozen) this.pendingCheckpoint = { seq, hash };
       return { seq, ts, actor, type, entityId, payload, prevHash, hash };
     });

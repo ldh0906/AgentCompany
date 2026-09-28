@@ -65,6 +65,19 @@ child.once('spawn', () => {
   }
 });
 
+// Unix: 데몬의 종료 요청(SIGTERM)을 받으면 CLI 프로세스 그룹부터 끝낸다.
+process.on('SIGTERM', () => {
+  if (child.pid && process.platform !== 'win32') {
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {
+      /* 이미 종료 */
+    }
+  }
+  writeAtomic(spec.exitPath, { exitCode: null, signal: 'SIGTERM', timedOut: false, killed: true, durationMs: Date.now() - started });
+  process.exit(0);
+});
+
 const timer = setTimeout(() => {
   timedOut = true;
   if (!child.pid) return;

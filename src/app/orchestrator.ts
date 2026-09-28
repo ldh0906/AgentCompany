@@ -2,6 +2,7 @@
 // 흐름: 접수 → 대기 목록 → 배정 → 작업 실행 → 제출 검증(범위·증거) → 독립 검수 → 대표 승인 → 반영
 import { tr } from '../core/i18n.ts';
 
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -24,7 +25,8 @@ import type { Claim, Employee, Evidence, FailureClass, Project, Ticket, TicketSt
 import { DEFAULT_BUDGET, TERMINAL_STATUSES } from '../core/types.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
 import { locateExecutable } from '../runner/locate.ts';
-import { isSameProcessAlive, readExitRecord, startProcess, waitForExit } from '../runner/process.ts';
+import { isSameProcessAlive, killTree, readExitRecord, startProcess, waitForExit } from '../runner/process.ts';
+import { git } from '../workspace/git.ts';
 import {
   changedPaths,
   checkScope,
@@ -207,7 +209,11 @@ export class Orchestrator {
       try {
         await this.postWork(run);
       } catch (error) {
-        run.reportError = tr(`실행 후 처리 실패: ${String(error)}`, `Post-run processing failed: ${String(error)}`);
+        // 범위·원본 검사를 못 했으면 제출로 인정하지 않는다.
+        return this.finishRun(run, {
+          failure: 'unknown',
+          detail: tr(`실행 후 검사 실패(제출 차단): ${String(error)}`, `Post-run checks failed (submission blocked): ${String(error)}`),
+        });
       }
       run.postProcessed = true;
       this.records.saveRun(run);
@@ -221,32 +227,47 @@ export class Orchestrator {
     const paths = projectPaths(this.opts.dataDir, project.id);
     await this.withProjectLock(project.id, async () => {
       const wt = await ensureTicketWorktree(paths, ticket.id, project.baseBranch);
-      const head = await commitWorktree(wt, `${ticket.id} round ${run.round}`);
       const branchRef = `refs/heads/${ticketBranch(ticket.id)}`;
-      if (head) this.records.setExpectedRef(project.id, branchRef, head);
+      const windowSeq = run.moveSeqBefore ?? 0;
+      // 오케스트레이터의 커밋 이전 상태로 비교해야 직원의 ref 조작과 구분된다.
+      const refsNow = run.refsBefore ? await snapshotRefs(paths.mirror) : null;
+      const prevHead = await headSha(wt.path);
+      const head = await commitWorktree(wt, `${ticket.id} round ${run.round}`);
+      if (head) this.records.recordRefMove(project.id, 'mirror', branchRef, prevHead, head);
       run.headSha = head;
       run.changedPaths = head && run.baseSha ? await changedPaths(paths.mirror, run.baseSha, head) : [];
-      if (run.refsBefore) {
-        const after = await snapshotRefs(paths.mirror);
-        // 오케스트레이터 자신이 바꾼 ref(다른 티켓 커밋·미러 동기화)는 위반이 아니다. 기록과 다른 변경만 잡는다.
-        run.refViolations = refChanges(run.refsBefore, after, [branchRef]).filter(
-          (ref) =>
-            !ref.startsWith('refs/ac-merge/') &&
-            !ref.startsWith('refs/ac-approved/') &&
-            this.records.expectedRef(project.id, ref) !== after[ref],
-        );
-      }
+      if (run.refsBefore && refsNow)
+        run.refViolations = this.unexplained(project, 'mirror', run.refsBefore, refsNow, windowSeq, [branchRef]);
       if (run.originBefore !== null) run.originChanged = (await originFingerprint(project.originPath)) !== run.originBefore;
-      if (run.originRefsBefore) run.originChanged ||= (await this.unexpectedOriginRefs(project, run.originRefsBefore)).length > 0;
+      if (run.originRefsBefore)
+        run.originChanged ||=
+          this.unexplained(project, 'origin', run.originRefsBefore, await snapshotRefs(project.originPath), windowSeq).length > 0;
     });
   }
 
-  /** 원본 저장소에서 오케스트레이터가 반영으로 바꾼 것이 아닌 ref 변경. */
-  private async unexpectedOriginRefs(project: Project, before: Record<string, string>): Promise<string[]> {
-    const after = await snapshotRefs(project.originPath);
-    return refChanges(before, after, [])
-      .filter((ref) => ref.startsWith('refs/heads/') || ref.startsWith('refs/tags/'))
-      .filter((ref) => this.records.expectedOriginRef(project.id, ref) !== after[ref]);
+  /** 미러 기준 브랜치 동기화. 이동을 전이 기록으로 남긴다(프로젝트 잠금 안에서 호출). */
+  private async syncMirrorRecorded(project: Project, paths: ReturnType<typeof projectPaths>): Promise<string> {
+    const ref = `refs/heads/${project.baseBranch}`;
+    const before = existsSync(paths.mirror)
+      ? (await git(['rev-parse', '--verify', '-q', ref], paths.mirror, { allowFail: true })).stdout.trim() || null
+      : null;
+    const after = await syncMirror(project.originPath, paths, project.baseBranch);
+    this.records.recordRefMove(project.id, 'mirror', ref, before, after);
+    return after;
+  }
+
+  /** 스냅샷 이후 바뀐 ref 중 오케스트레이터가 기록한 전이로 설명되지 않는 것. */
+  private unexplained(
+    project: Project,
+    scope: 'mirror' | 'origin',
+    before: Record<string, string>,
+    after: Record<string, string>,
+    windowSeq: number,
+    allowed: string[] = [],
+  ): string[] {
+    return refChanges(before, after, allowed)
+      .filter((ref) => scope === 'mirror' || ref.startsWith('refs/heads/') || ref.startsWith('refs/tags/'))
+      .filter((ref) => !this.records.explainedByMoves(project.id, scope, ref, before[ref], after[ref], windowSeq));
   }
 
   private readonly projectLocks = new Map<string, Promise<unknown>>();
@@ -436,16 +457,18 @@ export class Orchestrator {
 
     const project = this.company.requireProject(t.projectId);
     const paths = projectPaths(this.opts.dataDir, project.id);
-    const { wt, refsBefore, originBefore, originRefsBefore } = await this.withProjectLock(project.id, async () => {
-      const baseSha = await syncMirror(project.originPath, paths, project.baseBranch);
-      this.records.setExpectedRef(project.id, `refs/heads/${project.baseBranch}`, baseSha);
+    const { wt, refsBefore, originBefore, originRefsBefore, moveSeqBefore } = await this.withProjectLock(project.id, async () => {
+      await this.syncMirrorRecorded(project, paths);
+      const branchRef = `refs/heads/${ticketBranch(t.id)}`;
+      const existed = (await git(['rev-parse', '--verify', '-q', branchRef], paths.mirror, { allowFail: true })).stdout.trim() || null;
       const wt = await ensureTicketWorktree(paths, t.id, project.baseBranch);
-      this.records.setExpectedRef(project.id, `refs/heads/${ticketBranch(t.id)}`, await headSha(wt.path));
+      this.records.recordRefMove(project.id, 'mirror', branchRef, existed, await headSha(wt.path));
       return {
         wt,
         refsBefore: await snapshotRefs(paths.mirror),
         originBefore: await originFingerprint(project.originPath),
         originRefsBefore: await snapshotRefs(project.originPath),
+        moveSeqBefore: this.records.currentMoveSeq(),
       };
     });
 
@@ -472,6 +495,7 @@ export class Orchestrator {
       refsBefore,
       originBefore,
       originRefsBefore,
+      moveSeqBefore,
     });
   }
 
@@ -501,6 +525,7 @@ export class Orchestrator {
     refsBefore?: Record<string, string>;
     originBefore?: string;
     originRefsBefore?: Record<string, string>;
+    moveSeqBefore?: number;
     phase?: DeliberationPhase;
     claimIds?: string[];
   }): Promise<void> {
@@ -553,6 +578,7 @@ export class Orchestrator {
       refsBefore: p.refsBefore ?? null,
       originBefore: p.originBefore ?? null,
       originRefsBefore: p.originRefsBefore ?? null,
+      moveSeqBefore: p.moveSeqBefore ?? 0,
       postProcessed: false,
       phase: p.phase ?? null,
       claimIds: p.claimIds ?? [],
@@ -838,16 +864,17 @@ export class Orchestrator {
       const paths = projectPaths(this.opts.dataDir, project.id);
       const vwt = await ensureDetachedWorktree(paths, 'verify', ticketId, sub.headSha);
       // 검증 명령은 제출된 코드를 실행한다(CI와 같음). 실행 전후로 원본 저장소와 미러 ref를 비교해 부작용을 잡는다.
-      const snap = () =>
-        this.withProjectLock(project.id, async () => ({
-          origin: await originFingerprint(project.originPath),
-          refs: await snapshotRefs(paths.mirror),
-          originRefs: await snapshotRefs(project.originPath),
-        }));
-      const before = await snap();
+      // 스냅샷과 판정은 같은 프로젝트 잠금 안에서 한다(다른 티켓의 정상 반영과 경쟁하지 않게).
+      const before = await this.withProjectLock(project.id, async () => ({
+        origin: await originFingerprint(project.originPath),
+        refs: await snapshotRefs(paths.mirror),
+        originRefs: await snapshotRefs(project.originPath),
+        seq: this.records.currentMoveSeq(),
+      }));
+      await this.stopLeftoverVerify(ticketId);
       try {
         for (const [i, vc] of project.verifyCommands.entries()) {
-          const ev = await this.runVerifyCommand(vc, vwt, path.join(sub.runDir, 'verify', String(i)));
+          const ev = await this.runVerifyCommand(vc, vwt, path.join(sub.runDir, 'verify', String(i)), ticketId);
           const e: Evidence = {
             id: newId('EV'),
             ticketId,
@@ -869,25 +896,18 @@ export class Orchestrator {
             );
         }
       } finally {
-        const after = await snap();
-        const refViol = refChanges(before.refs, after.refs, []).filter(
-          (ref) =>
-            !ref.startsWith('refs/ac-merge/') &&
-            !ref.startsWith('refs/ac-approved/') &&
-            this.records.expectedRef(project.id, ref) !== after.refs[ref],
-        );
-        const originRefViol = await this.unexpectedOriginRefs(project, before.originRefs);
-        if (before.origin !== after.origin || refViol.length || originRefViol.length) {
-          this.apply(ticketId, {
-            type: 'scope_violation',
-            paths: [
-              ...(before.origin !== after.origin
-                ? [tr('검증 명령 실행 중 원본 저장소 변경', 'Original repository changed during verification')]
-                : []),
-              ...refViol.map((r) => tr(`검증 중 ref:${r}`, `Ref during verification:${r}`)),
-              ...originRefViol.map((r) => tr(`검증 중 원본 ref:${r}`, `Original ref during verification:${r}`)),
-            ],
-          });
+        const violations = await this.withProjectLock(project.id, async () => {
+          const out: string[] = [];
+          if ((await originFingerprint(project.originPath)) !== before.origin)
+            out.push(tr('검증 명령 실행 중 원본 저장소 변경', 'Original repository changed during verification'));
+          for (const r of this.unexplained(project, 'mirror', before.refs, await snapshotRefs(paths.mirror), before.seq))
+            out.push(tr(`검증 중 ref:${r}`, `Ref during verification:${r}`));
+          for (const r of this.unexplained(project, 'origin', before.originRefs, await snapshotRefs(project.originPath), before.seq))
+            out.push(tr(`검증 중 원본 ref:${r}`, `Original ref during verification:${r}`));
+          return out;
+        });
+        if (violations.length) {
+          this.apply(ticketId, { type: 'scope_violation', paths: violations });
           return;
         }
       }
@@ -901,11 +921,23 @@ export class Orchestrator {
     else this.apply(ticketId, { type: 'verification_passed' });
   }
 
+  /** 이전 데몬이 남긴 검증 프로세스가 살아 있으면 먼저 종료한다(같은 작업 트리에서 중복 실행 방지). */
+  private async stopLeftoverVerify(ticketId: string): Promise<void> {
+    const raw = this.company.store.getSetting(`verify_proc:${ticketId}`);
+    if (!raw) return;
+    const rec = JSON.parse(raw) as { pid: number; startedAtMs: number };
+    if (await isSameProcessAlive(rec.pid, rec.startedAtMs)) await killTree(rec.pid);
+    this.company.store.setSetting(`verify_proc:${ticketId}`, '');
+  }
+
   private async runVerifyCommand(
     vc: Project['verifyCommands'][number],
     cwd: string,
-    runDir: string,
+    baseRunDir: string,
+    ticketId?: string,
   ): Promise<{ exitCode: number | null; passed: boolean; outputPath: string | null; summary: string }> {
+    // 시도마다 고유 폴더: 이전 시도의 exit.json을 새 실행의 결과로 착각하지 않는다.
+    const runDir = `${baseRunDir}-${Date.now()}-${randomBytes(3).toString('hex')}`;
     const [cmd, ...rest] = vc.argv;
     const located = cmd ? await locateExecutable(cmd) : null;
     if (!located?.launch)
@@ -924,7 +956,10 @@ export class Orchestrator {
       runDir,
       timeoutMs: vc.timeoutMs ?? 15 * 60_000,
     });
+    if (ticketId)
+      this.company.store.setSetting(`verify_proc:${ticketId}`, JSON.stringify({ pid: proc.pid, startedAtMs: proc.startedAtMs }));
     const o = await proc.done;
+    if (ticketId) this.company.store.setSetting(`verify_proc:${ticketId}`, '');
     const tail = async (f: string) => (await readFile(f, 'utf8').catch(() => '')).slice(-1500);
     const summary = `${await tail(proc.stdoutPath)}\n${await tail(proc.stderrPath)}`.trim().slice(-1500);
     return {
@@ -1125,6 +1160,13 @@ export class Orchestrator {
     // 잠금을 기다리는 동안 취소·보류되었거나 승인이 바뀌었으면 원본을 건드리지 않는다.
     const current = this.company.requireTicket(ticketId);
     if (current.status !== 'integrating' || current.hold || this.records.approval(approval.id)?.state !== 'approved') return;
+    const mirrorBaseBefore =
+      (await git(['rev-parse', '--verify', '-q', `refs/heads/${project.baseBranch}`], paths.mirror, { allowFail: true })).stdout.trim() ||
+      null;
+    const originBranchBefore =
+      (
+        await git(['rev-parse', '--verify', '-q', `refs/heads/${ticketBranch(ticketId)}`], project.originPath, { allowFail: true })
+      ).stdout.trim() || null;
     try {
       const result =
         mode === 'auto_after_approval'
@@ -1133,29 +1175,44 @@ export class Orchestrator {
               const vwt = await ensureDetachedWorktree(paths, 'verify', t.id, mergeSha);
               const fp = await originFingerprint(project.originPath);
               const originRefs = await snapshotRefs(project.originPath);
-              for (const [i, vc] of project.verifyCommands.entries()) {
-                const r = await this.runVerifyCommand(vc, vwt, path.join(sub.runDir, 'merge-verify', String(i)));
-                if (!r.passed) return { ok: false, reason: `${vc.label}: ${r.summary.slice(-300)}` };
+              const mirrorRefs = await snapshotRefs(paths.mirror);
+              const seq = this.records.currentMoveSeq();
+              let failed: string | null = null;
+              try {
+                for (const [i, vc] of project.verifyCommands.entries()) {
+                  const r = await this.runVerifyCommand(vc, vwt, path.join(sub.runDir, `merge-verify-${Date.now()}`, String(i)), t.id);
+                  if (!r.passed) {
+                    failed = `${vc.label}: ${r.summary.slice(-300)}`;
+                    break;
+                  }
+                }
+              } finally {
+                const touched =
+                  (await originFingerprint(project.originPath)) !== fp ||
+                  this.unexplained(project, 'origin', originRefs, await snapshotRefs(project.originPath), seq).length > 0 ||
+                  this.unexplained(project, 'mirror', mirrorRefs, await snapshotRefs(paths.mirror), seq).length > 0;
+                // 정책 위반은 일반 테스트 실패와 다르다: 브랜치 반영으로 강등하지 않고 반영 자체를 멈춘다.
+                if (touched)
+                  throw new Error(
+                    tr(
+                      '병합 재검증 명령이 원본 저장소나 미러를 변경했습니다. 반영을 중단했습니다.',
+                      'Merge re-verification changed the original repository or mirror. Integration stopped.',
+                    ),
+                  );
               }
-              if ((await originFingerprint(project.originPath)) !== fp || (await this.unexpectedOriginRefs(project, originRefs)).length) {
-                return {
-                  ok: false,
-                  reason: tr(
-                    '병합 재검증 명령이 원본 저장소를 변경했습니다.',
-                    'Merge re-verification command changed the original repository.',
-                  ),
-                };
-              }
+              if (failed) return { ok: false, reason: failed };
               return { ok: true };
             })
           : await integrateAsBranch(project.originPath, paths, t.id, sub.headSha);
-      // 반영 중 미러의 기준 브랜치가 동기화됐으므로 예상 ref를 갱신한다.
-      const baseNow = await headSha(paths.mirror, `refs/heads/${project.baseBranch}`);
+      const baseRef = `refs/heads/${project.baseBranch}`;
+      const baseNow = await headSha(paths.mirror, baseRef);
       const commit = result.kind === 'merged' ? result.mergeSha : result.sha;
       this.company.store.transact(() => {
-        this.records.setExpectedRef(project.id, `refs/heads/${project.baseBranch}`, baseNow);
-        if (result.kind === 'merged') this.records.setExpectedOriginRef(project.id, `refs/heads/${result.baseBranch}`, result.mergeSha);
-        else this.records.setExpectedOriginRef(project.id, `refs/heads/${result.branch}`, result.sha);
+        // 반영으로 생긴 ref 이동을 전이로 기록한다(미러 기준 브랜치 동기화, 원본 브랜치·기준 브랜치 이동).
+        this.records.recordRefMove(project.id, 'mirror', baseRef, mirrorBaseBefore, baseNow);
+        if (result.kind === 'merged')
+          this.records.recordRefMove(project.id, 'origin', `refs/heads/${result.baseBranch}`, result.previousBaseSha, result.mergeSha);
+        else this.records.recordRefMove(project.id, 'origin', `refs/heads/${result.branch}`, originBranchBefore, result.sha);
         this.records.setApprovalState(approval.id, 'consumed', 'orchestrator', { result });
         this.company.store.appendEvent('orchestrator', 'ticket.integration_result', ticketId, result);
         this.apply(ticketId, { type: 'integrated', commitSha: commit });
@@ -1284,8 +1341,7 @@ export class Orchestrator {
     const paths = projectPaths(this.opts.dataDir, project.id);
     const cwd = async () =>
       this.withProjectLock(project.id, async () => {
-        const base = await syncMirror(project.originPath, paths, project.baseBranch);
-        this.records.setExpectedRef(project.id, `refs/heads/${project.baseBranch}`, base);
+        const base = await this.syncMirrorRecorded(project, paths);
         return ensureDetachedWorktree(paths, 'review', `${t.id}-delib`, base);
       });
     const launchPhase = async (e: Employee, phase: DeliberationPhase, prompt: string, nonce: string, claimIds: string[] = []) =>
@@ -1468,8 +1524,7 @@ export class Orchestrator {
     this.company.store.appendEvent('ceo', 'request.submitted', req.id, { text: req.text.slice(0, 300), chief: chief.id });
     const paths = projectPaths(this.opts.dataDir, project.id);
     const cwd = await this.withProjectLock(project.id, async () => {
-      const base = await syncMirror(project.originPath, paths, project.baseBranch);
-      this.records.setExpectedRef(project.id, `refs/heads/${project.baseBranch}`, base);
+      const base = await this.syncMirrorRecorded(project, paths);
       return ensureDetachedWorktree(paths, 'review', `_request-${req.id}`, base);
     });
     const nonce = randomBytes(6).toString('hex');

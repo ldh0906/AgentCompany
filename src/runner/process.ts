@@ -141,6 +141,13 @@ export async function startProcess(spec: ProcessSpec): Promise<RunningProcess> {
   const kill = async () => {
     killed = true;
     if (process.platform !== 'win32') {
+      // 먼저 셔틀에게 정중히 요청한다: 셔틀이 CLI 그룹을 끝내고 나간다(CLI pid가 아직 기록되지 않은 경쟁도 셔틀이 처리).
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        /* 이미 종료 */
+      }
+      await new Promise((r) => setTimeout(r, 500));
       // CLI는 셔틀과 다른 프로세스 그룹이다: CLI 그룹부터 종료한다.
       const rec = await readFile(files.pid, 'utf8')
         .then((x) => JSON.parse(x) as { cliPid?: number })
