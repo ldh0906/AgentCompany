@@ -2,6 +2,7 @@
 import { tr } from '../core/i18n.ts';
 
 import { execFile } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { ADAPTERS } from '../adapters/index.ts';
@@ -40,12 +41,19 @@ export function profileRoot(dataDir: string): string {
   return path.join(dataDir, 'profiles');
 }
 
+/** 앱 전용 CLI 프로필 폴더. 없으면 빈 폴더를 만든다(Codex는 CODEX_HOME 폴더가 없으면 로그인조차 거부한다). */
+export function appProfileDir(root: string, cli: string): string {
+  const dir = path.join(root, cli);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 export async function doctor(dataDir: string, useAppProfiles = true): Promise<DoctorReport> {
   const git = await run('git', ['--version'], process.env);
   const clis: CliCheck[] = [];
   for (const a of Object.values(ADAPTERS)) {
     if (a.kind === 'fake') continue;
-    const profileDir = useAppProfiles && a.capabilities.profileEnvVar ? path.join(profileRoot(dataDir), a.kind) : null;
+    const profileDir = useAppProfiles && a.capabilities.profileEnvVar ? appProfileDir(profileRoot(dataDir), a.kind) : null;
     const env = { ...process.env, ...(profileDir && a.capabilities.profileEnvVar ? { [a.capabilities.profileEnvVar]: profileDir } : {}) };
     const located = await locateExecutable(a.executable, env);
     const check: CliCheck = {

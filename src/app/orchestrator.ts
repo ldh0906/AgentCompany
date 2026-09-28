@@ -46,6 +46,7 @@ import {
 } from '../workspace/workspace.ts';
 import { Company, DomainError } from './company.ts';
 import { newId, Records, sha256, type CeoRequest, type RunRecord } from './records.ts';
+import { appProfileDir } from './doctor.ts';
 
 const ORCH: Actor = { kind: 'orchestrator' };
 const CEO: Actor = { kind: 'ceo' };
@@ -516,7 +517,7 @@ export class Orchestrator {
 
   private profileEnv(employee: Employee): Record<string, string> {
     const v = adapterFor(employee.cli).capabilities.profileEnvVar;
-    return v && this.opts.profileRoot ? { [v]: path.join(this.opts.profileRoot, employee.cli) } : {};
+    return v && this.opts.profileRoot ? { [v]: appProfileDir(this.opts.profileRoot, employee.cli) } : {};
   }
 
   private async launch(p: {
