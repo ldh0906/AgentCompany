@@ -15,6 +15,9 @@ This project was built the same way: code written by Claude (and two Codex worke
 | 8 | not approvable | 1 partial, 3 new P1 incl. a product rule gap: a review ticket could require `runtime` evidence and still complete with none | fixed; review tickets may only require reviewer inspection |
 | 9 | not approvable | all 4 fixed; 2 P1 in recovery ordering | fixed |
 | 10 | not approvable | both fixed; 1 P1 **security**: an employee could put `ok: true` in its JSON to skip claim validation and forge `authorId`, then review its own claim | fixed: parser result separated from agent data, claim fields whitelisted |
+| 11 | **approvable** | round-10 fix confirmed; the other employee-output parsers checked for the same bug class; final pass over the four core promises found no further P1 | — |
+
+35 P1 defects were found across 11 rounds; each fix came with a regression test. The reviewer reproduced most findings with in-memory models of the real code paths.
 
 The rounds are the product's own protocol, applied to itself: independent review → the author must answer every objection → no majority vote, the CEO decides what is acceptable.
 
