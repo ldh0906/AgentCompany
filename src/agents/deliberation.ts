@@ -106,20 +106,26 @@ type Fail = { ok: false; detail: string };
 const VERDICTS: ClaimVerdict[] = ['agree', 'partial', 'disagree', 'insufficient'];
 const RESPONSES: ClaimResponse[] = ['keep', 'narrow', 'revise', 'withdraw', 'user_decision'];
 
-function base(text: string | null, nonce: string, kind: string): Record<string, unknown> | Fail {
+/**
+ * 파서 결과(성공·실패)와 직원이 보낸 데이터를 분리한다.
+ * 직원 JSON에 `ok` 같은 필드가 들어 있어도 성공 판정이나 시스템 필드에 영향을 줄 수 없다.
+ */
+function base(text: string | null, nonce: string, kind: string): { ok: true; raw: Record<string, unknown> } | Fail {
   const raw = text ? (extractLastJson(text) as Record<string, unknown> | null) : null;
-  if (!raw || typeof raw !== 'object') return { ok: false, detail: tr('JSON 보고서를 찾지 못했습니다.', 'No JSON report found.') };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    return { ok: false, detail: tr('JSON 보고서를 찾지 못했습니다.', 'No JSON report found.') };
   if (raw.nonce !== nonce) return { ok: false, detail: tr('nonce 불일치', 'nonce mismatch') };
   if (raw.kind !== kind) return { ok: false, detail: tr(`kind가 ${kind}가 아닙니다.`, `kind must be ${kind}.`) };
-  return raw;
+  return { ok: true, raw };
 }
 
 export function parseClaims(
   text: string | null,
   nonce: string,
 ): { ok: true; claims: Pick<Claim, 'text' | 'impact' | 'confidence' | 'sources'>[] } | Fail {
-  const r = base(text, nonce, 'claims');
-  if ('ok' in r) return r as Fail;
+  const parsed = base(text, nonce, 'claims');
+  if (!parsed.ok) return parsed;
+  const r = parsed.raw;
   if (!Array.isArray(r.claims) || r.claims.length === 0 || r.claims.length > 12)
     return { ok: false, detail: tr('claims는 1~12개여야 합니다.', 'claims must contain 1–12 items.') };
   const claims = (r.claims as Record<string, unknown>[])
@@ -142,8 +148,9 @@ export function parseVerdicts(
   nonce: string,
   claimIds: string[],
 ): { ok: true; verdicts: { claimId: string; verdict: ClaimVerdict; reason: string }[] } | Fail {
-  const r = base(text, nonce, 'verdicts');
-  if ('ok' in r) return r as Fail;
+  const parsed = base(text, nonce, 'verdicts');
+  if (!parsed.ok) return parsed;
+  const r = parsed.raw;
   const list = Array.isArray(r.verdicts) ? (r.verdicts as Record<string, unknown>[]) : [];
   const out = list
     .filter((v) => claimIds.includes(String(v?.claimId)) && VERDICTS.includes(v.verdict as ClaimVerdict))
@@ -159,8 +166,9 @@ export function parseResponses(
   nonce: string,
   claimIds: string[],
 ): { ok: true; responses: { claimId: string; response: ClaimResponse; text: string }[] } | Fail {
-  const r = base(text, nonce, 'responses');
-  if ('ok' in r) return r as Fail;
+  const parsed = base(text, nonce, 'responses');
+  if (!parsed.ok) return parsed;
+  const r = parsed.raw;
   const list = Array.isArray(r.responses) ? (r.responses as Record<string, unknown>[]) : [];
   const out = list
     .filter((v) => claimIds.includes(String(v?.claimId)) && RESPONSES.includes(v.response as ClaimResponse))

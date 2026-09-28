@@ -1473,12 +1473,16 @@ export class Orchestrator {
       const r = parseClaims(finalText, run.nonce);
       if (r.ok) {
         for (const c of r.claims) {
+          // 직원이 보낸 필드는 명시적으로 골라 담고, 시스템 식별자(id·작성자·회차)는 덮어쓸 수 없게 뒤에 둔다.
           const claim: Claim = {
+            text: c.text,
+            impact: c.impact,
+            confidence: c.confidence,
+            sources: c.sources,
             id: newId('C'),
             ticketId: t.id,
             round: t.round,
             authorId: run.employeeId,
-            ...c,
             reviewerId: null,
             verdict: null,
             verdictReason: null,
