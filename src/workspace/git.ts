@@ -28,7 +28,7 @@ export function git(args: string[], cwd: string, opts: { allowFail?: boolean; en
         windowsHide: true,
         maxBuffer: 64 * 1024 * 1024,
         encoding: 'utf8',
-        env: { ...process.env, ...opts.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C.UTF-8' },
+        env: { ...process.env, ...opts.env, GIT_TERMINAL_PROMPT: '0' },
       },
       (error, stdout, stderr) => {
         const code = error ? (typeof (error as NodeJS.ErrnoException & { code?: unknown }).code === 'number' ? Number((error as { code?: unknown }).code) : 1) : 0;

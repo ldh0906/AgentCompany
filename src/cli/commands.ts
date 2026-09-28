@@ -33,7 +33,7 @@ function defaultDataDir(demo: boolean): string {
 
 function webRoot(): string | null {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  for (const c of [path.join(here, '..', '..', 'web', 'dist'), path.join(here, '..', 'web')]) {
+  for (const c of [path.join(here, '..', 'web'), path.join(here, '..', '..', 'dist', 'web')]) {
     if (existsSync(path.join(c, 'index.html'))) return c;
   }
   return null;

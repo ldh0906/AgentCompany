@@ -13,7 +13,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=22.13"
+    "node": ">=22.18"
   },
   "scripts": {
     "dev": "node src/cli/main.ts demo --no-open",
@@ -33,5 +33,17 @@
     "react-dom": "^19.3.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.1"
-  }
+  },
+  "keywords": [
+    "ai-agents",
+    "claude-code",
+    "codex",
+    "antigravity",
+    "multi-agent",
+    "orchestrator",
+    "code-review",
+    "git-worktree",
+    "local-first",
+    "windows"
+  ]
 }
