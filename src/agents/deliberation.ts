@@ -25,7 +25,7 @@ function question(t: Ticket): string {
   return `Title: ${t.title}\nPurpose: ${t.purpose}\nQuestions to answer:\n${t.requirements.map((r) => `- ${r.id}: ${r.text}`).join('\n')}`;
 }
 
-export function blindPrompt(e: Employee, p: Project, t: Ticket, nonce: string, language: string): string {
+export function blindPrompt(e: Employee, p: Project, t: Ticket, nonce: string, language: string, feedback: string | null = null): string {
   return `${header('claims', t, nonce)}
 You are "${e.name}", one of several independent reviewers at an AI development company run by a human CEO.
 Your current directory is a READ-ONLY copy of "${p.name}". Other reviewers are analysing the same material right now; you cannot see their work and they cannot see yours.
@@ -35,7 +35,7 @@ Mark guesses as low confidence. Do not decide product rules the CEO has not deci
 ${data('Review task', question(t))}
 
 ${data('Project document rules', p.docRules)}
-
+${feedback ? `\n${data("CEO feedback on the previous round (address it)", feedback)}\n` : ''}
 Write in language "${language}". End with exactly one JSON code block:
 ${fence}json
 {"nonce":"${nonce}","kind":"claims","claims":[{"text":"...","impact":"high|medium|low","confidence":0.7,"sources":[{"doc":"docs/design.md","loc":"## Party rules"}]}]}

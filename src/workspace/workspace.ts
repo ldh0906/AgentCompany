@@ -102,24 +102,32 @@ export interface ScopeCheck {
   protectedTouched: string[];
 }
 
-function matches(p: string, globs: string[]): boolean {
+/** Windows·macOS 기본 파일시스템은 대소문자를 구분하지 않는다: SRC/x 와 src/x 는 같은 파일이다. */
+export const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin';
+
+function norm(p: string, caseInsensitive: boolean): string {
   const posix = p.replaceAll('\\', '/');
-  return globs.some((g) => path.posix.matchesGlob(posix, g.replaceAll('\\', '/')));
+  return caseInsensitive ? posix.toLowerCase() : posix;
+}
+
+function matches(p: string, globs: string[], caseInsensitive: boolean): boolean {
+  const target = norm(p, caseInsensitive);
+  return globs.some((g) => path.posix.matchesGlob(target, norm(g, caseInsensitive)));
 }
 
 /** 변경 경로가 쓰기 범위 안에 있고 보호 경로를 건드리지 않았는지. */
-export function checkScope(paths: string[], writeScope: string[], protectedPaths: string[]): ScopeCheck {
-  const outOfScope = paths.filter((p) => !matches(p, writeScope));
-  const protectedTouched = paths.filter((p) => matches(p, protectedPaths));
+export function checkScope(paths: string[], writeScope: string[], protectedPaths: string[], caseInsensitive = CASE_INSENSITIVE_FS): ScopeCheck {
+  const outOfScope = paths.filter((p) => !matches(p, writeScope, caseInsensitive));
+  const protectedTouched = paths.filter((p) => matches(p, protectedPaths, caseInsensitive));
   return { ok: outOfScope.length === 0 && protectedTouched.length === 0, outOfScope, protectedTouched };
 }
 
 /** 두 쓰기 범위가 겹칠 수 있는지(보수적 판정: 디렉터리 접두사 비교). */
-export function scopesOverlap(a: string[], b: string[]): boolean {
+export function scopesOverlap(a: string[], b: string[], caseInsensitive = CASE_INSENSITIVE_FS): boolean {
   const prefix = (g: string) => {
-    const norm = g.replaceAll('\\', '/');
-    const idx = norm.search(/[*?[{]/);
-    return idx === -1 ? norm : norm.slice(0, idx);
+    const n = norm(g, caseInsensitive);
+    const idx = n.search(/[*?[{]/);
+    return idx === -1 ? n : n.slice(0, idx);
   };
   for (const x of a) {
     for (const y of b) {
@@ -190,8 +198,17 @@ export async function integrateAsBranch(originPath: string, paths: ProjectPaths,
   const branch = ticketBranch(ticketId);
   const head = await headSha(paths.mirror, `refs/heads/${branch}`);
   if (head !== expectedHead) throw new Error(`승인 이후 브랜치가 바뀌었습니다(${expectedHead.slice(0, 8)} → ${head.slice(0, 8)}). 다시 승인이 필요합니다.`);
-  await git(['fetch', '--no-tags', paths.mirror, `+refs/heads/${branch}:refs/heads/${branch}`], originPath);
-  return { kind: 'branch', branch, sha: head };
+  // 브랜치 이름이 아니라 승인된 SHA를 고정한 임시 ref로 가져온다(확인과 반영 사이에 브랜치가 움직여도 승인된 커밋만 들어감).
+  const pinned = `refs/ac-approved/${ticketId}`;
+  await git(['update-ref', pinned, expectedHead], paths.mirror);
+  try {
+    await git(['fetch', '--no-tags', paths.mirror, `+${pinned}:refs/heads/${branch}`], originPath);
+  } finally {
+    await git(['update-ref', '-d', pinned], paths.mirror, { allowFail: true });
+  }
+  const got = await gitOut(['rev-parse', `refs/heads/${branch}`], originPath);
+  if (got !== expectedHead) throw new Error(`반영된 커밋이 승인된 커밋과 다릅니다(${got.slice(0, 8)}).`);
+  return { kind: 'branch', branch, sha: expectedHead };
 }
 
 /**
@@ -224,7 +241,8 @@ export async function integrateWithMerge(
   await git(['worktree', 'add', '--detach', tmp, originBase], paths.mirror);
   let mergeSha: string;
   try {
-    const merged = await git([...AGENT_IDENTITY, 'merge', '--no-ff', '--no-edit', '-m', `${ticketId}: ${title}`, branch], tmp, { allowFail: true });
+    // 브랜치 이름이 아니라 승인된 SHA를 병합한다.
+    const merged = await git([...AGENT_IDENTITY, 'merge', '--no-ff', '--no-edit', '-m', `${ticketId}: ${title}`, expectedHead], tmp, { allowFail: true });
     if (merged.code !== 0) {
       await git(['merge', '--abort'], tmp, { allowFail: true });
       return await downgrade('기준 브랜치와 충돌해 자동 병합할 수 없습니다.');

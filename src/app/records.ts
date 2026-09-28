@@ -196,7 +196,7 @@ export class Records {
       const rows = this.store.db.prepare('SELECT ticket_id, glob FROM path_locks').all() as { ticket_id: string; glob: string }[];
       const byTicket = new Map<string, string[]>();
       for (const r of rows) byTicket.set(r.ticket_id, [...(byTicket.get(r.ticket_id) ?? []), r.glob]);
-      const activeIds = new Set(activeTickets.filter((t) => !TERMINAL_STATUSES.includes(t.status)).map((t) => t.id));
+      const activeIds = new Set(activeTickets.filter((t) => t.projectId === ticket.projectId && !TERMINAL_STATUSES.includes(t.status)).map((t) => t.id));
       for (const [other, globs] of byTicket) {
         if (other === ticket.id || !activeIds.has(other)) continue;
         if (scopesOverlap(ticket.writeScope, globs)) return { ok: false as const, conflictWith: other };

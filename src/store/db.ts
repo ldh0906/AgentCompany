@@ -3,6 +3,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
+import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import type { DomainEvent } from '../core/types.ts';
 
 const MIGRATIONS: string[] = [
@@ -52,8 +53,12 @@ export type EntityTable = 'projects' | 'employees' | 'tickets' | 'runs' | 'appro
 export class Store {
   readonly db: DatabaseSync;
   private inTransaction = false;
+  /** DB 밖에 마지막 이벤트의 seq·hash를 남긴다. 로그 끝부분을 지우면 체크포인트와 어긋나 탐지된다. */
+  private readonly checkpointPath: string | null;
+  private pendingCheckpoint: { seq: number; hash: string } | null = null;
 
   constructor(path: string) {
+    this.checkpointPath = path === ':memory:' ? null : `${path}.head`;
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     this.migrate();
@@ -77,12 +82,31 @@ export class Store {
     try {
       const result = fn();
       this.db.exec('COMMIT');
+      this.flushCheckpoint();
       return result;
     } catch (error) {
       this.db.exec('ROLLBACK');
+      this.pendingCheckpoint = null;
       throw error;
     } finally {
       this.inTransaction = false;
+    }
+  }
+
+  private flushCheckpoint(): void {
+    if (!this.checkpointPath || !this.pendingCheckpoint) return;
+    const tmp = `${this.checkpointPath}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(this.pendingCheckpoint));
+    renameSync(tmp, this.checkpointPath);
+    this.pendingCheckpoint = null;
+  }
+
+  private readCheckpoint(): { seq: number; hash: string } | null {
+    if (!this.checkpointPath) return null;
+    try {
+      return JSON.parse(readFileSync(this.checkpointPath, 'utf8'));
+    } catch {
+      return null;
     }
   }
 
@@ -134,6 +158,7 @@ export class Store {
       this.db
         .prepare('INSERT INTO events(seq, ts, actor, type, entity_id, payload, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
         .run(seq, ts, actor, type, entityId, payloadJson, prevHash, hash);
+      this.pendingCheckpoint = { seq, hash };
       return { seq, ts, actor, type, entityId, payload, prevHash, hash };
     });
   }
@@ -159,6 +184,9 @@ export class Store {
       prev = e.hash;
       count++;
     }
+    const cp = this.readCheckpoint();
+    if (cp && cp.seq > count) return { ok: false, brokenAt: count + 1, reason: `로그 끝부분 삭제(체크포인트 #${cp.seq}, DB #${count})` };
+    if (cp && cp.seq === count && cp.hash !== prev) return { ok: false, brokenAt: count, reason: '마지막 이벤트 해시가 체크포인트와 다름' };
     return { ok: true, count };
   }
 }

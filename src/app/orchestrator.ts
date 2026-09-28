@@ -126,6 +126,15 @@ export class Orchestrator {
       ingestedAfterRestart: [],
       orphaned: [],
     };
+    for (const prepared of this.records.runsByStatus('prepared')) {
+      const meta = await readFile(path.join(prepared.runDir, 'run.json'), 'utf8').then((x) => JSON.parse(x) as { shimPid?: number; startedAt?: string }).catch(() => null);
+      if (meta?.shimPid) {
+        this.records.saveRun({ ...prepared, status: 'running', pid: meta.shimPid, processStartMs: meta.startedAt ? Date.parse(meta.startedAt) : null });
+      } else {
+        await this.finishRun(prepared, { failure: 'spawn_failed', detail: '실행 준비 중 중단되어 프로세스가 시작되지 않았습니다.' });
+        report.orphaned.push(prepared.id);
+      }
+    }
     for (const run of this.records.runsByStatus('running')) {
       const finished = await readExitRecord(run.runDir);
       const alive = !finished && run.pid !== null && run.processStartMs !== null && (await isSameProcessAlive(run.pid, run.processStartMs));
@@ -187,7 +196,7 @@ export class Orchestrator {
         const after = await snapshotRefs(paths.mirror);
         // 오케스트레이터 자신이 바꾼 ref(다른 티켓 커밋·미러 동기화)는 위반이 아니다. 기록과 다른 변경만 잡는다.
         run.refViolations = refChanges(run.refsBefore, after, [branchRef]).filter(
-          (ref) => !ref.startsWith('refs/ac-merge/') && this.records.expectedRef(project.id, ref) !== after[ref],
+          (ref) => !ref.startsWith('refs/ac-merge/') && !ref.startsWith('refs/ac-approved/') && this.records.expectedRef(project.id, ref) !== after[ref],
         );
       }
       if (run.originBefore !== null) run.originChanged = (await originFingerprint(project.originPath)) !== run.originBefore;
@@ -524,6 +533,11 @@ export class Orchestrator {
   private async finishRun(run: RunRecord, failure: { failure: FailureClass; detail: string; orphan?: boolean } | null): Promise<void> {
     if (run.kind === 'analysis' && run.phase) return this.finishDeliberationRun(run, null, failure?.detail ?? '실패');
     if (run.kind === 'analysis') return this.finishDrafts(run, null, null, failure?.detail ?? '');
+    // 실행 결과·이벤트·티켓 전이를 한 트랜잭션으로: 중간에 죽어도 "성공했는데 제출 안 됨" 상태가 남지 않는다.
+    this.company.store.transact(() => this.finishRunTx(run, failure));
+  }
+
+  private finishRunTx(run: RunRecord, failure: { failure: FailureClass; detail: string; orphan?: boolean } | null): void {
     run.endedAt = new Date().toISOString();
     run.status = failure ? (failure.orphan ? 'orphaned' : 'failed') : 'succeeded';
     run.failureClass = failure?.failure ?? null;
@@ -587,7 +601,8 @@ export class Orchestrator {
         requirementId: r.id,
         met: r.met,
         verifiedEvidence: [
-          ...r.evidenceIds.map((id) => evidence.find((e) => e.id === id && e.passed)?.type),
+          // 인용 증거는 티켓 공통이거나 바로 이 요구사항 전용일 때만 인정한다(다른 요구사항의 대표 확인 전용 금지).
+          ...r.evidenceIds.map((id) => evidence.find((e) => e.id === id && e.passed && (!e.requirementId || e.requirementId === r.id))?.type),
           // 대표의 직접 확인은 검수자가 인용하지 않아도 그 요구사항의 증거가 된다.
           ...evidence.filter((e) => e.type === 'human_attest' && e.passed && e.requirementId === r.id).map((e) => e.type),
         ].filter((x): x is Evidence['type'] => Boolean(x)),
@@ -657,11 +672,25 @@ export class Orchestrator {
     if (project.verifyCommands.length && sub.headSha) {
       const paths = projectPaths(this.opts.dataDir, project.id);
       const vwt = await ensureDetachedWorktree(paths, 'verify', ticketId, sub.headSha);
+      // 검증 명령은 제출된 코드를 실행한다(CI와 같음). 실행 전후로 원본 저장소와 미러 ref를 비교해 부작용을 잡는다.
+      const snap = () => this.withProjectLock(project.id, async () => ({ origin: await originFingerprint(project.originPath), refs: await snapshotRefs(paths.mirror) }));
+      const before = await snap();
+      try {
       for (const [i, vc] of project.verifyCommands.entries()) {
         const ev = await this.runVerifyCommand(vc, vwt, path.join(sub.runDir, 'verify', String(i)));
         const e: Evidence = { id: newId('EV'), ticketId, round: ticket.round, headSha: sub.headSha, type: vc.evidenceType, label: vc.label, argv: vc.argv, ...ev, createdAt: now() };
         this.records.saveEvidence(e, sub.id);
         if (!e.passed) failures.push(`${vc.label} 실패 (exit ${e.exitCode ?? '-'}):\n${e.summary}`);
+      }
+      } finally {
+        const after = await snap();
+        const refViol = refChanges(before.refs, after.refs, []).filter(
+          (ref) => !ref.startsWith('refs/ac-merge/') && !ref.startsWith('refs/ac-approved/') && this.records.expectedRef(project.id, ref) !== after.refs[ref],
+        );
+        if (before.origin !== after.origin || refViol.length) {
+          this.apply(ticketId, { type: 'scope_violation', paths: [...(before.origin !== after.origin ? ['검증 명령 실행 중 원본 저장소 변경'] : []), ...refViol.map((r) => `검증 중 ref:${r}`)] });
+          return;
+        }
       }
     }
     this.changed('ticket', ticketId);
@@ -704,18 +733,19 @@ export class Orchestrator {
     this.runBusy(t.id, async () => {
       const project = this.company.requireProject(t.projectId);
       const sub = this.records.latestSubmission(t);
-      if (!sub?.headSha || !sub.baseSha) return;
+      const head = sub?.headSha ?? sub?.baseSha;
+      if (!sub || !head || !sub.baseSha) return;
       const paths = projectPaths(this.opts.dataDir, project.id);
-      const rwt = await ensureDetachedWorktree(paths, 'review', t.id, sub.headSha);
+      const rwt = await ensureDetachedWorktree(paths, 'review', t.id, head);
       const nonce = randomBytes(6).toString('hex');
       const prompt = buildReviewPrompt({
         employee: reviewer,
         project,
         ticket: t,
         nonce,
-        diff: await diffText(paths.mirror, sub.baseSha, sub.headSha),
+        diff: sub.headSha ? await diffText(paths.mirror, sub.baseSha, sub.headSha) : '(파일 변경 없음: 조사·보고 업무)',
         changedPaths: sub.changedPaths,
-        evidence: this.records.evidenceFor(t.id, sub.headSha),
+        evidence: this.records.evidenceFor(t.id, head),
         assigneeSummary: sub.summary,
         language: this.opts.language,
       });
@@ -733,7 +763,7 @@ export class Orchestrator {
   private ensureIntegrationApproval(t: Ticket): void {
     if (this.records.pendingApprovalFor(t.id, 'integrate')) return;
     if (t.type === 'review') {
-      const claims = this.records.claimsFor(t.id);
+      const claims = this.roundClaims(t);
       const escalated = claims.filter((c) => c.status === 'escalated');
       this.records.createApproval({
         kind: 'integrate',
@@ -766,36 +796,46 @@ export class Orchestrator {
     if (!a || a.kind !== 'integrate' || a.state !== 'pending' || !a.ticketId) throw new DomainError('처리할 수 없는 승인입니다.');
     const t = this.company.requireTicket(a.ticketId);
     const sub = this.records.latestSubmission(t);
+    const tx = <T>(fn: () => T): T => this.company.store.transact(fn);
     if (t.type === 'review' && decision === 'approved') {
       if (sha256(this.reviewSubject(t)) !== a.subjectHash) throw new DomainError('검토 결과가 바뀌었습니다. 새 승인 요청을 확인하세요.');
-      this.records.setApprovalState(approvalId, 'approved', 'ceo', { mode: 'review' });
-      return this.apply(t.id, { type: 'ceo_approve' }, CEO);
+      return tx(() => {
+        this.records.setApprovalState(approvalId, 'approved', 'ceo', { mode: 'review' });
+        return this.apply(t.id, { type: 'ceo_approve' }, CEO);
+      });
     }
     if (decision === 'rejected') {
-      this.records.setApprovalState(approvalId, 'rejected', 'ceo', { reason: opts.reason ?? '' });
-      return this.apply(t.id, { type: 'ceo_reject', reason: opts.reason || '대표가 반려했습니다.' }, CEO);
+      return tx(() => {
+        this.records.setApprovalState(approvalId, 'rejected', 'ceo', { reason: opts.reason ?? '' });
+        return this.apply(t.id, { type: 'ceo_reject', reason: opts.reason || '대표가 반려했습니다.' }, CEO);
+      });
     }
     if (!sub || sha256(this.integrationSubject(t, sub)) !== a.subjectHash) {
       this.records.setApprovalState(approvalId, 'expired', 'orchestrator', { reason: '승인 대상이 바뀌었습니다.' });
       throw new DomainError('승인 요청 이후 제출물이 바뀌어 승인이 무효가 되었습니다. 새 승인 요청을 확인하세요.');
     }
     const mode = opts.mode ?? (a.detail as { mode: Project['integrationMode'] }).mode;
-    this.records.setApprovalState(approvalId, 'approved', 'ceo', { mode });
-    return this.apply(t.id, { type: 'ceo_approve' }, CEO);
+    return tx(() => {
+      this.records.setApprovalState(approvalId, 'approved', 'ceo', { mode });
+      return this.apply(t.id, { type: 'ceo_approve' }, CEO);
+    });
   }
 
   private async integrate(ticketId: string): Promise<void> {
     const t = this.company.requireTicket(ticketId);
     if (t.status !== 'integrating') return;
-    if (t.type === 'review') {
-      const approval = this.records.approvals('approved').filter((a) => a.ticketId === ticketId && a.kind === 'integrate').at(-1);
-      if (approval) this.records.setApprovalState(approval.id, 'consumed', 'orchestrator', {});
-      this.apply(ticketId, { type: 'integrated', commitSha: 'review-acknowledged' });
-      return;
-    }
+    const approvalFor = () => this.records.approvals('approved').filter((a) => a.ticketId === ticketId && a.kind === 'integrate').at(-1);
+    const finishWithout = (commitSha: string) =>
+      this.company.store.transact(() => {
+        const a = approvalFor();
+        if (a) this.records.setApprovalState(a.id, 'consumed', 'orchestrator', {});
+        this.apply(ticketId, { type: 'integrated', commitSha });
+      });
+    if (t.type === 'review') return finishWithout('review-acknowledged');
     const project = this.company.requireProject(t.projectId);
     const sub = this.records.latestSubmission(t);
-    const approval = this.records.approvals('approved').filter((a) => a.ticketId === ticketId && a.kind === 'integrate').at(-1);
+    const approval = approvalFor();
+    if (sub && !sub.headSha && approval && t.type === 'research') return finishWithout('no-changes'); // 조사 결과는 반영할 파일이 없다
     if (!sub?.headSha || !approval) {
       this.apply(ticketId, { type: 'integration_failed', reason: '반영할 제출물 또는 승인 기록이 없습니다.' });
       return;
@@ -815,6 +855,9 @@ export class Orchestrator {
   ): Promise<void> {
     const ticketId = t.id;
     if (!sub.headSha) return;
+    // 잠금을 기다리는 동안 취소·보류되었거나 승인이 바뀌었으면 원본을 건드리지 않는다.
+    const current = this.company.requireTicket(ticketId);
+    if (current.status !== 'integrating' || current.hold || this.records.approval(approval.id)?.state !== 'approved') return;
     try {
       const result =
         mode === 'auto_after_approval'
@@ -829,11 +872,14 @@ export class Orchestrator {
             })
           : await integrateAsBranch(project.originPath, paths, t.id, sub.headSha);
       // 반영 중 미러의 기준 브랜치가 동기화됐으므로 예상 ref를 갱신한다.
-      this.records.setExpectedRef(project.id, `refs/heads/${project.baseBranch}`, await headSha(paths.mirror, `refs/heads/${project.baseBranch}`));
-      this.records.setApprovalState(approval.id, 'consumed', 'orchestrator', { result });
+      const baseNow = await headSha(paths.mirror, `refs/heads/${project.baseBranch}`);
       const commit = result.kind === 'merged' ? result.mergeSha : result.sha;
-      this.company.store.appendEvent('orchestrator', 'ticket.integration_result', ticketId, result);
-      this.apply(ticketId, { type: 'integrated', commitSha: commit });
+      this.company.store.transact(() => {
+        this.records.setExpectedRef(project.id, `refs/heads/${project.baseBranch}`, baseNow);
+        this.records.setApprovalState(approval.id, 'consumed', 'orchestrator', { result });
+        this.company.store.appendEvent('orchestrator', 'ticket.integration_result', ticketId, result);
+        this.apply(ticketId, { type: 'integrated', commitSha: commit });
+      });
     } catch (error) {
       this.apply(ticketId, { type: 'integration_failed', reason: String((error as Error).message ?? error) });
     }
@@ -883,7 +929,12 @@ export class Orchestrator {
   // ======================= 검토형 업무: 블라인드 교차 검토 =======================
 
   private reviewSubject(t: Ticket): string {
-    return `${t.id}|review|${this.records.claimsFor(t.id).map((c) => `${c.id}:${c.verdict}:${c.response}:${c.status}`).join(',')}`;
+    return `${t.id}|review|${t.round}|${this.roundClaims(t).map((c) => `${c.id}:${c.verdict}:${c.response}:${c.status}`).join(',')}`;
+  }
+
+  /** 이번 회차의 주장만. 대표가 반려하면 새 회차에서 처음부터 다시 분석한다. */
+  private roundClaims(t: Ticket): Claim[] {
+    return this.records.claimsFor(t.id).filter((c) => (c.round ?? 1) === t.round);
   }
 
   private participants(t: Ticket): Employee[] {
@@ -896,7 +947,7 @@ export class Orchestrator {
   }
 
   private phaseRuns(t: Ticket, phase: DeliberationPhase, employeeId: string): RunRecord[] {
-    return this.records.runsForTicket(t.id).filter((r) => r.phase === phase && r.employeeId === employeeId);
+    return this.records.runsForTicket(t.id).filter((r) => r.phase === phase && r.employeeId === employeeId && r.round === t.round);
   }
 
   /** 한 단계의 한 직원 실행을 관리한다. 끝났으면 true. 두 번 실패하면 대표 결정으로 보류. */
@@ -940,13 +991,13 @@ export class Orchestrator {
     for (const e of people) {
       const done = this.phaseRuns(t, 'blind', e.id).some((r) => r.status === 'succeeded');
       const n = nonce();
-      const ok = await this.phaseStep(t, 'blind', e, !done, () => launchPhase(e, 'blind', blindPrompt(e, project, t, n, this.opts.language), n));
+      const ok = await this.phaseStep(t, 'blind', e, !done, () => launchPhase(e, 'blind', blindPrompt(e, project, t, n, this.opts.language, this.lastFeedback(t)), n));
       allDone &&= ok;
     }
     if (!allDone || this.company.requireTicket(t.id).hold) return;
 
     // 2) 교차 판정: 작성자가 아닌 다른 참여자(가능하면 다른 CLI)에게 배정. 작성자는 가린다.
-    let claims = this.records.claimsFor(t.id);
+    let claims = this.roundClaims(t);
     const load = new Map<string, number>();
     for (const c of claims) {
       if (c.reviewerId) continue;
@@ -956,7 +1007,7 @@ export class Orchestrator {
       load.set(pick.id, (load.get(pick.id) ?? 0) + 1);
       this.records.saveClaim({ ...c, reviewerId: pick.id, status: 'under_review' });
     }
-    claims = this.records.claimsFor(t.id);
+    claims = this.roundClaims(t);
     allDone = true;
     for (const e of people) {
       const mine = claims.filter((c) => c.reviewerId === e.id && c.verdict === null);
@@ -967,7 +1018,7 @@ export class Orchestrator {
     if (!allDone || this.company.requireTicket(t.id).hold) return;
 
     // 3) 재답변: 동의가 아닌 모든 판정에 원 작성자가 답해야 다음으로 넘어간다.
-    claims = this.records.claimsFor(t.id);
+    claims = this.roundClaims(t);
     allDone = true;
     for (const e of people) {
       const mine = claims.filter((c) => c.authorId === e.id && c.verdict !== 'agree' && c.response === null);
@@ -978,7 +1029,7 @@ export class Orchestrator {
     if (!allDone || this.company.requireTicket(t.id).hold) return;
 
     // 4) 코드 종합: 미해결 이견은 삭제하지 않고 대표에게 올린다.
-    claims = this.records.claimsFor(t.id);
+    claims = this.roundClaims(t);
     const { resolved, escalated } = synthesize(claims);
     this.company.store.transact(() => {
       for (const c of [...resolved, ...escalated]) this.records.saveClaim(c);
@@ -993,7 +1044,7 @@ export class Orchestrator {
       const r = parseClaims(finalText, run.nonce);
       if (r.ok) {
         for (const c of r.claims) {
-          const claim: Claim = { id: newId('C'), ticketId: t.id, authorId: run.employeeId, ...c, reviewerId: null, verdict: null, verdictReason: null, response: null, responseText: null, status: 'proposed' };
+          const claim: Claim = { id: newId('C'), ticketId: t.id, round: t.round, authorId: run.employeeId, ...c, reviewerId: null, verdict: null, verdictReason: null, response: null, responseText: null, status: 'proposed' };
           this.records.saveClaim(claim);
         }
         run.summary = `주장 ${r.claims.length}개`;

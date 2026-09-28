@@ -37,6 +37,8 @@ const child = spawn(spec.file, spec.args, {
   env: process.env,
   windowsHide: true,
   shell: false,
+  // Unix: 별도 프로세스 그룹 → 시간 초과 시 하위 프로세스(셸·빌드)까지 함께 종료. Windows는 taskkill /T가 트리를 종료한다.
+  detached: process.platform !== 'win32',
   stdio: [spec.stdinPath ? 'pipe' : 'ignore', outFd, errFd],
 });
 closeSync(outFd);
@@ -59,7 +61,13 @@ const timer = setTimeout(() => {
   timedOut = true;
   if (!child.pid) return;
   if (process.platform === 'win32') execFile('taskkill', ['/T', '/F', '/PID', String(child.pid)], { windowsHide: true }, () => {});
-  else child.kill('SIGKILL');
+  else {
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {
+      child.kill('SIGKILL');
+    }
+  }
 }, spec.timeoutMs);
 
 child.once('close', (exitCode, signal) => {

@@ -231,6 +231,7 @@ export type ClaimImpact = 'high' | 'medium' | 'low';
 export interface Claim {
   id: string;
   ticketId: string;
+  round?: number;
   authorId: string;
   text: string;
   impact: ClaimImpact;

@@ -297,6 +297,7 @@ export function applyTicketCommand(
 
     case 'cancel': {
       if (!isCeo(actor)) return reject('취소는 대표만 할 수 있습니다.');
+      if (ticket.status === 'integrating') return reject('반영 중에는 취소할 수 없습니다. 반영이 끝나거나 실패한 뒤 처리하세요.');
       return next({ status: 'cancelled', hold: null }, 'ticket.cancelled', { reason: cmd.reason });
     }
 

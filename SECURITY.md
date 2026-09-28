@@ -14,9 +14,16 @@ Processes running as the same OS user can, in principle, read or write anything 
 - Messages and reports from employees are data. Nothing is ever executed through a shell; all processes are started with argv arrays.
 - A ticket cannot reach `integrating`/`done` without a CEO approval bound to the submission hash (property-tested).
 - The assignee can never review their own work.
-- The event log is hash-chained; edits and deletions are detected on startup.
+- The event log is hash-chained and its head is checkpointed outside the database; edits, deletions and truncation are detected on startup.
+- Integration fetches the exact approved commit SHA, never a branch name that could move after approval.
+- Run results and the ticket transitions they cause are committed in one database transaction.
 - The dashboard listens on `127.0.0.1` only, requires a per-start bearer token, rejects foreign `Host` (DNS rebinding) and `Origin` headers, and sends a strict CSP.
 - Agent Company never reads CLI credential files and stores no tokens.
+
+## Verify commands run submitted code
+
+Like CI, your verify commands (`npm test`, …) execute code written by an employee, on your machine, before you approve anything.
+They run in a clean detached checkout of the submitted commit. Before and after, the orchestrator compares your origin repository's working tree and the mirror's git refs; any change quarantines the submission and holds the ticket for you. This detects side effects on your repository; it does not sandbox the test process itself.
 
 ## Known limits
 
