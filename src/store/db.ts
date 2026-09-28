@@ -56,12 +56,23 @@ export class Store {
   /** DB 밖에 마지막 이벤트의 seq·hash를 남긴다. 로그 끝부분을 지우면 체크포인트와 어긋나 탐지된다. */
   private readonly checkpointPath: string | null;
   private pendingCheckpoint: { seq: number; hash: string } | null = null;
+  /** 체크포인트가 DB와 어긋나면(끝부분 삭제 등) 갱신을 멈춰 증거를 보존한다. */
+  private checkpointFrozen = false;
+  checkpointError: string | null = null;
 
   constructor(path: string) {
     this.checkpointPath = path === ':memory:' ? null : `${path}.head`;
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     this.migrate();
+    this.checkpointFrozen = !this.checkpointMatchesDb();
+  }
+
+  private checkpointMatchesDb(): boolean {
+    const cp = this.readCheckpoint();
+    if (!cp) return true;
+    const row = this.db.prepare('SELECT hash FROM events WHERE seq = ?').get(cp.seq) as Row | undefined;
+    return Boolean(row) && String(row!.hash) === cp.hash;
   }
 
   private migrate(): void {
@@ -82,10 +93,17 @@ export class Store {
     try {
       const result = fn();
       this.db.exec('COMMIT');
-      this.flushCheckpoint();
+      this.inTransaction = false;
+      // 커밋은 이미 끝났다: 체크포인트 쓰기 실패는 롤백 대상이 아니다.
+      try {
+        this.flushCheckpoint();
+      } catch (error) {
+        this.checkpointError = String(error);
+        this.pendingCheckpoint = null;
+      }
       return result;
     } catch (error) {
-      this.db.exec('ROLLBACK');
+      if (this.inTransaction) this.db.exec('ROLLBACK');
       this.pendingCheckpoint = null;
       throw error;
     } finally {
@@ -158,7 +176,7 @@ export class Store {
       this.db
         .prepare('INSERT INTO events(seq, ts, actor, type, entity_id, payload, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
         .run(seq, ts, actor, type, entityId, payloadJson, prevHash, hash);
-      this.pendingCheckpoint = { seq, hash };
+      if (!this.checkpointFrozen) this.pendingCheckpoint = { seq, hash };
       return { seq, ts, actor, type, entityId, payload, prevHash, hash };
     });
   }
@@ -186,7 +204,8 @@ export class Store {
     }
     const cp = this.readCheckpoint();
     if (cp && cp.seq > count) return { ok: false, brokenAt: count + 1, reason: `로그 끝부분 삭제(체크포인트 #${cp.seq}, DB #${count})` };
-    if (cp && cp.seq === count && cp.hash !== prev) return { ok: false, brokenAt: count, reason: '마지막 이벤트 해시가 체크포인트와 다름' };
+    if (cp && !this.checkpointMatchesDb()) return { ok: false, brokenAt: cp.seq, reason: `이벤트 #${cp.seq}가 체크포인트와 다름(삭제 후 다시 쓰였을 수 있음)` };
+    if (this.checkpointError) return { ok: false, brokenAt: count, reason: `체크포인트를 쓰지 못했습니다: ${this.checkpointError}` };
     return { ok: true, count };
   }
 }

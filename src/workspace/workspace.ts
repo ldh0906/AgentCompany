@@ -1,8 +1,9 @@
 // 작업공간: 원본 저장소 → (bare 미러) → 티켓 worktree / 검증 worktree → 승인 후 원본 반영.
 // 직원은 원본 저장소를 절대 직접 만지지 않는다.
 
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { AGENT_IDENTITY, git, gitOut, splitZ } from './git.ts';
 
@@ -158,11 +159,37 @@ export function refChanges(before: RefSnapshot, after: RefSnapshot, allowed: str
   return [...refs].filter((r) => !allowed.includes(r) && before[r] !== after[r]).sort();
 }
 
-/** 원본 저장소의 작업 트리 상태 요약(직원이 원본을 건드렸는지 비교용). */
+/**
+ * 원본 저장소 작업 트리의 "내용" 지문. HEAD 커밋 이동(오케스트레이터의 정상 반영)에는 변하지 않고,
+ * 체크아웃 브랜치 변경·추적 파일 내용 변경(이미 수정된 파일을 다시 덮어쓴 경우 포함)·미추적 파일 내용 변경에는 변한다.
+ * ref 변경은 snapshotRefs + 예상 ref 기록으로 따로 본다.
+ */
 export async function originFingerprint(originPath: string): Promise<string> {
+  const h = createHash('sha256');
+  const sym = await git(['symbolic-ref', '-q', 'HEAD'], originPath, { allowFail: true });
+  h.update(sym.code === 0 ? `ref:${sym.stdout.trim()}` : `detached:${(await git(['rev-parse', 'HEAD'], originPath, { allowFail: true })).stdout.trim()}`);
   const status = (await git(['status', '--porcelain=v1', '-z', '--untracked-files=all'], originPath)).stdout;
-  const head = (await git(['rev-parse', 'HEAD'], originPath, { allowFail: true })).stdout.trim();
-  return `${head}\n${status}`;
+  h.update('\0status\0').update(status);
+  h.update('\0diff\0').update((await git(['diff', 'HEAD', '--binary', '--no-color', '--no-ext-diff'], originPath, { allowFail: true })).stdout);
+  const entries = splitZ(status);
+  let budget = 256 * 1024 * 1024;
+  for (const e of entries) {
+    if (!e.startsWith('?? ')) continue;
+    const rel = e.slice(3);
+    try {
+      const st = await stat(path.join(originPath, rel));
+      if (!st.isFile()) continue;
+      if (st.size > budget) {
+        h.update(`\0big:${rel}:${st.size}:${st.mtimeMs}`);
+        continue;
+      }
+      budget -= st.size;
+      h.update(`\0untracked:${rel}\0`).update(await readFile(path.join(originPath, rel)));
+    } catch {
+      h.update(`\0gone:${rel}`);
+    }
+  }
+  return h.digest('hex');
 }
 
 /** 제출 SHA의 깨끗한 분리 worktree. 검증·검수용. 있으면 그 SHA로 되돌려 재사용. */
@@ -193,21 +220,22 @@ export type IntegrationResult =
   | { kind: 'merged'; baseBranch: string; mergeSha: string; previousBaseSha: string }
   | { kind: 'downgraded'; branch: string; sha: string; reason: string };
 
+/** 미러에서 정확한 커밋 SHA를 원본으로 가져온다(브랜치 이름·임시 ref를 거치지 않음). */
+async function fetchExactSha(originPath: string, paths: ProjectPaths, sha: string): Promise<void> {
+  await git(['config', 'uploadpack.allowAnySHA1InWant', 'true'], paths.mirror);
+  await git(['fetch', '--no-tags', '--no-write-fetch-head', paths.mirror, sha], originPath);
+  const ok = await git(['cat-file', '-e', `${sha}^{commit}`], originPath, { allowFail: true });
+  if (ok.code !== 0) throw new Error(`승인된 커밋 ${sha.slice(0, 8)}을(를) 원본으로 가져오지 못했습니다.`);
+}
+
 /** manual: 원본 저장소에 ac/<ticket> 브랜치만 만든다. 대표가 직접 병합한다. */
 export async function integrateAsBranch(originPath: string, paths: ProjectPaths, ticketId: string, expectedHead: string): Promise<IntegrationResult> {
   const branch = ticketBranch(ticketId);
   const head = await headSha(paths.mirror, `refs/heads/${branch}`);
   if (head !== expectedHead) throw new Error(`승인 이후 브랜치가 바뀌었습니다(${expectedHead.slice(0, 8)} → ${head.slice(0, 8)}). 다시 승인이 필요합니다.`);
-  // 브랜치 이름이 아니라 승인된 SHA를 고정한 임시 ref로 가져온다(확인과 반영 사이에 브랜치가 움직여도 승인된 커밋만 들어감).
-  const pinned = `refs/ac-approved/${ticketId}`;
-  await git(['update-ref', pinned, expectedHead], paths.mirror);
-  try {
-    await git(['fetch', '--no-tags', paths.mirror, `+${pinned}:refs/heads/${branch}`], originPath);
-  } finally {
-    await git(['update-ref', '-d', pinned], paths.mirror, { allowFail: true });
-  }
-  const got = await gitOut(['rev-parse', `refs/heads/${branch}`], originPath);
-  if (got !== expectedHead) throw new Error(`반영된 커밋이 승인된 커밋과 다릅니다(${got.slice(0, 8)}).`);
+  // 브랜치 이름이 아니라 승인된 SHA 자체를 가져와 원본 ref를 그 SHA로 설정한다.
+  await fetchExactSha(originPath, paths, expectedHead);
+  await git(['update-ref', '-m', `agent-company: ${ticketId} approved`, `refs/heads/${branch}`, expectedHead], originPath);
   return { kind: 'branch', branch, sha: expectedHead };
 }
 
@@ -257,21 +285,17 @@ export async function integrateWithMerge(
     if (!v.ok) return downgrade(`병합 결과 재검증 실패: ${v.reason ?? ''}`);
   }
 
-  const mergeRef = `refs/ac-merge/${ticketId}`;
-  await git(['update-ref', mergeRef, mergeSha], paths.mirror);
+  await fetchExactSha(originPath, paths, mergeSha);
   const current = (await git(['symbolic-ref', '--short', '-q', 'HEAD'], originPath, { allowFail: true })).stdout.trim();
   if (current === baseBranch) {
     const dirty = (await git(['status', '--porcelain', '--untracked-files=no'], originPath)).stdout.trim();
     if (dirty) return downgrade('원본 저장소에 커밋하지 않은 변경이 있어 자동 병합하지 않았습니다.');
-    await git(['fetch', '--no-tags', paths.mirror, `${mergeRef}:refs/ac-merge/${ticketId}`], originPath);
-    const ff = await git(['merge', '--ff-only', `refs/ac-merge/${ticketId}`], originPath, { allowFail: true });
-    await git(['update-ref', '-d', `refs/ac-merge/${ticketId}`], originPath, { allowFail: true });
+    const ff = await git(['merge', '--ff-only', mergeSha], originPath, { allowFail: true });
     if (ff.code !== 0) return downgrade('fast-forward가 불가능해 자동 병합하지 않았습니다.');
   } else {
-    // 체크아웃되지 않은 브랜치는 + 없는 refspec이라 fast-forward가 아니면 거부된다.
-    const f = await git(['fetch', '--no-tags', paths.mirror, `${mergeRef}:refs/heads/${baseBranch}`], originPath, { allowFail: true });
-    if (f.code !== 0) return downgrade('fast-forward가 불가능해 자동 병합하지 않았습니다.');
+    // 체크아웃되지 않은 기준 브랜치: 확인한 원래 값(originBase)일 때만 바꾸는 비교-교체.
+    const cas = await git(['update-ref', '-m', `agent-company: ${ticketId} merged`, `refs/heads/${baseBranch}`, mergeSha, originBase], originPath, { allowFail: true });
+    if (cas.code !== 0) return downgrade('기준 브랜치가 그사이 바뀌어 자동 병합하지 않았습니다.');
   }
-  await git(['update-ref', '-d', mergeRef], paths.mirror, { allowFail: true });
   return { kind: 'merged', baseBranch, mergeSha, previousBaseSha: originBase };
 }

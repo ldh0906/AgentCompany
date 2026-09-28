@@ -8,7 +8,8 @@
 // 환경변수는 파일에 쓰지 않는다(비밀값이 있을 수 있음). 셔틀의 환경이 그대로 CLI로 넘어간다.
 
 import { spawn, execFile } from 'node:child_process';
-import { closeSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 
 interface ShimSpec {
   file: string;
@@ -30,6 +31,13 @@ function writeAtomic(path: string, data: unknown): void {
 
 const spec = JSON.parse(readFileSync(process.argv[2]!, 'utf8')) as ShimSpec;
 const started = Date.now();
+// 시작하자마자 자기 pid를 남긴다(데몬이 기록 전에 죽어도 복구가 찾을 수 있게).
+writeAtomic(spec.pidPath, { shimPid: process.pid, cliPid: null, startedAtMs: started });
+// 복구가 이 실행을 포기했으면 CLI를 띄우지 않는다(중복 실행 방지).
+if (existsSync(path.join(path.dirname(spec.pidPath), 'abandoned'))) {
+  writeAtomic(spec.exitPath, { exitCode: null, signal: null, timedOut: false, abandoned: true, durationMs: 0 });
+  process.exit(0);
+}
 const outFd = openSync(spec.stdoutPath, 'a');
 const errFd = openSync(spec.stderrPath, 'a');
 const child = spawn(spec.file, spec.args, {

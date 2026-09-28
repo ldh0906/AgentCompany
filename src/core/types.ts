@@ -203,6 +203,8 @@ export interface Evidence {
   summary: string;
   /** 특정 요구사항에만 해당하는 증거(대표 직접 확인 등). 없으면 티켓 전체. */
   requirementId?: string;
+  /** 이 증거가 묶인 제출(작업 실행 ID). 다른 제출·회차의 증거는 재사용할 수 없다. */
+  runId?: string;
   createdAt: string;
 }
 

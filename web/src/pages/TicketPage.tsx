@@ -18,7 +18,10 @@ export function TicketPage({ id }: { id: string }) {
   const { state, reload } = useCompany();
   const { t, lang, evidence: evLabel, role, hold: holdLabel } = useT();
   const [detail, setDetail] = useState<Detail | null>(null);
-  const [tab, setTab] = useState<'timeline' | 'runs' | 'diff' | 'claims'>('timeline');
+  const [tab, setTab] = useState<'timeline' | 'runs' | 'diff' | 'claims'>(() => {
+    const q = new URLSearchParams(location.search).get('tab');
+    return q === 'runs' || q === 'diff' || q === 'claims' ? q : 'timeline';
+  });
   const [diff, setDiff] = useState<{ diff: string; changedPaths: string[] } | null>(null);
   const [log, setLog] = useState<{ id: string; text: string; reportError: string | null } | null>(null);
   const [assigning, setAssigning] = useState(false);

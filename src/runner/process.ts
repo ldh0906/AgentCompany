@@ -126,6 +126,17 @@ export async function startProcess(spec: ProcessSpec): Promise<RunningProcess> {
   let killed = false;
   const kill = async () => {
     killed = true;
+    if (process.platform !== 'win32') {
+      // CLI는 셔틀과 다른 프로세스 그룹이다: CLI 그룹부터 종료한다.
+      const rec = await readFile(files.pid, 'utf8').then((x) => JSON.parse(x) as { cliPid?: number }).catch(() => null);
+      if (rec?.cliPid) {
+        try {
+          process.kill(-rec.cliPid, 'SIGKILL');
+        } catch {
+          /* 이미 종료 */
+        }
+      }
+    }
     await killTree(pid);
   };
   const done = waitForExit(spec.runDir, pid).then(async (o) => {

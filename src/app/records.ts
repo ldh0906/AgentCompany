@@ -22,6 +22,7 @@ export interface RunRecord extends Run {
   /** 실행 전 스냅샷: 재시작 후에도 범위 검사를 할 수 있게 저장한다. */
   refsBefore: Record<string, string> | null;
   originBefore: string | null;
+  originRefsBefore?: Record<string, string> | null;
   postProcessed: boolean;
   /** 검토형 업무의 단계와 이번 실행이 다루는 주장. */
   phase?: DeliberationPhase | null;
@@ -105,11 +106,14 @@ export class Records {
 
   // ---- 증거 ----
   saveEvidence(e: Evidence, runId: string | null): void {
-    this.store.put('evidence', e.id, e, { ticket_id: e.ticketId, run_id: runId, created_at: e.createdAt });
+    const withRun = { ...e, runId: runId ?? e.runId };
+    this.store.put('evidence', e.id, withRun, { ticket_id: e.ticketId, run_id: runId, created_at: e.createdAt });
   }
-  evidenceFor(ticketId: string, headSha?: string): Evidence[] {
+  /** submission(작업 실행 ID)을 주면 그 제출의 증거만. 제출이 없으면 빈 목록. */
+  evidenceFor(ticketId: string, scope?: { submission: string | null | undefined }): Evidence[] {
     const all = this.store.list<Evidence>('evidence', 'WHERE ticket_id = ? ORDER BY created_at', ticketId);
-    return headSha ? all.filter((e) => e.headSha === headSha) : all;
+    if (!scope) return all;
+    return scope.submission ? all.filter((e) => e.runId === scope.submission) : [];
   }
 
   // ---- 승인 ----
@@ -187,6 +191,13 @@ export class Records {
   }
   expectedRef(projectId: string, ref: string): string | null {
     return this.store.getSetting(`xref:${projectId}:${ref}`);
+  }
+  /** 원본 저장소에서 오케스트레이터가 반영으로 바꾼 ref. */
+  setExpectedOriginRef(projectId: string, ref: string, sha: string): void {
+    this.store.setSetting(`xoref:${projectId}:${ref}`, sha);
+  }
+  expectedOriginRef(projectId: string, ref: string): string | null {
+    return this.store.getSetting(`xoref:${projectId}:${ref}`);
   }
 
   // ---- 경로 잠금 ----

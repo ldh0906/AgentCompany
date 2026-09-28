@@ -127,13 +127,21 @@ export class Orchestrator {
       orphaned: [],
     };
     for (const prepared of this.records.runsByStatus('prepared')) {
-      const meta = await readFile(path.join(prepared.runDir, 'run.json'), 'utf8').then((x) => JSON.parse(x) as { shimPid?: number; startedAt?: string }).catch(() => null);
-      if (meta?.shimPid) {
-        this.records.saveRun({ ...prepared, status: 'running', pid: meta.shimPid, processStartMs: meta.startedAt ? Date.parse(meta.startedAt) : null });
-      } else {
-        await this.finishRun(prepared, { failure: 'spawn_failed', detail: '실행 준비 중 중단되어 프로세스가 시작되지 않았습니다.' });
-        report.orphaned.push(prepared.id);
+      const shim = await findShim(prepared.runDir);
+      if (shim) {
+        this.records.saveRun({ ...prepared, status: 'running', pid: shim.pid, processStartMs: shim.startedAtMs });
+        continue;
       }
+      // 셔틀 기록이 없다: 포기 표시를 남기고 잠시 기다린 뒤 다시 본다(셔틀은 시작하자마자 표시를 확인하고 스스로 멈춘다).
+      await writeFile(path.join(prepared.runDir, 'abandoned'), new Date().toISOString()).catch(() => {});
+      await new Promise((r) => setTimeout(r, 1500));
+      const late = await findShim(prepared.runDir);
+      if (late && !(await readExitRecord(prepared.runDir))) {
+        this.records.saveRun({ ...prepared, status: 'running', pid: late.pid, processStartMs: late.startedAtMs });
+        continue;
+      }
+      await this.finishRun(prepared, { failure: 'spawn_failed', detail: '실행 준비 중 중단되어 프로세스가 시작되지 않았습니다.' });
+      report.orphaned.push(prepared.id);
     }
     for (const run of this.records.runsByStatus('running')) {
       const finished = await readExitRecord(run.runDir);
@@ -200,7 +208,14 @@ export class Orchestrator {
         );
       }
       if (run.originBefore !== null) run.originChanged = (await originFingerprint(project.originPath)) !== run.originBefore;
+      if (run.originRefsBefore) run.originChanged ||= (await this.unexpectedOriginRefs(project, run.originRefsBefore)).length > 0;
     });
+  }
+
+  /** 원본 저장소에서 오케스트레이터가 반영으로 바꾼 것이 아닌 ref 변경. */
+  private async unexpectedOriginRefs(project: Project, before: Record<string, string>): Promise<string[]> {
+    const after = await snapshotRefs(project.originPath);
+    return refChanges(before, after, []).filter((ref) => ref.startsWith('refs/heads/') || ref.startsWith('refs/tags/')).filter((ref) => this.records.expectedOriginRef(project.id, ref) !== after[ref]);
   }
 
   private readonly projectLocks = new Map<string, Promise<unknown>>();
@@ -354,12 +369,17 @@ export class Orchestrator {
 
     const project = this.company.requireProject(t.projectId);
     const paths = projectPaths(this.opts.dataDir, project.id);
-    const { wt, refsBefore, originBefore } = await this.withProjectLock(project.id, async () => {
+    const { wt, refsBefore, originBefore, originRefsBefore } = await this.withProjectLock(project.id, async () => {
       const baseSha = await syncMirror(project.originPath, paths, project.baseBranch);
       this.records.setExpectedRef(project.id, `refs/heads/${project.baseBranch}`, baseSha);
       const wt = await ensureTicketWorktree(paths, t.id, project.baseBranch);
       this.records.setExpectedRef(project.id, `refs/heads/${ticketBranch(t.id)}`, await headSha(wt.path));
-      return { wt, refsBefore: await snapshotRefs(paths.mirror), originBefore: await originFingerprint(project.originPath) };
+      return {
+        wt,
+        refsBefore: await snapshotRefs(paths.mirror),
+        originBefore: await originFingerprint(project.originPath),
+        originRefsBefore: await snapshotRefs(project.originPath),
+      };
     });
 
     const nonce = randomBytes(6).toString('hex');
@@ -384,6 +404,7 @@ export class Orchestrator {
       baseSha: wt.baseSha,
       refsBefore,
       originBefore,
+      originRefsBefore,
     });
   }
 
@@ -412,6 +433,7 @@ export class Orchestrator {
     baseSha: string | null;
     refsBefore?: Record<string, string>;
     originBefore?: string;
+    originRefsBefore?: Record<string, string>;
     phase?: DeliberationPhase;
     claimIds?: string[];
   }): Promise<void> {
@@ -460,6 +482,7 @@ export class Orchestrator {
       originChanged: false,
       refsBefore: p.refsBefore ?? null,
       originBefore: p.originBefore ?? null,
+      originRefsBefore: p.originRefsBefore ?? null,
       postProcessed: false,
       phase: p.phase ?? null,
       claimIds: p.claimIds ?? [],
@@ -595,7 +618,7 @@ export class Orchestrator {
     if (rr.kind !== 'review') return;
     const reviewer: Actor = { kind: 'employee', id: run.employeeId };
     const submission = this.records.latestSubmission(ticket);
-    const evidence = this.records.evidenceFor(ticket.id, submission?.headSha ?? undefined);
+    const evidence = this.records.evidenceFor(ticket.id, { submission: submission?.id });
     if (rr.verdict === 'approve') {
       const checks = rr.requirements.map((r) => ({
         requirementId: r.id,
@@ -673,7 +696,8 @@ export class Orchestrator {
       const paths = projectPaths(this.opts.dataDir, project.id);
       const vwt = await ensureDetachedWorktree(paths, 'verify', ticketId, sub.headSha);
       // 검증 명령은 제출된 코드를 실행한다(CI와 같음). 실행 전후로 원본 저장소와 미러 ref를 비교해 부작용을 잡는다.
-      const snap = () => this.withProjectLock(project.id, async () => ({ origin: await originFingerprint(project.originPath), refs: await snapshotRefs(paths.mirror) }));
+      const snap = () =>
+        this.withProjectLock(project.id, async () => ({ origin: await originFingerprint(project.originPath), refs: await snapshotRefs(paths.mirror), originRefs: await snapshotRefs(project.originPath) }));
       const before = await snap();
       try {
       for (const [i, vc] of project.verifyCommands.entries()) {
@@ -687,8 +711,12 @@ export class Orchestrator {
         const refViol = refChanges(before.refs, after.refs, []).filter(
           (ref) => !ref.startsWith('refs/ac-merge/') && !ref.startsWith('refs/ac-approved/') && this.records.expectedRef(project.id, ref) !== after.refs[ref],
         );
-        if (before.origin !== after.origin || refViol.length) {
-          this.apply(ticketId, { type: 'scope_violation', paths: [...(before.origin !== after.origin ? ['검증 명령 실행 중 원본 저장소 변경'] : []), ...refViol.map((r) => `검증 중 ref:${r}`)] });
+        const originRefViol = await this.unexpectedOriginRefs(project, before.originRefs);
+        if (before.origin !== after.origin || refViol.length || originRefViol.length) {
+          this.apply(ticketId, {
+            type: 'scope_violation',
+            paths: [...(before.origin !== after.origin ? ['검증 명령 실행 중 원본 저장소 변경'] : []), ...refViol.map((r) => `검증 중 ref:${r}`), ...originRefViol.map((r) => `검증 중 원본 ref:${r}`)],
+          });
           return;
         }
       }
@@ -745,7 +773,7 @@ export class Orchestrator {
         nonce,
         diff: sub.headSha ? await diffText(paths.mirror, sub.baseSha, sub.headSha) : '(파일 변경 없음: 조사·보고 업무)',
         changedPaths: sub.changedPaths,
-        evidence: this.records.evidenceFor(t.id, head),
+        evidence: this.records.evidenceFor(t.id, { submission: sub.id }),
         assigneeSummary: sub.summary,
         language: this.opts.language,
       });
@@ -864,9 +892,14 @@ export class Orchestrator {
           ? await integrateWithMerge(project.originPath, paths, t.id, project.baseBranch, sub.headSha, t.title, async (mergeSha) => {
               if (!project.verifyCommands.length) return { ok: true };
               const vwt = await ensureDetachedWorktree(paths, 'verify', t.id, mergeSha);
+              const fp = await originFingerprint(project.originPath);
+              const originRefs = await snapshotRefs(project.originPath);
               for (const [i, vc] of project.verifyCommands.entries()) {
                 const r = await this.runVerifyCommand(vc, vwt, path.join(sub.runDir, 'merge-verify', String(i)));
                 if (!r.passed) return { ok: false, reason: `${vc.label}: ${r.summary.slice(-300)}` };
+              }
+              if ((await originFingerprint(project.originPath)) !== fp || (await this.unexpectedOriginRefs(project, originRefs)).length) {
+                return { ok: false, reason: '병합 재검증 명령이 원본 저장소를 변경했습니다.' };
               }
               return { ok: true };
             })
@@ -876,6 +909,8 @@ export class Orchestrator {
       const commit = result.kind === 'merged' ? result.mergeSha : result.sha;
       this.company.store.transact(() => {
         this.records.setExpectedRef(project.id, `refs/heads/${project.baseBranch}`, baseNow);
+        if (result.kind === 'merged') this.records.setExpectedOriginRef(project.id, `refs/heads/${result.baseBranch}`, result.mergeSha);
+        else this.records.setExpectedOriginRef(project.id, `refs/heads/${result.branch}`, result.sha);
         this.records.setApprovalState(approval.id, 'consumed', 'orchestrator', { result });
         this.company.store.appendEvent('orchestrator', 'ticket.integration_result', ticketId, result);
         this.apply(ticketId, { type: 'integrated', commitSha: commit });
@@ -1194,12 +1229,12 @@ export class Orchestrator {
     const t = this.company.requireTicket(ticketId);
     if (!t.requirements.some((r) => r.id === requirementId)) throw new DomainError(`요구사항 ${requirementId}이(가) 없습니다.`);
     const sub = this.records.latestSubmission(t);
-    if (!sub?.headSha) throw new DomainError('확인할 제출물이 아직 없습니다.');
+    if (!sub) throw new DomainError('확인할 제출물이 아직 없습니다.');
     const e: Evidence = {
       id: newId('EV'),
       ticketId,
       round: t.round,
-      headSha: sub.headSha,
+      headSha: sub.headSha ?? sub.baseSha ?? '',
       type: 'human_attest',
       label: '대표 직접 확인',
       argv: null,
@@ -1208,10 +1243,11 @@ export class Orchestrator {
       outputPath: null,
       summary: note || '대표가 직접 확인했습니다.',
       requirementId,
+      runId: sub.id,
       createdAt: new Date().toISOString(),
     };
     this.records.saveEvidence(e, sub.id);
-    this.company.store.appendEvent('ceo', 'evidence.attested', ticketId, { requirementId, headSha: sub.headSha, note });
+    this.company.store.appendEvent('ceo', 'evidence.attested', ticketId, { requirementId, submission: sub.id, headSha: e.headSha, note });
     if (t.hold?.reason === 'needs_decision' && t.status === 'in_review') this.releaseHold(ticketId);
     this.changed('ticket', ticketId);
     return e;
@@ -1232,4 +1268,14 @@ export class Orchestrator {
       CEO,
     );
   }
+}
+
+/** 실행 폴더의 셔틀 기록(run.json의 shimPid 또는 셔틀이 직접 쓴 pid.json). */
+async function findShim(runDir: string): Promise<{ pid: number; startedAtMs: number | null } | null> {
+  const read = async (f: string) => JSON.parse(await readFile(path.join(runDir, f), 'utf8')) as Record<string, unknown>;
+  const meta = await read('run.json').catch(() => null);
+  if (typeof meta?.shimPid === 'number') return { pid: meta.shimPid, startedAtMs: typeof meta.startedAt === 'string' ? Date.parse(meta.startedAt) : null };
+  const pid = await read('pid.json').catch(() => null);
+  if (typeof pid?.shimPid === 'number') return { pid: pid.shimPid, startedAtMs: typeof pid.startedAtMs === 'number' ? pid.startedAtMs : null };
+  return null;
 }
