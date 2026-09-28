@@ -1,0 +1,195 @@
+// SQLite 저장소. node:sqlite(내장)를 써서 네이티브 빌드 없이 Windows에서 바로 동작한다.
+// 모든 상태 변경은 transact() 안에서 이벤트 로그와 함께 커밋된다.
+
+import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
+import type { DomainEvent } from '../core/types.ts';
+
+const MIGRATIONS: string[] = [
+  `
+  CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  CREATE TABLE projects (id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at TEXT NOT NULL);
+  CREATE TABLE employees (id TEXT PRIMARY KEY, data TEXT NOT NULL, active INTEGER NOT NULL, created_at TEXT NOT NULL);
+  CREATE TABLE tickets (
+    id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  );
+  CREATE INDEX tickets_status ON tickets(status);
+  CREATE TABLE runs (
+    id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL, started_at TEXT NOT NULL
+  );
+  CREATE INDEX runs_ticket ON runs(ticket_id);
+  CREATE INDEX runs_status ON runs(status);
+  CREATE TABLE approvals (
+    id TEXT PRIMARY KEY, ticket_id TEXT, state TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL
+  );
+  CREATE INDEX approvals_state ON approvals(state);
+  CREATE TABLE evidence (
+    id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, run_id TEXT, data TEXT NOT NULL, created_at TEXT NOT NULL
+  );
+  CREATE INDEX evidence_ticket ON evidence(ticket_id);
+  CREATE TABLE claims (id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, data TEXT NOT NULL);
+  CREATE TABLE decisions (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL);
+  CREATE TABLE messages (id TEXT PRIMARY KEY, ticket_id TEXT, data TEXT NOT NULL, created_at TEXT NOT NULL);
+  CREATE TABLE path_locks (ticket_id TEXT NOT NULL, glob TEXT NOT NULL, PRIMARY KEY (ticket_id, glob));
+  CREATE TABLE events (
+    seq INTEGER PRIMARY KEY, ts TEXT NOT NULL, actor TEXT NOT NULL, type TEXT NOT NULL,
+    entity_id TEXT NOT NULL, payload TEXT NOT NULL, prev_hash TEXT NOT NULL, hash TEXT NOT NULL
+  );
+  CREATE INDEX events_entity ON events(entity_id);
+  `,
+];
+
+export const GENESIS_HASH = '0'.repeat(64);
+
+type Row = Record<string, unknown>;
+
+export type EntityTable = 'projects' | 'employees' | 'tickets' | 'runs' | 'approvals' | 'evidence' | 'claims' | 'decisions' | 'messages';
+
+export class Store {
+  readonly db: DatabaseSync;
+  private inTransaction = false;
+
+  constructor(path: string) {
+    this.db = new DatabaseSync(path);
+    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+    this.migrate();
+  }
+
+  private migrate(): void {
+    const current = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
+    for (let v = current; v < MIGRATIONS.length; v++) {
+      this.transact(() => {
+        this.db.exec(MIGRATIONS[v]!);
+        this.db.exec(`PRAGMA user_version = ${v + 1}`);
+      });
+    }
+  }
+
+  /** 중첩 호출 시 바깥 트랜잭션에 합류한다. */
+  transact<T>(fn: () => T): T {
+    if (this.inTransaction) return fn();
+    this.db.exec('BEGIN IMMEDIATE');
+    this.inTransaction = true;
+    try {
+      const result = fn();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    } finally {
+      this.inTransaction = false;
+    }
+  }
+
+  close(): void {
+    this.db.close();
+  }
+
+  // ---- 설정 ----
+
+  getSetting(key: string): string | null {
+    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as Row | undefined;
+    return row ? String(row.value) : null;
+  }
+
+  setSetting(key: string, value: string): void {
+    this.db.prepare('INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+  }
+
+  // ---- 엔터티 (JSON 문서 + 조회용 컬럼) ----
+
+  get<T>(table: EntityTable, id: string): T | null {
+    const row = this.db.prepare(`SELECT data FROM ${table} WHERE id = ?`).get(id) as Row | undefined;
+    return row ? (JSON.parse(String(row.data)) as T) : null;
+  }
+
+  list<T>(table: EntityTable, where = '', ...params: (string | number | null)[]): T[] {
+    const rows = this.db.prepare(`SELECT data FROM ${table} ${where}`).all(...params) as Row[];
+    return rows.map((r) => JSON.parse(String(r.data)) as T);
+  }
+
+  put(table: EntityTable, id: string, data: unknown, columns: Record<string, string | number | null> = {}): void {
+    const names = ['id', 'data', ...Object.keys(columns)];
+    const values = [id, JSON.stringify(data), ...Object.values(columns)];
+    const updates = names.slice(1).map((n) => `${n} = excluded.${n}`).join(', ');
+    this.db
+      .prepare(`INSERT INTO ${table}(${names.join(', ')}) VALUES (${names.map(() => '?').join(', ')}) ON CONFLICT(id) DO UPDATE SET ${updates}`)
+      .run(...values);
+  }
+
+  // ---- 이벤트 로그 (추가 전용, 해시 체인) ----
+
+  appendEvent(actor: string, type: string, entityId: string, payload: unknown, ts = new Date().toISOString()): DomainEvent {
+    return this.transact(() => {
+      const last = this.db.prepare('SELECT seq, hash FROM events ORDER BY seq DESC LIMIT 1').get() as Row | undefined;
+      const seq = last ? Number(last.seq) + 1 : 1;
+      const prevHash = last ? String(last.hash) : GENESIS_HASH;
+      const payloadJson = canonicalJson(payload);
+      const hash = eventHash(prevHash, seq, ts, actor, type, entityId, payloadJson);
+      this.db
+        .prepare('INSERT INTO events(seq, ts, actor, type, entity_id, payload, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(seq, ts, actor, type, entityId, payloadJson, prevHash, hash);
+      return { seq, ts, actor, type, entityId, payload, prevHash, hash };
+    });
+  }
+
+  events(entityId?: string, limit = 500): DomainEvent[] {
+    const rows = (
+      entityId
+        ? this.db.prepare('SELECT * FROM events WHERE entity_id = ? ORDER BY seq DESC LIMIT ?').all(entityId, limit)
+        : this.db.prepare('SELECT * FROM events ORDER BY seq DESC LIMIT ?').all(limit)
+    ) as Row[];
+    return rows.reverse().map(toEvent);
+  }
+
+  /** 변조 탐지: 모든 이벤트의 해시를 다시 계산한다. */
+  verifyEventChain(): { ok: true; count: number } | { ok: false; brokenAt: number; reason: string } {
+    let prev = GENESIS_HASH;
+    let count = 0;
+    for (const row of this.db.prepare('SELECT * FROM events ORDER BY seq').iterate() as Iterable<Row>) {
+      const e = toEvent(row);
+      if (e.prevHash !== prev) return { ok: false, brokenAt: e.seq, reason: '이전 해시 불일치(삭제 또는 삽입)' };
+      const expected = eventHash(e.prevHash, e.seq, e.ts, e.actor, e.type, e.entityId, String(row.payload));
+      if (expected !== e.hash) return { ok: false, brokenAt: e.seq, reason: '내용 해시 불일치(수정)' };
+      prev = e.hash;
+      count++;
+    }
+    return { ok: true, count };
+  }
+}
+
+function toEvent(row: Row): DomainEvent {
+  return {
+    seq: Number(row.seq),
+    ts: String(row.ts),
+    actor: String(row.actor),
+    type: String(row.type),
+    entityId: String(row.entity_id),
+    payload: JSON.parse(String(row.payload)),
+    prevHash: String(row.prev_hash),
+    hash: String(row.hash),
+  };
+}
+
+function eventHash(prevHash: string, seq: number, ts: string, actor: string, type: string, entityId: string, payloadJson: string): string {
+  return createHash('sha256').update([prevHash, seq, ts, actor, type, entityId, payloadJson].join('\u001f')).digest('hex');
+}
+
+/** 키 순서를 고정한 JSON. 해시가 직렬화 순서에 흔들리지 않게 한다. */
+export function canonicalJson(value: unknown): string {
+  return JSON.stringify(sortKeys(value));
+}
+
+function sortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value as object)
+        .sort()
+        .map((k) => [k, sortKeys((value as Record<string, unknown>)[k])]),
+    );
+  }
+  return value;
+}
