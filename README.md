@@ -74,6 +74,32 @@ This project separates **measured facts** from assumptions ([details](docs/desig
 - ✅ Tested: crash/restart continuity with a real daemon kill, scope violations, ref tampering, lazy completion, verify-failure budgets, concurrent tickets, auto-merge safety.
 - ⏳ Not yet measured end-to-end with real subscriptions: Claude `--permission-prompt-tool` relay, Codex app-server approvals, Antigravity permission behavior in headless mode.
 
+## How a ticket moves
+
+Every arrow is a guarded transition in `src/core/ticket-machine.ts`. LLM output never moves a card by itself.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> backlog: CEO or chief-of-staff draft (confirmed by CEO)
+    backlog --> assigned: assignee ≠ reviewer
+    assigned --> in_progress: dependencies done, write-scope lock acquired
+    in_progress --> verifying: run ended with a valid, nonce-bound report
+    in_progress --> assigned: timeout / usage limit / bad report (budget consumed)
+    verifying --> in_review: scope ok, protected paths untouched, verify commands pass
+    verifying --> changes_requested: no changes or failing checks
+    verifying --> quarantined: out-of-scope edit or git ref tampering
+    in_review --> awaiting_approval: every requirement met with strong-enough evidence
+    in_review --> changes_requested: reviewer objects
+    changes_requested --> in_progress: next round (max rounds, then CEO decides)
+    awaiting_approval --> integrating: CEO approves (bound to base, head, changed paths)
+    awaiting_approval --> changes_requested: CEO rejects with a reason
+    integrating --> done: branch created or fast-forward merge
+    quarantined: held for CEO permission
+```
+
+Review tickets use a different path: blind analysis → anonymized cross-verdicts → mandatory author rebuttal → deterministic synthesis. Disputes the author keeps are escalated to you, never outvoted.
+
 ## Architecture
 
 ```

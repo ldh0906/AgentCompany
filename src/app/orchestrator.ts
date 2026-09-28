@@ -145,7 +145,19 @@ export class Orchestrator {
   }
 
   /** 실행 종료 후 처리: 작업이면 오케스트레이터가 커밋하고 범위를 계산한 뒤 결과를 수거한다. */
+  private readonly completing = new Set<string>();
+
   private async completeRun(runId: string, outcome: { exitCode: number | null; timedOut: boolean } | null): Promise<void> {
+    if (this.completing.has(runId)) return; // 같은 실행의 종료 처리가 겹치지 않게
+    this.completing.add(runId);
+    try {
+      await this.completeRunOnce(runId, outcome);
+    } finally {
+      this.completing.delete(runId);
+    }
+  }
+
+  private async completeRunOnce(runId: string, outcome: { exitCode: number | null; timedOut: boolean } | null): Promise<void> {
     const run = this.records.run(runId);
     if (!run || run.status !== 'running') return;
     if (run.kind === 'work' && !run.postProcessed && !outcome?.timedOut) {

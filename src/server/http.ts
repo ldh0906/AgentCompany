@@ -151,7 +151,8 @@ async function serveStatic(res: http.ServerResponse, pathname: string, webRoot: 
   }
   const rel = decodeURIComponent(pathname).replace(/^\/+/, '');
   let file = path.resolve(webRoot, rel || 'index.html');
-  if (!file.startsWith(path.resolve(webRoot))) {
+  const inside = path.relative(path.resolve(webRoot), file);
+  if (inside.startsWith('..') || path.isAbsolute(inside)) {
     res.writeHead(403).end();
     return;
   }
