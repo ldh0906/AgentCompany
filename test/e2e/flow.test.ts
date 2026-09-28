@@ -80,3 +80,48 @@ test('대표 반려 → 수정 요청으로 돌아가 다음 회차 진행', { t
   const again = await driveUntil(env, ticket.id, statusIs('awaiting_approval'));
   assert.equal(again.round, 2);
 });
+
+test('같은 프로젝트의 두 업무가 동시에 진행돼도 서로의 정상 커밋을 위반으로 오인하지 않음 (데모에서 발견한 버그)', { timeout: 180_000 }, async (t) => {
+  const env = await setup(t);
+  env.company.hireEmployee({ name: '구현 2', roles: ['implementer'], cli: 'fake', model: 'diligent' });
+  const a = newImplTicket(env);
+  const b = env.company.createTicket({
+    projectId: env.projectId,
+    type: 'doc',
+    title: '문서',
+    purpose: 'p',
+    requirements: [{ text: '문서 갱신', evidenceType: 'inspection' }],
+    doneCriteria: 'd',
+    writeScope: ['docs/**'],
+  });
+  const both = async () => {
+    const ta = await driveUntil(env, a.id, (x) => x.status === 'awaiting_approval' || x.hold !== null, 150_000);
+    const tb = await driveUntil(env, b.id, (x) => x.status === 'awaiting_approval' || x.hold !== null, 150_000);
+    return [ta, tb];
+  };
+  const [ta, tb] = await both();
+  assert.equal(ta!.status, 'awaiting_approval', `A 보류: ${ta!.hold?.note}`);
+  assert.equal(tb!.status, 'awaiting_approval', `B 보류: ${tb!.hold?.note}`);
+});
+
+test('직원이 git ref를 조작하면(브랜치 생성) 범위 위반으로 격리', { timeout: 120_000 }, async (t) => {
+  const env = await setup(t, { implementer: 'tamper' });
+  const ticket = newImplTicket(env);
+  const held = await driveUntil(env, ticket.id, (x) => x.hold !== null);
+  assert.equal(held.hold?.reason, 'needs_permission');
+  assert.match(held.hold!.note, /sneaky-branch/);
+});
+
+test('쓰기 범위가 겹치는 업무는 오류 없이 순서를 기다리고, 대기 이벤트는 한 번만 기록', { timeout: 120_000 }, async (t) => {
+  const env = await setup(t);
+  env.company.hireEmployee({ name: '구현 2', roles: ['implementer'], cli: 'fake', model: 'diligent' });
+  const a = newImplTicket(env);
+  const b = newImplTicket(env); // 같은 src/** 범위
+  await driveUntil(env, a.id, statusIs('awaiting_approval'));
+  for (let i = 0; i < 20; i++) await env.orch.tick();
+  const tb = env.company.requireTicket(b.id);
+  assert.equal(tb.status, 'assigned', 'A가 끝날 때까지 B는 시작하지 않음');
+  const evs = env.store.events(b.id);
+  assert.equal(evs.filter((e) => e.type === 'ticket.waiting_lock').length, 1);
+  assert.equal(evs.filter((e) => e.type === 'orchestrator.error').length, 0);
+});

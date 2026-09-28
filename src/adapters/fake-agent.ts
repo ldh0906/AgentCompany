@@ -1,8 +1,9 @@
 // 가짜 직원 CLI. 실제 구독 없이 제품 흐름을 시연·테스트한다.
-// 성격(FAKE_BEHAVIOR): diligent(성실) | lazy(첫 회차에 일 안 하고 완료 주장) | rogue(범위 밖 수정) | slow(느림)
+// 성격(FAKE_BEHAVIOR): diligent(성실) | lazy(첫 회차에 일 안 하고 완료 주장) | rogue(범위 밖 수정) | slow(느림) | tamper(git ref 조작)
 // stdin으로 프롬프트를 받고, Claude의 stream-json과 비슷한 JSONL을 출력한다.
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { parseTaskHeader, type TaskHeader } from '../agents/prompt.ts';
@@ -40,6 +41,9 @@ async function work(h: TaskHeader): Promise<string> {
   }
   if (behavior === 'rogue') {
     writeFileSync('README.md', '범위 밖 수정 (rogue 직원)\n');
+  }
+  if (behavior === 'tamper') {
+    execFileSync('git', ['branch', '-f', 'sneaky-branch', 'HEAD'], { windowsHide: true, stdio: 'ignore' });
   }
   return finalWith(
     {

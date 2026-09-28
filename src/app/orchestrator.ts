@@ -21,6 +21,7 @@ import {
   diffText,
   ensureDetachedWorktree,
   ensureTicketWorktree,
+  headSha,
   integrateAsBranch,
   integrateWithMerge,
   originFingerprint,
@@ -76,6 +77,18 @@ export class Orchestrator {
       concurrency: { claude: 1, codex: 1, agy: 1, fake: 4, ...opts.concurrency },
       onChange: opts.onChange,
     };
+  }
+
+  private readonly lastNotes = new Map<string, string>();
+
+  /** 같은 대상·같은 내용의 이벤트는 반복 기록하지 않는다(추가 전용 로그 팽창 방지). */
+  private noteOnce(entityId: string, type: string, payload: Record<string, unknown>): void {
+    const key = `${entityId}|${type}`;
+    const body = JSON.stringify(payload);
+    if (this.lastNotes.get(key) === body) return;
+    this.lastNotes.set(key, body);
+    this.company.store.appendEvent('orchestrator', type, entityId, payload);
+    this.changed('ticket', entityId);
   }
 
   private changed(kind: string, id: string): void {
@@ -150,12 +163,32 @@ export class Orchestrator {
     const ticket = this.company.requireTicket(run.ticketId);
     const project = this.company.requireProject(ticket.projectId);
     const paths = projectPaths(this.opts.dataDir, project.id);
-    const wt = await ensureTicketWorktree(paths, ticket.id, project.baseBranch);
-    const head = await commitWorktree(wt, `${ticket.id} round ${run.round}`);
-    run.headSha = head;
-    run.changedPaths = head && run.baseSha ? await changedPaths(paths.mirror, run.baseSha, head) : [];
-    if (run.refsBefore) run.refViolations = refChanges(run.refsBefore, await snapshotRefs(paths.mirror), [`refs/heads/${ticketBranch(ticket.id)}`]);
-    if (run.originBefore !== null) run.originChanged = (await originFingerprint(project.originPath)) !== run.originBefore;
+    await this.withProjectLock(project.id, async () => {
+      const wt = await ensureTicketWorktree(paths, ticket.id, project.baseBranch);
+      const head = await commitWorktree(wt, `${ticket.id} round ${run.round}`);
+      const branchRef = `refs/heads/${ticketBranch(ticket.id)}`;
+      if (head) this.records.setExpectedRef(project.id, branchRef, head);
+      run.headSha = head;
+      run.changedPaths = head && run.baseSha ? await changedPaths(paths.mirror, run.baseSha, head) : [];
+      if (run.refsBefore) {
+        const after = await snapshotRefs(paths.mirror);
+        // 오케스트레이터 자신이 바꾼 ref(다른 티켓 커밋·미러 동기화)는 위반이 아니다. 기록과 다른 변경만 잡는다.
+        run.refViolations = refChanges(run.refsBefore, after, [branchRef]).filter(
+          (ref) => !ref.startsWith('refs/ac-merge/') && this.records.expectedRef(project.id, ref) !== after[ref],
+        );
+      }
+      if (run.originBefore !== null) run.originChanged = (await originFingerprint(project.originPath)) !== run.originBefore;
+    });
+  }
+
+  private readonly projectLocks = new Map<string, Promise<unknown>>();
+
+  /** 같은 프로젝트 미러의 git 작업(동기화·커밋·ref 비교)을 순서대로 실행한다. */
+  private withProjectLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.projectLocks.get(projectId) ?? Promise.resolve();
+    const next = prev.catch(() => {}).then(fn);
+    this.projectLocks.set(projectId, next.catch(() => {}));
+    return next;
   }
 
   private track(runId: string, p: Promise<void>): void {
@@ -177,7 +210,7 @@ export class Orchestrator {
         try {
           await this.advance(t);
         } catch (error) {
-          this.company.store.appendEvent('orchestrator', 'orchestrator.error', t.id, { error: String(error) });
+          this.noteOnce(t.id, 'orchestrator.error', { error: String(error) });
         }
       }
     } finally {
@@ -278,16 +311,24 @@ export class Orchestrator {
     }
     if (this.liveCountFor(employee.cli) >= (this.opts.concurrency[employee.cli] ?? 1)) return;
     const deps = t.dependsOn.every((d) => this.company.requireTicket(d).status === 'done');
-    const locks = this.records.acquireLocks(t, this.company.tickets().filter((x) => LOCK_HOLDING.includes(x.status)));
-    const next = this.apply(t.id, { type: 'start_work', dependenciesDone: deps, locksAcquired: locks.ok });
+    const locks = deps ? this.records.acquireLocks(t, this.company.tickets().filter((x) => LOCK_HOLDING.includes(x.status))) : { ok: true as const };
+    if (!locks.ok) {
+      // 다른 업무와 쓰기 범위가 겹친다: 오류가 아니라 대기. 같은 사유로는 한 번만 기록한다.
+      this.noteOnce(t.id, 'ticket.waiting_lock', { conflictWith: locks.conflictWith });
+      return;
+    }
+    const next = this.apply(t.id, { type: 'start_work', dependenciesDone: deps, locksAcquired: true });
     if (next.status !== 'in_progress') return;
 
     const project = this.company.requireProject(t.projectId);
     const paths = projectPaths(this.opts.dataDir, project.id);
-    await syncMirror(project.originPath, paths, project.baseBranch);
-    const wt = await ensureTicketWorktree(paths, t.id, project.baseBranch);
-    const refsBefore = await snapshotRefs(paths.mirror);
-    const originBefore = await originFingerprint(project.originPath);
+    const { wt, refsBefore, originBefore } = await this.withProjectLock(project.id, async () => {
+      const baseSha = await syncMirror(project.originPath, paths, project.baseBranch);
+      this.records.setExpectedRef(project.id, `refs/heads/${project.baseBranch}`, baseSha);
+      const wt = await ensureTicketWorktree(paths, t.id, project.baseBranch);
+      this.records.setExpectedRef(project.id, `refs/heads/${ticketBranch(t.id)}`, await headSha(wt.path));
+      return { wt, refsBefore: await snapshotRefs(paths.mirror), originBefore: await originFingerprint(project.originPath) };
+    });
 
     const nonce = randomBytes(6).toString('hex');
     const feedback = this.lastFeedback(next);
@@ -701,6 +742,19 @@ export class Orchestrator {
     }
     const mode = (approval.detail as { mode?: Project['integrationMode'] }).mode ?? project.integrationMode;
     const paths = projectPaths(this.opts.dataDir, project.id);
+    await this.withProjectLock(project.id, () => this.integrateLocked(t, project, sub, approval, mode, paths));
+  }
+
+  private async integrateLocked(
+    t: Ticket,
+    project: Project,
+    sub: RunRecord,
+    approval: NonNullable<ReturnType<Records['approval']>>,
+    mode: Project['integrationMode'],
+    paths: ReturnType<typeof projectPaths>,
+  ): Promise<void> {
+    const ticketId = t.id;
+    if (!sub.headSha) return;
     try {
       const result =
         mode === 'auto_after_approval'
@@ -714,6 +768,8 @@ export class Orchestrator {
               return { ok: true };
             })
           : await integrateAsBranch(project.originPath, paths, t.id, sub.headSha);
+      // 반영 중 미러의 기준 브랜치가 동기화됐으므로 예상 ref를 갱신한다.
+      this.records.setExpectedRef(project.id, `refs/heads/${project.baseBranch}`, await headSha(paths.mirror, `refs/heads/${project.baseBranch}`));
       this.records.setApprovalState(approval.id, 'consumed', 'orchestrator', { result });
       const commit = result.kind === 'merged' ? result.mergeSha : result.sha;
       this.company.store.appendEvent('orchestrator', 'ticket.integration_result', ticketId, result);

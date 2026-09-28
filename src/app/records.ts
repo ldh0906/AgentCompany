@@ -142,6 +142,14 @@ export class Records {
       : this.store.list<Decision>('decisions', 'WHERE project_id = ? ORDER BY created_at', projectId);
   }
 
+  // ---- 오케스트레이터가 직접 바꾼 ref 기록 (직원의 ref 조작과 구분) ----
+  setExpectedRef(projectId: string, ref: string, sha: string): void {
+    this.store.setSetting(`xref:${projectId}:${ref}`, sha);
+  }
+  expectedRef(projectId: string, ref: string): string | null {
+    return this.store.getSetting(`xref:${projectId}:${ref}`);
+  }
+
   // ---- 경로 잠금 ----
   /** 다른 활성 티켓과 쓰기 범위가 겹치지 않으면 잠금을 얻는다. */
   acquireLocks(ticket: Ticket, activeTickets: Ticket[]): { ok: true } | { ok: false; conflictWith: string } {
