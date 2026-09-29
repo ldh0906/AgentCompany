@@ -105,6 +105,7 @@ export interface ReviewPromptInput {
   changedPaths: string[];
   evidence: Evidence[];
   assigneeSummary: string;
+  decisions?: Decision[];
   language: string;
 }
 
@@ -118,6 +119,7 @@ export function buildReviewPrompt(i: ReviewPromptInput): string {
     requirementIds: i.ticket.requirements.map((r) => r.id),
     evidenceIds: i.evidence.map((e) => e.id),
   };
+  const ceoChecks = i.ticket.requirements.filter((r) => r.evidenceType === 'human_attest');
   const evidenceText = i.evidence
     .map((e) => `- ${e.id} [${e.type}] ${e.label}: ${e.passed ? 'PASSED' : 'FAILED'} (exit ${e.exitCode ?? '-'}) ${e.summary}`)
     .join('\n');
@@ -125,6 +127,7 @@ export function buildReviewPrompt(i: ReviewPromptInput): string {
 You are "${i.employee.name}", an independent reviewer at an AI development company run by a human CEO.
 Review ticket ${i.ticket.id} (round ${i.ticket.round}). Your current directory is a READ-ONLY copy of the submitted commit.
 Do not modify any file. Do not trust the implementer's self-assessment: check the diff and the system-generated evidence yourself.
+You may read any file in the current directory and run read-only commands (search, git log/show/diff, running the tests). The diff below may omit lockfiles or be cut; read the files directly when you need more.
 ${i.ticket.reviewBelowRank ? '\nThe implementer outranks you (no reviewer of equal rank exists). Do not defer to rank: judge only the diff and the evidence, and request changes whenever a requirement is not proven. The CEO will read your verdict closely.\n' : ''}
 ## Ticket
 Title: ${i.ticket.title}
@@ -135,6 +138,12 @@ Done criteria: ${i.ticket.doneCriteria}
 
 ## How to judge
 - For each requirement decide met=true/false.
+${
+  ceoChecks.length
+    ? `- ${ceoChecks.map((r) => r.id).join(', ')} need the CEO's own hands-on check (human_attest). You cannot provide or demand that evidence: the CEO checks it at final approval. Judge only whether the code plausibly supports it; set met=true unless the code clearly cannot work, and never request changes just because human_attest evidence is missing.
+`
+    : ''
+}
 - Cite only evidence IDs from the list below. You cannot invent evidence. If a requirement needs stronger evidence than exists, it is NOT met.
 - A mockup is not an implementation. A static check is not runtime verification.
 
@@ -147,6 +156,8 @@ ${dataBlock("Implementer's own summary (a claim, not proof)", i.assigneeSummary)
 ${dataBlock('Diff', i.diff.slice(0, 60_000))}
 
 ${dataBlock('Project document rules', i.project.docRules)}
+
+${dataBlock('Current CEO decisions (binding)', (i.decisions ?? []).map((d) => `- [${d.id}] ${d.text}`).join('\n'))}
 
 ## Final answer format (required)
 Write reasons in language "${i.language}". End with exactly one JSON code block:

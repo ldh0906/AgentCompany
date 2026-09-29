@@ -23,27 +23,31 @@ test('[P1-1] 검증 명령이 원본 저장소를 건드리면 격리', { timeou
   assert.ok(existsSync(path.join(env.origin, 'pwn.txt')), '실제로 쓴 것을 탐지해 대표에게 보고');
 });
 
-test('[P1-2] 한 요구사항의 대표 확인 증거를 다른 요구사항에 쓸 수 없음', { timeout: 120_000 }, async (t) => {
-  const env = await setup(t);
-  const tk = env.company.createTicket({
-    projectId: env.projectId,
-    type: 'impl',
-    title: '두 화면',
-    purpose: 'p',
-    requirements: [
-      { text: '화면 A', evidenceType: 'human_attest' },
-      { text: '화면 B', evidenceType: 'human_attest' },
-    ],
-    doneCriteria: 'd',
-    writeScope: ['src/**'],
-  });
-  await driveUntil(env, tk.id, (x) => x.hold !== null);
-  env.orch.attest(tk.id, 'R1', 'A만 확인');
-  const again = await driveUntil(env, tk.id, (x) => x.hold !== null || x.status === 'awaiting_approval');
-  assert.equal(again.status, 'in_review');
-  assert.match(again.hold!.note, /R2/);
-});
-
+test(
+  '[P1-2] 한 요구사항의 대표 확인을 다른 요구사항에 쓸 수 없음: 승인 때 체크하지 않은 항목이 있으면 거부',
+  { timeout: 120_000 },
+  async (t) => {
+    const env = await setup(t);
+    const tk = env.company.createTicket({
+      projectId: env.projectId,
+      type: 'impl',
+      title: '두 화면',
+      purpose: 'p',
+      requirements: [
+        { text: '화면 A', evidenceType: 'human_attest' },
+        { text: '화면 B', evidenceType: 'human_attest' },
+      ],
+      doneCriteria: 'd',
+      writeScope: ['src/**'],
+    });
+    await driveUntil(env, tk.id, (x) => x.hold !== null || x.status === 'awaiting_approval');
+    env.orch.attest(tk.id, 'R1', 'A만 확인');
+    const approval = env.orch.records.pendingApprovalFor(tk.id, 'integrate')!;
+    assert.throws(() => env.orch.decideIntegration(approval.id, 'approved'), /R2/);
+    assert.throws(() => env.orch.decideIntegration(approval.id, 'approved', { attested: ['R1'] }), /R2/);
+    env.orch.decideIntegration(approval.id, 'approved', { attested: ['R2'] });
+  },
+);
 test('[P1-3] 반영 중에는 취소할 수 없음', () => {
   const r = applyTicketCommand(
     { id: 'T', status: 'integrating', hold: null } as never,

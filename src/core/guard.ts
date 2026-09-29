@@ -117,6 +117,29 @@ function judgeCommand(command: string, workspace: string, depth: number): ToolJu
   return { allow: true };
 }
 
+// 읽기 전용 실행(검수 등): 파일을 쓰거나 git 기록을 바꾸는 명령은 막는다. 읽기·검색·테스트 실행은 허용.
+// (Windows에서 Codex는 승인된 명령을 샌드박스 밖에서 실행하므로 이 판단이 곧 읽기 전용 보장이다.)
+const WRITE_CMDLETS =
+  /\b(set-content|add-content|out-file|new-item|remove-item|move-item|copy-item|rename-item|clear-content|set-item|tee-object|ni|ri|mi|cpi|rni|sc|ac)\b/i;
+const WRITE_SHELL =
+  /(^|[\s;&|(])(rm|rmdir|rd|del|erase|mv|move|cp|copy|xcopy|robocopy|mkdir|md|touch|ren|rename|truncate|chmod|chown)(\s|$)/i;
+const GIT_MUTATE =
+  /\bgit\b[^|;&]*?\s(commit|push|reset|checkout|switch|restore|branch|tag|update-ref|worktree|stash|merge|rebase|cherry-pick|revert|am|apply|clean|rm|mv|add|gc|prune|fetch|pull|config|remote|submodule|notes|replace|symbolic-ref)\b/i;
+const REDIRECT = /(^|[^0-9<>=!-])>{1,2}(?!\s*&?\s*(\$?null|nul)\b)/i;
+const INSTALL = /\b(npm|pnpm|yarn|bun)\s+(i|install|ci|add|remove|uninstall|update|up|link)\b|\bpip\s+install\b/i;
+
+export function judgeReadOnlyCommand(command: string, workspace: string): ToolJudgement {
+  const hard = judgeCommand(command, workspace, 0);
+  if (!hard.allow) return hard;
+  const c = command;
+  if (WRITE_CMDLETS.test(c)) return { allow: false, reason: `read-only run: file write (${command.slice(0, 120)})` };
+  if (WRITE_SHELL.test(c)) return { allow: false, reason: `read-only run: file change (${command.slice(0, 120)})` };
+  if (GIT_MUTATE.test(c)) return { allow: false, reason: `read-only run: git change (${command.slice(0, 120)})` };
+  if (REDIRECT.test(c)) return { allow: false, reason: `read-only run: output redirect (${command.slice(0, 120)})` };
+  if (INSTALL.test(c)) return { allow: false, reason: `read-only run: package install (${command.slice(0, 120)})` };
+  return { allow: true };
+}
+
 export function judgeToolRequest(req: { tool: string; input: unknown; workspace: string }): ToolJudgement {
   const command = commandOf(req.input);
   if (!command) return { allow: true }; // 파일 변경 등: 작업공간 안에서 일어나고 사후 범위 검사가 따로 있다

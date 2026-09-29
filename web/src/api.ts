@@ -73,6 +73,20 @@ export interface State {
   /** 권한 요청을 대표 대신 처리하는 전체 자동 직원(없으면 null → 대표가 처리). */
   permissionDelegate?: string | null;
   usage?: UsageSummary;
+  previews?: PreviewInfo[];
+}
+
+/** 실행해 보기(대표 직접 확인용으로 띄운 개발 서버). */
+export interface PreviewInfo {
+  key: string;
+  projectId: string;
+  ticketId: string | null;
+  sha: string;
+  state: 'starting' | 'running' | 'failed' | 'stopped';
+  url: string | null;
+  command: string;
+  log: string;
+  startedAt: string;
 }
 
 const TOKEN_KEY = 'agent-company-token';

@@ -1,7 +1,7 @@
 // 권한 위임 처리자의 판단: 치명적인 것만 막고 나머지는 허용한다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { judgeToolRequest } from '../../src/core/guard.ts';
+import { judgeReadOnlyCommand, judgeToolRequest } from '../../src/core/guard.ts';
 
 const WS = 'C:\\Users\\me\\AgentCompany\\projects\\P-1\\wt\\T-4';
 const cmd = (command: unknown, tool = 'PowerShell') => judgeToolRequest({ tool, input: { command }, workspace: WS });
@@ -87,4 +87,35 @@ test('실측 Codex 형식: powershell.exe -Command "…" 안에 숨은 명령도
   assert.equal(cmd(wrap('Remove-Item -Recurse -Force C:\\'), 'command').allow, false);
   assert.equal(cmd(wrap('Remove-Item -Recurse -Force .\\obj'), 'command').allow, true);
   assert.equal(cmd("bash -lc 'rm -rf / --no-preserve-root'", 'Bash').allow, false);
+});
+
+test('읽기 전용 실행(검수): 읽기·검색·테스트는 허용, 쓰기·git 변경·설치·리다이렉트는 차단', () => {
+  const ps = (inner: string) => `"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -Command '${inner}'`;
+  const ok = (c: string) => judgeReadOnlyCommand(c, WS).allow;
+  for (const c of [
+    ps('Get-Content -LiteralPath src/main.ts'),
+    ps('Get-ChildItem -Recurse src | Select-Object FullName'),
+    'rg -n "GameLoop" src',
+    'git diff HEAD~1 --stat',
+    'git log --oneline -5',
+    'git show HEAD:package.json',
+    'npm test',
+    'npx vitest run',
+    ps('Select-String -Path tests/*.ts -Pattern "copy"'),
+  ])
+    assert.equal(ok(c), true, c);
+  for (const c of [
+    ps("Set-Content -LiteralPath written.txt -Value 'x'"),
+    ps('Remove-Item a.txt'),
+    'rm -rf src',
+    'git commit -am x',
+    'git checkout main',
+    'git branch -D feature',
+    'echo hi > out.txt',
+    'npm install',
+    'npm ci',
+    ps('New-Item -ItemType File x.ts'),
+  ])
+    assert.equal(ok(c), false, c);
+  assert.equal(ok(ps('Get-Content x 2>$null')), true, '오류 버리기 리다이렉트는 허용');
 });

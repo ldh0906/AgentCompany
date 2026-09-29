@@ -1,5 +1,6 @@
 // 가짜 직원 CLI. 실제 구독 없이 제품 흐름을 시연·테스트한다.
 // 성격(FAKE_BEHAVIOR): diligent(성실) | lazy(첫 회차에 일 안 하고 완료 주장) | rogue(범위 밖 수정) | slow(느림) | tamper(git ref 조작)
+//   stubborn(2회차부터 고치지 않고 반박) | picky(검수: 1회차만 반려) | harsh(검수: 항상 반려)
 // stdin으로 프롬프트를 받고, Claude의 stream-json과 비슷한 JSONL을 출력한다.
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -35,7 +36,8 @@ function finalWith(json: object, text: string): string {
 
 async function work(h: TaskHeader): Promise<string> {
   const lazyNow = behavior === 'lazy' && h.round === 1;
-  if (!lazyNow) {
+  const rebut = behavior === 'stubborn' && h.round > 1;
+  if (!lazyNow && !rebut) {
     const file = targetFile(h);
     mkdirSync(path.dirname(file), { recursive: true });
     const prev = existsSync(file) ? readFileSync(file, 'utf8') : '';
@@ -59,7 +61,11 @@ async function work(h: TaskHeader): Promise<string> {
       nonce: h.nonce,
       kind: 'work',
       status: 'done',
-      summary: lazyNow ? L('완료했습니다.', 'Done.') : L('요구사항을 구현했습니다.', 'Implemented the requirements.'),
+      summary: lazyNow
+        ? L('완료했습니다.', 'Done.')
+        : rebut
+          ? L('지적 사항은 이미 충족되어 있어 고치지 않고 다시 제출합니다.', 'The feedback is already addressed; resubmitting unchanged.')
+          : L('요구사항을 구현했습니다.', 'Implemented the requirements.'),
       requirements: h.requirementIds.map((id) => ({ id, claim: 'met', notes: '' })),
       questions: [],
     },
@@ -71,12 +77,15 @@ function review(h: TaskHeader, prompt: string): string {
   const changedBlock = prompt.split('### Changed paths')[1]?.split('DATA>>>')[0] ?? '';
   const nothingChanged = /\(none\)/.test(changedBlock);
   const failed = /FAILED/.test(prompt.split('### System-generated evidence')[1]?.split('DATA>>>')[0] ?? '');
-  const approve = !nothingChanged && !failed;
-  const reason = nothingChanged
-    ? L('변경된 파일이 없습니다. 완료 주장과 달리 실제 작업이 없습니다.', 'No files changed. The claimed work is not there.')
-    : failed
-      ? L('시스템 검증이 실패했습니다.', 'System verification failed.')
-      : L('diff와 증거가 요구사항을 충족합니다.', 'The diff and evidence satisfy the requirements.');
+  const nitpick = behavior === 'harsh' || (behavior === 'picky' && h.round === 1);
+  const approve = !nothingChanged && !failed && !nitpick;
+  const reason = nitpick
+    ? L('설명이 더 필요합니다.', 'Needs more explanation.')
+    : nothingChanged
+      ? L('변경된 파일이 없습니다. 완료 주장과 달리 실제 작업이 없습니다.', 'No files changed. The claimed work is not there.')
+      : failed
+        ? L('시스템 검증이 실패했습니다.', 'System verification failed.')
+        : L('diff와 증거가 요구사항을 충족합니다.', 'The diff and evidence satisfy the requirements.');
   return finalWith(
     {
       nonce: h.nonce,

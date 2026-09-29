@@ -7,6 +7,7 @@ import { Avatar, empName, EmptyState, HoldChip, Icon, Modal, StatusChip, useActi
 import { useCliStatus } from '../components/kit.tsx';
 import { UsagePanel } from '../components/usage.tsx';
 import { RequestBox } from './Requests.tsx';
+import { PreviewButton } from '../components/preview.tsx';
 
 const ACTIVE = ['assigned', 'in_progress', 'verifying', 'in_review', 'changes_requested', 'integrating'];
 
@@ -132,9 +133,17 @@ export function ApprovalItem({ a }: { a: Approval }) {
   const [recorded, setRecorded] = useState<string[]>([]);
   const d = (a.detail ?? {}) as Record<string, unknown>;
   const tk = a.ticketId ? state?.tickets.find((x) => x.id === a.ticketId) : undefined;
+  // 대표 직접 확인 요구: 실행해 보고 체크해야 승인할 수 있다(체크 = 확인 기록).
+  const ceoChecks =
+    a.kind === 'integrate' && d.mode !== 'review' ? (tk?.requirements.filter((r) => r.evidenceType === 'human_attest') ?? []) : [];
+  const [checked, setChecked] = useState<string[]>([]);
+  const unchecked = ceoChecks.length > checked.length;
   const decide = (decision: 'approved' | 'rejected', mode?: string) =>
     run(
-      () => api(`approvals/${a.id}/decide`, { body: { decision, ...(mode ? { mode } : {}), reason } }),
+      () =>
+        api(`approvals/${a.id}/decide`, {
+          body: { decision, ...(mode ? { mode } : {}), reason, ...(decision === 'approved' ? { attested: checked } : {}) },
+        }),
       decision === 'approved' ? '승인했습니다.' : '반려했습니다.',
     ).then(reload);
 
@@ -162,15 +171,15 @@ export function ApprovalItem({ a }: { a: Approval }) {
         <div className="row">
           {a.kind === 'integrate' && d.mode === 'auto_after_approval' ? (
             <>
-              <button className="btn ok small" disabled={busy} onClick={() => decide('approved', 'auto_after_approval')}>
+              <button className="btn ok small" disabled={busy || unchecked} onClick={() => decide('approved', 'auto_after_approval')}>
                 {t('approveMerge')}
               </button>
-              <button className="btn small" disabled={busy} onClick={() => decide('approved', 'manual')}>
+              <button className="btn small" disabled={busy || unchecked} onClick={() => decide('approved', 'manual')}>
                 {t('approveBranch')}
               </button>
             </>
           ) : (
-            <button className="btn ok small" disabled={busy} onClick={() => decide('approved')}>
+            <button className="btn ok small" disabled={busy || unchecked} onClick={() => decide('approved')}>
               {t('approve')}
             </button>
           )}
@@ -185,6 +194,31 @@ export function ApprovalItem({ a }: { a: Approval }) {
         </pre>
       )}
       {a.kind === 'integrate' && typeof d.summary === 'string' && d.summary && <div className="note">{d.summary}</div>}
+      {tk && ceoChecks.length > 0 && (
+        <div className="ceo-checks">
+          <div className="spread">
+            <b>{lang === 'ko' ? '대표 직접 확인' : 'Your own check'}</b>
+            <PreviewButton projectId={tk.projectId} ticketId={tk.id} />
+          </div>
+          {ceoChecks.map((r) => (
+            <label key={r.id} className="check-row">
+              <input
+                type="checkbox"
+                checked={checked.includes(r.id)}
+                onChange={() => setChecked(checked.includes(r.id) ? checked.filter((x) => x !== r.id) : [...checked, r.id])}
+              />
+              <span>
+                <b>{r.id}</b> {r.text}
+              </span>
+            </label>
+          ))}
+          <div className="hint">
+            {lang === 'ko'
+              ? '실행해 보고 확인한 항목을 체크하세요. 모두 체크해야 승인할 수 있습니다.'
+              : 'Run it, then tick what you confirmed. All items must be ticked to approve.'}
+          </div>
+        </div>
+      )}
       {a.kind === 'integrate' && tk?.reviewBelowRank && (
         <div className="banner warn" style={{ margin: '8px 0 0' }}>
           {lang === 'ko'

@@ -37,16 +37,16 @@ export const codexAdapter: CliAdapter = {
     get notes() {
       return [
         tr(
-          '실측: exec --json, stdin 프롬프트, ID 재개, 한글 정상 (0.153.4)',
-          'Verified: exec --json, stdin prompts, resume by ID, Korean text (0.153.4)',
+          '실측(Windows, 0.159): exec 모드는 읽기 전용·전체 자동에서 셸 명령을 모두 거절 → 모든 등급을 app-server 중계로 실행',
+          'Measured (Windows, 0.159): exec mode rejects every shell command in read-only/full-auto → all levels run through the app-server relay',
         ),
         tr(
-          '전체 자동은 workspace-write 샌드박스 안에서만 동작(네트워크 차단, 작업공간 밖 쓰기 차단)',
-          'Full-auto runs only in the workspace-write sandbox (no network or writes outside the workspace)',
+          '읽기 전용(검수 등): 읽기·검색·테스트 명령은 자동 허용, 파일 쓰기·git 변경·설치는 자동 거부',
+          'Read-only (reviews): read/search/test commands auto-allowed; file writes, git changes and installs auto-denied',
         ),
         tr(
-          '실측: 등급 2·3은 app-server로 명령·파일 변경 승인을 중계(읽기 명령도 묻는다)',
-          'Levels 2–3 use app-server relay (method names checked against local schema; subscription testing pending)',
+          '전체 자동: 치명적 명령(드라이브 삭제·포맷 등)만 막고 나머지 자동 허용. 등급 2·3은 대표(또는 위임자)에게 묻는다',
+          'Full auto: blocks only catastrophic commands (drive wipes, formats…). Levels 2–3 ask the CEO (or the delegate)',
         ),
         tr(
           '허용 목록 자동 승인은 셸 메타문자(; & | $ < > 등)가 없는 명령만',
@@ -56,35 +56,30 @@ export const codexAdapter: CliAdapter = {
     },
   },
 
+  // 실측(Windows, 0.159): `codex exec`는 approval_policy=never(읽기 전용·전체 자동)에서 모든 셸 명령을
+  // "blocked by policy"로 거절해 검수자가 파일조차 읽지 못했다. 그래서 모든 등급을 app-server 중계기로 실행한다.
+  // 읽기 전용·전체 자동의 승인 요청은 중계기가 가드로 자동 판단하고, 등급 2·3만 대표(또는 위임자)에게 올린다.
   buildInvocation(req: InvocationRequest): Invocation {
-    if ((req.accessLevel === 'write-ask' || req.accessLevel === 'write-allowlist') && !req.resumeSessionId) {
-      return {
-        file: process.execPath,
-        args: ['--no-warnings', relayScript()],
-        env: {
-          ...process.env,
-          ...req.profileEnv,
-          AC_CODEX_CWD: req.cwd,
-          AC_CODEX_POLICY: 'untrusted',
-          AC_APPROVAL_DIR: req.approvalDir ?? '',
-          AC_ALLOWED_COMMANDS: JSON.stringify(req.accessLevel === 'write-allowlist' ? req.allowedCommands : []),
-          ...(req.model ? { AC_CODEX_MODEL: req.model } : {}),
-          ...(req.effort ? { AC_CODEX_EFFORT: req.effort } : {}),
-        },
-        stdinText: req.prompt,
-        files: [],
-      };
-    }
-    // 실측(0.153.4): effort는 설정값 model_reasoning_effort(TOML 문자열)로 넘긴다.
-    const model = [...(req.model ? ['-m', req.model] : []), ...(req.effort ? ['-c', `model_reasoning_effort="${req.effort}"`] : [])];
-    let args: string[];
-    if (req.resumeSessionId) {
-      args = ['exec', 'resume', req.resumeSessionId, '--json', '--skip-git-repo-check', ...model, '-'];
-    } else {
-      const sandbox = req.accessLevel === 'read-only' ? ['-s', 'read-only'] : ['-s', 'workspace-write', '-c', 'approval_policy="never"'];
-      args = ['exec', '--json', '--skip-git-repo-check', ...sandbox, '-C', req.cwd, ...model, '-'];
-    }
-    return { file: 'codex', args, env: { ...process.env, ...req.profileEnv }, stdinText: req.prompt, files: [] };
+    const auto = req.accessLevel === 'read-only' ? 'commands' : req.accessLevel === 'full-auto' ? 'all' : 'none';
+    return {
+      file: process.execPath,
+      args: ['--no-warnings', relayScript()],
+      env: {
+        ...process.env,
+        ...req.profileEnv,
+        AC_CODEX_CWD: req.cwd,
+        AC_CODEX_POLICY: 'untrusted',
+        AC_CODEX_SANDBOX: req.accessLevel === 'read-only' ? 'read-only' : 'workspace-write',
+        AC_AUTO_APPROVE: auto,
+        AC_APPROVAL_DIR: auto === 'none' ? (req.approvalDir ?? '') : '',
+        AC_ALLOWED_COMMANDS: JSON.stringify(req.accessLevel === 'write-allowlist' ? req.allowedCommands : []),
+        ...(req.resumeSessionId ? { AC_CODEX_RESUME: req.resumeSessionId } : {}),
+        ...(req.model ? { AC_CODEX_MODEL: req.model } : {}),
+        ...(req.effort ? { AC_CODEX_EFFORT: req.effort } : {}),
+      },
+      stdinText: req.prompt,
+      files: [],
+    };
   },
 
   parse(events: unknown[]): ParsedRun {

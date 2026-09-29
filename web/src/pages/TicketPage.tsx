@@ -5,6 +5,7 @@ import { useT } from '../i18n.ts';
 import { fmtTokens } from '../components/usage.tsx';
 import { CliChip, DiffView, empName, HoldChip, Icon, Modal, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
 import { ApprovalItem, describeEvent } from './Dashboard.tsx';
+import { PreviewButton } from '../components/preview.tsx';
 
 interface Detail {
   ticket: Ticket;
@@ -69,13 +70,39 @@ export function TicketPage({ id }: { id: string }) {
           </div>
         </div>
         <div className="row">
+          {latestHead && !['done', 'failed', 'cancelled'].includes(tk.status) && (
+            <PreviewButton projectId={tk.projectId} ticketId={tk.id} />
+          )}
+          {tk.hold?.reason === 'needs_decision' && ['in_review', 'changes_requested'].includes(tk.status) && (
+            <button
+              className="btn primary"
+              disabled={busy}
+              title={
+                ko
+                  ? '시스템 검증을 통과한 마지막 제출물을 대표 승인 단계로 보냅니다. 검수 결과는 참고만 합니다.'
+                  : 'Send the last submission that passed verification to your approval. The review is advisory.'
+              }
+              onClick={() =>
+                run(() => api(`tickets/${tk.id}/skip-review`, { body: {} }), ko ? '승인 단계로 보냈습니다.' : 'Sent to approval.').then(
+                  reload,
+                )
+              }
+            >
+              {ko ? '검수 건너뛰고 승인 단계로' : 'Skip review → approval'}
+            </button>
+          )}
           {tk.hold && (
             <button
               className="btn"
               disabled={busy}
-              onClick={() => run(() => api(`tickets/${tk.id}/release`, { body: {} }), 'OK').then(reload)}
+              title={
+                ko
+                  ? '보류 전 단계로 되돌립니다. 수정 요청 상태면 직원이 한 회차 더 작업합니다.'
+                  : 'Resume. From changes requested, the employee works one more round.'
+              }
+              onClick={() => run(() => api(`tickets/${tk.id}/release`, { body: {} }), ko ? '보류를 풀었습니다.' : 'Released.').then(reload)}
             >
-              {t('release')}
+              {tk.status === 'changes_requested' ? (ko ? '한 회차 더 시키기' : 'One more round') : t('release')}
             </button>
           )}
           {tk.status === 'backlog' && (
@@ -148,7 +175,8 @@ export function TicketPage({ id }: { id: string }) {
                         <span className="chip ok">✓ {ko ? '대표 확인' : 'Attested'}</span>
                       ) : (
                         latestHead &&
-                        ['in_review', 'awaiting_approval', 'verifying'].includes(tk.status) && (
+                        r.evidenceType === 'human_attest' &&
+                        !['done', 'failed', 'cancelled', 'backlog', 'assigned'].includes(tk.status) && (
                           <button
                             className="btn small"
                             disabled={busy}

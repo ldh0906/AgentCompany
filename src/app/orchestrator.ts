@@ -33,7 +33,7 @@ import {
   changedPaths,
   checkScope,
   commitWorktree,
-  diffText,
+  reviewDiffText,
   ensureDetachedWorktree,
   ensureTicketWorktree,
   headSha,
@@ -49,6 +49,8 @@ import {
 import { Company, DomainError } from './company.ts';
 import { newId, Records, sha256, type CeoRequest, type RunRecord } from './records.ts';
 import { appProfileDir } from './doctor.ts';
+import { dependencySetup } from './verify-setup.ts';
+import { PreviewManager, type PreviewInfo } from './preview.ts';
 
 const ORCH: Actor = { kind: 'orchestrator' };
 const CEO: Actor = { kind: 'ceo' };
@@ -130,6 +132,28 @@ export class Orchestrator {
   async stop(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    this.previews.stopAll();
+  }
+
+  // ======================= 실행해 보기 =======================
+
+  readonly previews = new PreviewManager();
+
+  /** 제출물(ticketId) 또는 기준 브랜치 최신 상태를 띄운다. 대표 직접 확인용. */
+  async preview(projectId: string, ticketId: string | null): Promise<PreviewInfo> {
+    const project = this.company.requireProject(projectId);
+    const paths = projectPaths(this.opts.dataDir, project.id);
+    const { sha, dir } = await this.withProjectLock(project.id, async () => {
+      let sha: string | null;
+      if (ticketId) {
+        const t = this.company.requireTicket(ticketId);
+        const sub = this.records.latestSubmission(t);
+        sha = sub?.headSha ?? null;
+        if (!sha) throw new DomainError(tr('이 업무에는 아직 실행해 볼 제출물이 없습니다.', 'This ticket has no submission to run yet.'));
+      } else sha = await this.syncMirrorRecorded(project, paths);
+      return { sha, dir: await ensureDetachedWorktree(paths, 'preview', ticketId ?? 'base', sha) };
+    });
+    return this.previews.start({ projectId, ticketId, sha, dir });
   }
 
   /** 모든 진행 중 비동기 작업이 끝날 때까지 기다린다(테스트용). */
@@ -242,8 +266,10 @@ export class Orchestrator {
       // 오케스트레이터의 커밋 이전 상태로 비교해야 직원의 ref 조작과 구분된다.
       const refsNow = run.refsBefore ? await snapshotRefs(paths.mirror) : null;
       const prevHead = await headSha(wt.path);
-      const head = await commitWorktree(wt, `${ticket.id} round ${run.round}`);
+      let head = await commitWorktree(wt, `${ticket.id} round ${run.round}`);
       if (head) this.records.recordRefMove(project.id, 'mirror', branchRef, prevHead, head);
+      // 새 변경이 없어도 이전 회차 결과가 있으면 그대로 다시 제출한다(피드백에 대한 반박·설명). "변경 없음"으로 반려하지 않는다.
+      else if (prevHead && run.baseSha && prevHead !== run.baseSha) head = prevHead;
       run.headSha = head;
       run.changedPaths = head && run.baseSha ? await changedPaths(paths.mirror, run.baseSha, head) : [];
       if (run.refsBefore && refsNow)
@@ -791,7 +817,10 @@ ${failure.detail.slice(0, 400)}`,
     const reviewer: Actor = { kind: 'employee', id: run.employeeId };
     const submission = this.records.latestSubmission(ticket);
     const evidence = this.records.evidenceFor(ticket.id, { submission: submission?.id });
-    if (rr.verdict === 'approve') {
+    // 대표 직접 확인 요구만 남았다는 이유의 수정 요청은 승인으로 본다(그 확인은 대표 승인 단계에서 한다).
+    const attestOnly = new Set(ticket.requirements.filter((r) => r.evidenceType === 'human_attest').map((r) => r.id));
+    const unmetOthers = rr.requirements.filter((r) => !r.met && !attestOnly.has(r.id));
+    if (rr.verdict === 'approve' || (attestOnly.size > 0 && unmetOthers.length === 0 && rr.requirements.length > 0)) {
       const checks = rr.requirements.map((r) => ({
         requirementId: r.id,
         met: r.met,
@@ -818,7 +847,7 @@ ${failure.detail.slice(0, 400)}`,
         });
       }
     } else {
-      const reasons = rr.requirements.filter((r) => !r.met).map((r) => `- ${r.id}: ${r.reason}`);
+      const reasons = unmetOthers.map((r) => `- ${r.id}: ${r.reason}`);
       this.apply(ticket.id, { type: 'review_request_changes', reason: [rr.summary, ...reasons].join('\n') }, reviewer);
     }
   }
@@ -897,7 +926,10 @@ ${failure.detail.slice(0, 400)}`,
       // 기준 스냅샷은 DB에 남겨, 검증 중 재시작해도 "이미 바뀐 원본"을 새 기준으로 삼지 않는다.
       const before = await this.verifyBaseline(`verify_base:${ticketId}`, project, paths);
       try {
-        for (const [i, vc] of project.verifyCommands.entries()) {
+        // 깨끗한 사본에는 의존성이 없다(실측: npm test가 항상 실패). 설치 명령이 따로 없으면 먼저 설치한다.
+        const setup = dependencySetup(vwt, project.verifyCommands);
+        const steps = setup ? [setup, ...project.verifyCommands] : project.verifyCommands;
+        for (const [i, vc] of steps.entries()) {
           const ev = await this.runVerifyCommand(vc, vwt, path.join(sub.runDir, 'verify', String(i)), ticketId);
           const e: Evidence = {
             id: newId('EV'),
@@ -1049,11 +1081,12 @@ ${failure.detail.slice(0, 400)}`,
         ticket: t,
         nonce,
         diff: sub.headSha
-          ? await diffText(paths.mirror, sub.baseSha, sub.headSha)
+          ? await reviewDiffText(paths.mirror, sub.baseSha, sub.headSha)
           : tr('(파일 변경 없음: 조사·보고 업무)', '(No file changes: research/report task)'),
         changedPaths: sub.changedPaths,
         evidence: this.records.evidenceFor(t.id, { submission: sub.id }),
         assigneeSummary: sub.summary,
+        decisions: this.records.decisions(project.id, 'current'),
         language: this.opts.language,
       });
       // 검수자는 항상 읽기 전용으로 실행한다.
@@ -1126,7 +1159,7 @@ ${failure.detail.slice(0, 400)}`,
   decideIntegration(
     approvalId: string,
     decision: 'approved' | 'rejected',
-    opts: { mode?: Project['integrationMode']; reason?: string } = {},
+    opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[] } = {},
   ): Ticket {
     const a = this.records.approval(approvalId);
     if (!a || a.kind !== 'integrate' || a.state !== 'pending' || !a.ticketId)
@@ -1161,6 +1194,23 @@ ${failure.detail.slice(0, 400)}`,
         ),
       );
     }
+    // 대표 직접 확인 요구: 이번 제출물에 대해 대표가 확인했어야 한다(승인 화면의 체크 = 확인 기록).
+    const attested = new Set(
+      this.records
+        .evidenceFor(t.id, { submission: sub.id })
+        .filter((e) => e.type === 'human_attest' && e.passed && e.requirementId)
+        .map((e) => e.requirementId!),
+    );
+    const missing = t.requirements.filter((r) => r.evidenceType === 'human_attest' && !attested.has(r.id));
+    const checkedNow = missing.filter((r) => opts.attested?.includes(r.id));
+    if (checkedNow.length < missing.length)
+      throw new DomainError(
+        tr(
+          `대표 직접 확인 항목을 확인하고 체크하세요: ${missing.map((r) => r.id).join(', ')}`,
+          `Check the items that need your own confirmation first: ${missing.map((r) => r.id).join(', ')}`,
+        ),
+      );
+    for (const r of checkedNow) this.attest(t.id, r.id, tr('승인하면서 대표가 직접 확인했습니다.', 'Confirmed by the CEO when approving.'));
     const mode = opts.mode ?? (a.detail as { mode: Project['integrationMode'] }).mode;
     return tx(() => {
       this.records.setApprovalState(approvalId, 'approved', 'ceo', { mode });
@@ -1233,7 +1283,8 @@ ${failure.detail.slice(0, 400)}`,
               const seq = base.seq;
               let failed: string | null = null;
               try {
-                for (const [i, vc] of project.verifyCommands.entries()) {
+                const setup = dependencySetup(vwt, project.verifyCommands);
+                for (const [i, vc] of (setup ? [setup, ...project.verifyCommands] : project.verifyCommands).entries()) {
                   const r = await this.runVerifyCommand(vc, vwt, path.join(sub.runDir, `merge-verify-${Date.now()}`, String(i)), t.id);
                   if (!r.passed) {
                     failed = `${vc.label}: ${r.summary.slice(-300)}`;
@@ -1762,6 +1813,32 @@ ${failure.detail.slice(0, 400)}`,
     if (t.hold?.reason === 'needs_decision' && t.status === 'in_review') this.releaseHold(ticketId);
     this.changed('ticket', ticketId);
     return e;
+  }
+
+  /** 검수가 막혔을 때(회차 초과 등) 대표가 검수를 건너뛰고 승인 단계로 보낸다. 시스템 검증을 통과한 제출물만. */
+  skipReview(ticketId: string): Ticket {
+    const t = this.company.requireTicket(ticketId);
+    const project = this.company.requireProject(t.projectId);
+    // 수정 요청 뒤에는 회차가 이미 넘어가 있으므로 회차와 상관없이 마지막 제출물을 쓴다.
+    const sub = this.records
+      .runsForTicket(t.id)
+      .filter((r) => r.kind === 'work' && r.status === 'succeeded' && r.headSha)
+      .at(-1);
+    if (!sub?.headSha) throw new DomainError(tr('승인할 제출물이 없습니다.', 'There is no submission to approve.'));
+    const ev = this.records.evidenceFor(t.id, { submission: sub.id });
+    const verified = project.verifyCommands.every((vc) => ev.some((e) => e.label === vc.label && e.passed));
+    if (!verified)
+      throw new DomainError(
+        tr(
+          '이 제출물은 시스템 검증을 통과하지 못했습니다. 검증 실패는 건너뛸 수 없습니다.',
+          'This submission did not pass system verification, which cannot be skipped.',
+        ),
+      );
+    return this.apply(
+      t.id,
+      { type: 'ceo_skip_review', reason: tr('대표가 검수를 건너뛰었습니다.', 'The CEO skipped review.'), round: sub.round },
+      CEO,
+    );
   }
 
   releaseHold(ticketId: string): Ticket {

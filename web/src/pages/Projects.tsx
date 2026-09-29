@@ -4,6 +4,7 @@ import { useCompany } from '../App.tsx';
 import { EVIDENCE, useT } from '../i18n.ts';
 import { EmptyState, Icon, Modal, useAction, Skeleton } from '../components/ui.tsx';
 import { ChipToggles, FolderPicker, Segmented } from '../components/kit.tsx';
+import { PreviewButton } from '../components/preview.tsx';
 
 export function Projects() {
   const { state, reload } = useCompany();
@@ -51,6 +52,7 @@ export function Projects() {
             <div className="card-head">
               <span>{p.name}</span>
               <span className="row">
+                <PreviewButton projectId={p.id} />
                 <button className="btn small" onClick={() => setEditing(p)}>
                   {ko ? '설정' : 'Settings'}
                 </button>
@@ -154,10 +156,13 @@ interface Inspection {
 }
 
 function ProjectModal({ project, onClose }: { project: Project | null; onClose: () => void }) {
-  const { reload } = useCompany();
+  const { reload, state } = useCompany();
   const { t, lang, evidence } = useT();
   const { busy, run } = useAction();
   const ko = lang === 'ko';
+  // 찾아보기 시작 위치: 드라이브 루트 대신 이미 등록한 프로젝트가 있는 폴더.
+  const known = state?.projects[0]?.originPath ?? '';
+  const pickerStart = known.replace(/[\\/][^\\/]+[\\/]?$/, '');
   const [name, setName] = useState(project?.name ?? '');
   const [nameTouched, setNameTouched] = useState(Boolean(project));
   const [originPath, setOriginPath] = useState(project?.originPath ?? '');
@@ -412,7 +417,7 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
           </label>
         </details>
       </div>
-      {picking && <FolderPicker initial={originPath} onPick={setOriginPath} onClose={() => setPicking(false)} />}
+      {picking && <FolderPicker initial={originPath || pickerStart} onPick={setOriginPath} onClose={() => setPicking(false)} />}
     </Modal>
   );
 }

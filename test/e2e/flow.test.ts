@@ -143,7 +143,7 @@ test('쓰기 범위가 겹치는 업무는 오류 없이 순서를 기다리고,
   assert.equal(evs.filter((e) => e.type === 'orchestrator.error').length, 0);
 });
 
-test('대표 직접 확인이 필요한 요구사항: 검수 승인만으로는 통과 불가 → 대표 확인 후 승인 대기', { timeout: 120_000 }, async (t) => {
+test('대표 직접 확인 요구: 검수는 막지 않고, 대표가 승인하면서 체크해야 반영된다', { timeout: 120_000 }, async (t) => {
   const env = await setup(t);
   const ticket = env.company.createTicket({
     projectId: env.projectId,
@@ -154,11 +154,16 @@ test('대표 직접 확인이 필요한 요구사항: 검수 승인만으로는 
     doneCriteria: '대표가 직접 확인',
     writeScope: ['src/**'],
   });
-  const held = await driveUntil(env, ticket.id, (x) => x.hold !== null || x.status === 'awaiting_approval');
-  assert.equal(held.status, 'in_review');
-  assert.equal(held.hold?.reason, 'needs_decision');
-  assert.match(held.hold!.note, /human_attest/);
-  env.orch.attest(ticket.id, 'R1', '에디터에서 직접 플레이해 확인');
-  const ok = await driveUntil(env, ticket.id, (x) => x.status === 'awaiting_approval' || x.hold !== null);
-  assert.equal(ok.status, 'awaiting_approval', `보류: ${ok.hold?.note}`);
+  // 실측(2026-09-30): 검수자가 대표 확인 증거를 요구하며 3회차까지 반려했다. 이제 그 확인은 승인 단계의 몫이다.
+  const waiting = await driveUntil(env, ticket.id, (x) => x.hold !== null || x.status === 'awaiting_approval');
+  assert.equal(waiting.status, 'awaiting_approval', `보류: ${waiting.hold?.note}`);
+  const approval = env.orch.records.pendingApprovalFor(ticket.id, 'integrate')!;
+  assert.throws(() => env.orch.decideIntegration(approval.id, 'approved'), /R1/, '체크 없이 승인 불가');
+  env.orch.decideIntegration(approval.id, 'approved', { attested: ['R1'] });
+  assert.ok(
+    env.orch.records.evidenceFor(ticket.id).some((e) => e.type === 'human_attest' && e.requirementId === 'R1'),
+    '체크가 대표 확인 증거로 남는다',
+  );
+  const done = await driveUntil(env, ticket.id, statusIs('done', 'failed'));
+  assert.equal(done.status, 'done');
 });

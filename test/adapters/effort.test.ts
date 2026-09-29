@@ -26,10 +26,20 @@ test('Claude: 정확한 모델명과 --effort', () => {
   assert.ok(!claudeAdapter.buildInvocation({ ...base, model: 'claude-sonnet-5' }).args.includes('--effort'), 'effort가 없으면 CLI 기본값');
 });
 
-test('Codex exec: -m 과 -c model_reasoning_effort', () => {
-  const inv = codexAdapter.buildInvocation({ ...base, model: 'gpt-6-astra', effort: 'high' });
-  assert.ok(seq(inv.args, '-m', 'gpt-6-astra'));
-  assert.ok(seq(inv.args, '-c', 'model_reasoning_effort="high"'));
+test('Codex: 모든 등급이 중계기로 실행되고, 읽기 전용·전체 자동은 자동 판단, 이어서 하기는 thread 재개', () => {
+  const ro = codexAdapter.buildInvocation({ ...base, approvalDir: 'q', model: 'gpt-6-astra', effort: 'high' });
+  assert.equal(ro.file, process.execPath);
+  assert.equal(ro.env.AC_CODEX_SANDBOX, 'read-only');
+  assert.equal(ro.env.AC_AUTO_APPROVE, 'commands');
+  assert.equal(ro.env.AC_APPROVAL_DIR, '', '읽기 전용 실행은 대표에게 묻지 않는다');
+  assert.equal(ro.env.AC_CODEX_EFFORT, 'high');
+  const full = codexAdapter.buildInvocation({ ...base, accessLevel: 'full-auto', resumeSessionId: 'th-1' });
+  assert.equal(full.env.AC_AUTO_APPROVE, 'all');
+  assert.equal(full.env.AC_CODEX_SANDBOX, 'workspace-write');
+  assert.equal(full.env.AC_CODEX_RESUME, 'th-1');
+  const ask = codexAdapter.buildInvocation({ ...base, accessLevel: 'write-ask', approvalDir: 'q' });
+  assert.equal(ask.env.AC_AUTO_APPROVE, 'none');
+  assert.equal(ask.env.AC_APPROVAL_DIR, 'q');
 });
 
 test('Codex 중계(등급 2): 모델과 effort를 환경변수로 중계기에 전달', () => {

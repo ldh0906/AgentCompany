@@ -98,6 +98,16 @@ export async function diffText(repo: string, baseSha: string, head: string, maxB
   return out.length > maxBytes ? out.slice(0, maxBytes) + tr('\n... (잘림)', '\n... (truncated)') : out;
 }
 
+const LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'Cargo.lock', 'poetry.lock'];
+
+/** 검수용 diff: 변경 요약(stat)을 먼저 두고, 잠금 파일처럼 길기만 한 파일은 본문에서 뺀다(실측: package-lock이 6만 자를 다 차지). */
+export async function reviewDiffText(repo: string, baseSha: string, head: string): Promise<string> {
+  const range = `${baseSha}..${head}`;
+  const stat = (await git(['diff', '--stat=120', '--find-renames', range], repo)).stdout.trim();
+  const body = (await git(['diff', '--find-renames', range, '--', '.', ...LOCKFILES.map((f) => `:(exclude,glob)**/${f}`)], repo)).stdout;
+  return `${stat}\n\n${body}`;
+}
+
 export interface ScopeCheck {
   ok: boolean;
   outOfScope: string[];
@@ -207,11 +217,11 @@ export async function originFingerprint(originPath: string): Promise<string> {
 /** 제출 SHA의 깨끗한 분리 worktree. 검증·검수용. 있으면 그 SHA로 되돌려 재사용. */
 export async function ensureDetachedWorktree(
   paths: ProjectPaths,
-  kind: 'verify' | 'review',
+  kind: 'verify' | 'review' | 'preview',
   ticketId: string,
   sha: string,
 ): Promise<string> {
-  const parent = kind === 'verify' ? paths.verify : paths.review;
+  const parent = kind === 'verify' ? paths.verify : kind === 'review' ? paths.review : path.join(paths.root, 'preview');
   const wtPath = path.join(parent, ticketId);
   if (!existsSync(wtPath)) {
     await mkdir(parent, { recursive: true });

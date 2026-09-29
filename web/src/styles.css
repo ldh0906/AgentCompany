@@ -1444,6 +1444,16 @@ details.advanced[open] summary {
 .picker-item.git .icon {
   color: var(--ok);
 }
+.picker-new {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 6px;
+}
+.picker-new input {
+  flex: 1;
+}
 
 /* 대시보드 팀 패널 */
 .member {
@@ -1699,4 +1709,31 @@ details.advanced[open] summary {
 .item .meta,
 .note {
   overflow-wrap: anywhere;
+}
+
+/* 대표 직접 확인 (승인 카드) */
+.ceo-checks {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+}
+.check-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  flex-direction: row;
+  font-weight: 400;
+}
+.check-row input {
+  width: auto;
+  margin-top: 3px;
+}
+.preview {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
 }

@@ -10,12 +10,19 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { createApprovalRequest, waitForDecision } from '../approvals/file-queue.ts';
+import { judgeReadOnlyCommand, judgeToolRequest } from '../core/guard.ts';
 import { locateExecutable } from '../runner/locate.ts';
 
 const env = process.env;
 const approvalDir = env.AC_APPROVAL_DIR ?? '';
 const policy = env.AC_CODEX_POLICY ?? 'untrusted';
 const allowed: string[][] = JSON.parse(env.AC_ALLOWED_COMMANDS ?? '[]');
+// 실측(Windows, 0.159): `codex exec`는 approval_policy=never 면 모든 셸 명령을 "blocked by policy"로 거절한다.
+// 그래서 읽기 전용·전체 자동도 app-server를 거치고, 승인 요청을 여기서 자동으로 답한다.
+//   commands: 명령은 허용(치명적 명령은 차단), 파일 변경은 거부 — 읽기 전용 실행(검수 등)
+//   all:      명령·파일 변경 모두 허용(치명적 명령은 차단) — 전체 자동
+const autoApprove = env.AC_AUTO_APPROVE === 'all' || env.AC_AUTO_APPROVE === 'commands' ? env.AC_AUTO_APPROVE : 'none';
+const sandboxMode = env.AC_CODEX_SANDBOX === 'read-only' ? 'read-only' : 'workspace-write';
 const approvalTimeoutMs = Number(env.AC_APPROVAL_TIMEOUT_MS ?? 600_000);
 const SHELL_META = /[;&|`$<>(){}\n]/;
 
@@ -131,6 +138,18 @@ async function main(): Promise<void> {
       return;
     }
     const isCommand = m.method === approvalMethods[0];
+    if (autoApprove !== 'none') {
+      const text = Array.isArray(m.params?.command) ? m.params.command.join(' ') : String(m.params?.command ?? '');
+      const ws = env.AC_CODEX_CWD ?? '';
+      const verdict = !isCommand
+        ? { allow: autoApprove === 'all' }
+        : autoApprove === 'all'
+          ? judgeToolRequest({ tool: 'command', input: { command: text }, workspace: ws })
+          : judgeReadOnlyCommand(text, ws);
+      out({ type: 'approval.auto', command: isCommand ? m.params?.command : 'fileChange', allow: verdict.allow });
+      send({ id: m.id, result: { decision: verdict.allow ? 'accept' : 'decline' } });
+      return;
+    }
     if (isCommand && isAllowlisted(m.params?.command, allowed)) {
       out({ type: 'approval.auto', command: m.params?.command });
       send({ id: m.id, result: { decision: 'accept' } });
@@ -161,13 +180,17 @@ async function main(): Promise<void> {
     return;
   }
   send({ method: 'initialized' });
-  const thread = await request('thread/start', {
+  const threadParams = {
     cwd: env.AC_CODEX_CWD,
-    sandbox: 'workspace-write',
+    sandbox: sandboxMode,
     approvalPolicy: policy,
     approvalsReviewer: 'user',
     ...(env.AC_CODEX_MODEL ? { model: env.AC_CODEX_MODEL } : {}),
-  });
+  };
+  // 이어서 하기(수정 회차): 이전 대화를 되살린다.
+  const thread = env.AC_CODEX_RESUME
+    ? await request('thread/resume', { threadId: env.AC_CODEX_RESUME, ...threadParams })
+    : await request('thread/start', threadParams);
   threadId = thread.result?.thread?.id ?? null;
   if (!threadId) {
     out({ type: 'error', message: `thread/start 실패: ${JSON.stringify(thread.error ?? thread.result)}` });

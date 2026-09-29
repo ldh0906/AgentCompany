@@ -54,6 +54,7 @@ export type TicketCommand =
   | { type: 'integration_failed'; reason: string }
   | { type: 'hold'; reason: HoldReason; note: string }
   | { type: 'release_hold' }
+  | { type: 'ceo_skip_review'; reason: string; round: number }
   | { type: 'cancel'; reason: string }
   | { type: 'fail'; reason: string };
 
@@ -64,7 +65,7 @@ export interface TransitionEvent {
 
 export type TransitionResult = { ok: true; ticket: Ticket; events: TransitionEvent[] } | { ok: false; error: string };
 
-const ALLOWED_WHILE_HELD = new Set<TicketCommand['type']>(['release_hold', 'cancel', 'fail']);
+const ALLOWED_WHILE_HELD = new Set<TicketCommand['type']>(['release_hold', 'ceo_skip_review', 'cancel', 'fail']);
 
 /** 대표만 풀 수 있는 보류 사유. 나머지는 오케스트레이터도 해제 가능. */
 const CEO_ONLY_HOLDS = new Set<HoldReason>(['needs_decision', 'needs_permission', 'on_hold']);
@@ -338,6 +339,8 @@ export function applyTicketCommand(ticket: Ticket, cmd: TicketCommand, actor: Ac
       const bad = expect('in_review');
       if (bad) return reject(bad);
       for (const req of ticket.requirements) {
+        // 대표 직접 확인 요구는 검수자가 채울 수 없다: 대표 승인 단계에서 확인한다.
+        if (req.evidenceType === 'human_attest') continue;
         const check = cmd.checks.find((c) => c.requirementId === req.id);
         if (!check) return reject(tr(`요구사항 ${req.id}에 대한 판정이 없습니다.`, `No verdict for requirement ${req.id}.`));
         if (!check.met)
@@ -422,6 +425,23 @@ export function applyTicketCommand(ticket: Ticket, cmd: TicketCommand, actor: Ac
       return next({ status: ticket.hold.resumeTo, hold: null }, 'ticket.released', {
         reason: ticket.hold.reason,
         resumeTo: ticket.hold.resumeTo,
+      });
+    }
+
+    case 'ceo_skip_review': {
+      // 검수가 막혔을 때 대표가 직접 판단한다: 검증을 통과한 제출물을 대표 승인 단계로 보낸다(오케스트레이터가 검증 통과를 확인).
+      if (!isCeo(actor)) return reject(tr('검수 생략은 대표만 할 수 있습니다.', 'Only the CEO can skip review.'));
+      if (!['in_review', 'changes_requested'].includes(ticket.status))
+        return reject(
+          tr(
+            '검수 중이거나 수정 요청 상태에서만 승인 단계로 보낼 수 있습니다.',
+            'Only tickets in review or changes requested can go to approval.',
+          ),
+        );
+      // 수정 요청으로 회차가 넘어갔으면 승인할 제출물의 회차로 되돌린다.
+      return next({ status: 'awaiting_approval', hold: null, round: cmd.round }, 'ticket.review_skipped', {
+        reason: cmd.reason,
+        round: cmd.round,
       });
     }
 

@@ -10,7 +10,7 @@ import { DIFFICULTIES, RANKS } from '../core/types.ts';
 import type { AccessLevel, CliKind, EvidenceType, RoleTemplate, TicketType, VerifyCommand } from '../core/types.ts';
 import { doctor, type DoctorReport, installInfo } from '../app/doctor.ts';
 import { listModels } from '../app/models.ts';
-import { inspectRepo, listDirs, trackedDirs } from '../app/repo-inspect.ts';
+import { createRepo, inspectRepo, listDirs, trackedDirs } from '../app/repo-inspect.ts';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -120,6 +120,12 @@ export class Api {
             tr(`폴더를 열 수 없습니다: ${(error as Error).message}`, `Cannot open folder: ${(error as Error).message}`),
           );
         });
+      case 'POST repos':
+        return {
+          path: await createRepo(str(b, 'parent', { max: 1000 }), str(b, 'name', { max: 200 })).catch((error) => {
+            throw new ApiError(400, (error as Error).message);
+          }),
+        };
       case 'GET inspect':
         return inspectRepo(str(Object.fromEntries(query), 'path', { max: 1000 }));
       case 'GET projects/:id/dirs': {
@@ -202,6 +208,11 @@ export class Api {
           verifyCommands: verifyCommands(b) ?? [],
           docRules: str(b, 'docRules', { optional: true }),
         });
+      case 'POST projects/:id/preview':
+        return this.orch.preview(id!, str(b, 'ticketId', { optional: true }) || null);
+      case 'POST projects/:id/preview-stop':
+        this.orch.previews.stop(`${id}:${str(b, 'ticketId', { optional: true }) || 'base'}`);
+        return { ok: true };
       case 'POST projects/:id/remove':
         return this.company.removeProject(id!);
       case 'PATCH projects/:id': {
@@ -238,6 +249,8 @@ export class Api {
       }
       case 'POST tickets/:id/assign':
         return this.orch.assign(id!, str(b, 'assigneeId'), str(b, 'reviewerId'));
+      case 'POST tickets/:id/skip-review':
+        return this.orch.skipReview(id!);
       case 'POST tickets/:id/attest':
         return this.orch.attest(id!, str(b, 'requirementId'), str(b, 'note', { optional: true, max: 2000 }));
       case 'POST tickets/:id/release':
@@ -255,7 +268,11 @@ export class Api {
         }
         if (a.kind === 'integrate') {
           const mode = b.mode === undefined ? undefined : oneOf(b, 'mode', ['manual', 'auto_after_approval'] as const);
-          return this.orch.decideIntegration(id!, decision, { ...(mode ? { mode } : {}), reason: str(b, 'reason', { optional: true }) });
+          return this.orch.decideIntegration(id!, decision, {
+            ...(mode ? { mode } : {}),
+            reason: str(b, 'reason', { optional: true }),
+            attested: strList(b, 'attested'),
+          });
         }
         throw new ApiError(
           400,
@@ -307,6 +324,7 @@ export class Api {
       chiefOfStaff: this.orch.chiefOfStaff()?.id ?? null,
       permissionDelegate: this.orch.permissionDelegate()?.id ?? null,
       usage: r.usageSummary(),
+      previews: this.orch.previews.list(),
     };
   }
 

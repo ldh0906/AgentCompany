@@ -257,6 +257,8 @@ export function FolderPicker({ initial, onPick, onClose }: { initial: string; on
   const ko = lang === 'ko';
   const [cur, setCur] = useState<DirListing | null>(null);
   const [error, setError] = useState('');
+  const [newName, setNewName] = useState('');
+  const [creating, setCreating] = useState(false);
   const load = (p: string): Promise<boolean> =>
     api<DirListing>(`dirs?path=${encodeURIComponent(p)}`)
       .then((d) => {
@@ -322,6 +324,34 @@ export function FolderPicker({ initial, onPick, onClose }: { initial: string; on
           {ko
             ? '폴더를 눌러 들어가고, git 표시가 있는 폴더를 두 번 누르면 바로 선택됩니다.'
             : 'Click to open a folder; double-click a git folder to choose it.'}
+        </div>
+        <div className="picker-new">
+          <div className="field-label">{ko ? '처음부터 시작하기' : 'Start from scratch'}</div>
+          <div className="row">
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder={ko ? '새 프로젝트 폴더 이름 (예: my-game)' : 'New project folder name (e.g. my-game)'}
+            />
+            <button
+              className="btn small"
+              disabled={!cur || !newName.trim() || creating}
+              onClick={() => {
+                setCreating(true);
+                api<{ path: string }>('repos', { body: { parent: cur!.path, name: newName.trim() } })
+                  .then((r) => (onPick(r.path), onClose()))
+                  .catch((e) => setError(String((e as Error).message)))
+                  .finally(() => setCreating(false));
+              }}
+            >
+              <Icon name="plus" size={13} /> {ko ? '여기에 새로 만들기' : 'Create here'}
+            </button>
+          </div>
+          <div className="hint">
+            {ko
+              ? '지금 보고 있는 폴더 아래에 새 폴더를 만들고 빈 git 저장소로 시작합니다.'
+              : 'Creates a new folder under the current one as an empty git repository.'}
+          </div>
         </div>
       </div>
     </Modal>
