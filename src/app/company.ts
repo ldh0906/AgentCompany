@@ -8,8 +8,12 @@ import { applyTicketCommand, type Actor, type TicketCommand } from '../core/tick
 import {
   DEFAULT_BUDGET,
   MAX_ACTIVE_EMPLOYEES,
+  RANKS,
+  rankOf,
   type AccessLevel,
   type CliKind,
+  type Difficulty,
+  type Rank,
   type Employee,
   type Project,
   type Requirement,
@@ -30,6 +34,7 @@ export interface NewEmployee {
   roles: RoleTemplate[];
   cli: CliKind;
   model: string | null;
+  rank?: Rank;
   accessLevel?: AccessLevel;
   allowedCommands?: string[][];
 }
@@ -54,6 +59,7 @@ export interface NewTicket {
   writeScope?: string[];
   readScope?: string[];
   priority?: 1 | 2 | 3;
+  difficulty?: Difficulty;
   dependsOn?: string[];
 }
 
@@ -102,6 +108,7 @@ export class Company {
         id: `E-${randomUUID().slice(0, 8)}`,
         name: input.name.trim(),
         roles: input.roles,
+        rank: input.rank ?? 'senior',
         cli: input.cli,
         model: input.model,
         accessLevel,
@@ -114,10 +121,22 @@ export class Company {
         actorId(actor),
         'employee.hired',
         employee.id,
-        { name: employee.name, cli: employee.cli, model: employee.model, roles: employee.roles },
+        { name: employee.name, cli: employee.cli, model: employee.model, roles: employee.roles, rank: employee.rank },
         this.clock(),
       );
       return employee;
+    });
+  }
+
+  setEmployeeRank(id: string, rank: Rank, actor: Actor = { kind: 'ceo' }): Employee {
+    if (actor.kind !== 'ceo') throw new DomainError(tr('직급은 대표만 바꿀 수 있습니다.', 'Only the CEO can change ranks.'));
+    if (!RANKS.includes(rank)) throw new DomainError(tr('알 수 없는 직급입니다.', 'Unknown rank.'));
+    return this.store.transact(() => {
+      const e = this.requireEmployee(id);
+      const updated = { ...e, rank };
+      this.saveEmployee(updated);
+      this.store.appendEvent('ceo', 'employee.rank_changed', id, { from: rankOf(e), to: rank }, this.clock());
+      return updated;
     });
   }
 
@@ -239,6 +258,7 @@ export class Company {
         assigneeId: null,
         reviewerId: null,
         priority: input.priority ?? 2,
+        difficulty: input.difficulty ?? 'normal',
         status: 'received',
         hold: null,
         writeScope: input.writeScope ?? [],

@@ -22,7 +22,8 @@ import { parseDrafts, parseReport, type TicketDraft, type WorkReport } from '../
 import { writeDecision } from '../approvals/file-queue.ts';
 import type { Actor } from '../core/ticket-machine.ts';
 import type { Claim, Employee, Evidence, FailureClass, Project, Ticket, TicketStatus } from '../core/types.ts';
-import { DEFAULT_BUDGET, TERMINAL_STATUSES } from '../core/types.ts';
+import { DEFAULT_BUDGET, DIFFICULTY_RANK, RANK_ORDER, TERMINAL_STATUSES, difficultyOf, rankOf } from '../core/types.ts';
+import { pickStaff } from '../core/staffing.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
 import { locateExecutable } from '../runner/locate.ts';
 import { abandonAndTerminate, isSameProcessAlive, readExitRecord, reapGroup, startProcess, waitForExit } from '../runner/process.ts';
@@ -407,30 +408,37 @@ export class Orchestrator {
 
   private autoAssign(t: Ticket): void {
     const active = this.company.activeEmployees();
-    if (active.length < 2) {
-      this.apply(t.id, {
-        type: 'hold',
-        reason: 'needs_decision',
-        note: tr(
-          '담당자와 검수자를 나누려면 활성 직원이 2명 이상 필요합니다.',
-          'At least two active employees are needed for separate assignee and reviewer roles.',
-        ),
-      });
-      return;
-    }
-    const wants =
-      t.type === 'impl' ? ['implementer'] : t.type === 'doc' ? ['planner', 'recorder', 'architect'] : ['architect', 'planner', 'qa'];
     const load = (e: Employee) =>
       this.company.tickets().filter((x) => x.assigneeId === e.id && !TERMINAL_STATUSES.includes(x.status)).length;
-    const byLoad = (a: Employee, b: Employee) => load(a) - load(b);
-    const assignee = [...active].sort(byLoad).find((e) => e.roles.some((r) => wants.includes(r))) ?? [...active].sort(byLoad)[0]!;
-    const others = active.filter((e) => e.id !== assignee.id);
-    const reviewer =
-      others.find((e) => e.roles.includes('qa') && e.cli !== assignee.cli) ??
-      others.find((e) => e.roles.includes('qa')) ??
-      others.find((e) => e.cli !== assignee.cli) ??
-      others[0]!;
-    this.apply(t.id, { type: 'assign', assigneeId: assignee.id, reviewerId: reviewer.id, activeEmployeeIds: active.map((e) => e.id) });
+    const pick = pickStaff(t, active, load);
+    if (!pick.ok) {
+      const need = DIFFICULTY_RANK[difficultyOf(t)];
+      const note =
+        pick.reason === 'too_few'
+          ? tr(
+              '담당자와 검수자를 나누려면 활성 직원이 2명 이상 필요합니다.',
+              'At least two active employees are needed for separate assignee and reviewer roles.',
+            )
+          : pick.reason === 'no_assignee_rank'
+            ? tr(
+                `이 업무(난이도 ${difficultyOf(t)})는 ${need === 'lead' ? '팀장' : '선임'} 이상만 맡을 수 있는데, 그런 직원이 없습니다. 난이도를 낮추거나 직원의 직급을 올리세요.`,
+                `This ticket (difficulty ${difficultyOf(t)}) needs a ${need} or higher, and there is none. Lower the difficulty or promote an employee.`,
+              )
+            : tr(
+                '담당자와 같거나 높은 직급의 검수자가 없습니다. 직원의 직급을 조정하세요.',
+                'No reviewer of the same or higher rank than the assignee. Adjust employee ranks.',
+              );
+      this.apply(t.id, { type: 'hold', reason: 'needs_decision', note });
+      return;
+    }
+    this.apply(t.id, {
+      type: 'assign',
+      assigneeId: pick.assigneeId,
+      reviewerId: pick.reviewerId,
+      ownerId: pick.ownerId,
+      activeEmployeeIds: active.map((e) => e.id),
+      ranks: Object.fromEntries(active.map((e) => [e.id, rankOf(e)])),
+    });
   }
 
   // ======================= 작업 실행 =======================
@@ -1711,9 +1719,14 @@ export class Orchestrator {
   }
 
   assign(ticketId: string, assigneeId: string, reviewerId: string): Ticket {
+    const active = this.company.activeEmployees();
+    const ranks = Object.fromEntries(active.map((e) => [e.id, rankOf(e)]));
+    // 책임자: 담당자를 뺀 가장 높은 직급(담당자보다 낮으면 담당자 본인).
+    const top = active.filter((e) => e.id !== assigneeId).sort((a, b) => RANK_ORDER[rankOf(b)] - RANK_ORDER[rankOf(a)])[0];
+    const ownerId = top && ranks[assigneeId] && RANK_ORDER[rankOf(top)] >= RANK_ORDER[ranks[assigneeId]!] ? top.id : assigneeId;
     return this.apply(
       ticketId,
-      { type: 'assign', assigneeId, reviewerId, activeEmployeeIds: this.company.activeEmployees().map((e) => e.id) },
+      { type: 'assign', assigneeId, reviewerId, ownerId, activeEmployeeIds: active.map((e) => e.id), ranks },
       CEO,
     );
   }

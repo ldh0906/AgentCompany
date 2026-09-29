@@ -54,15 +54,28 @@ export async function seedDemo(company: Company, orch: Orchestrator, dataDir: st
     ),
   });
 
-  company.hireEmployee({ name: L('하나 (성실)', 'Ada (diligent)'), roles: ['implementer'], cli: 'fake', model: 'diligent' });
-  company.hireEmployee({ name: L('둘 (게으름)', 'Lou (lazy)'), roles: ['recorder', 'planner'], cli: 'fake', model: 'lazy' });
   company.hireEmployee({
-    name: L('셋 (QA·비서실장)', 'Quinn (QA, chief of staff)'),
-    roles: ['qa', 'chief-of-staff'],
+    name: L('하나 (성실)', 'Ada (diligent)'),
+    roles: ['implementer'],
+    rank: 'senior',
     cli: 'fake',
     model: 'diligent',
   });
-  company.hireEmployee({ name: L('넷 (범위 위반)', 'Rex (rogue)'), roles: ['implementer'], cli: 'fake', model: 'rogue' });
+  company.hireEmployee({
+    name: L('둘 (게으름)', 'Lou (lazy)'),
+    roles: ['recorder', 'planner'],
+    rank: 'junior',
+    cli: 'fake',
+    model: 'lazy',
+  });
+  company.hireEmployee({
+    name: L('셋 (QA·비서실장)', 'Quinn (QA, chief of staff)'),
+    roles: ['qa', 'chief-of-staff'],
+    rank: 'lead',
+    cli: 'fake',
+    model: 'diligent',
+  });
+  company.hireEmployee({ name: L('넷 (범위 위반)', 'Rex (rogue)'), roles: ['implementer'], rank: 'junior', cli: 'fake', model: 'rogue' });
 
   orch.records.recordDecision(
     project.id,
@@ -93,6 +106,7 @@ export async function seedDemo(company: Company, orch: Orchestrator, dataDir: st
       },
     ],
     doneCriteria: L('검수자가 문서를 확인', 'Reviewer checks the doc'),
+    difficulty: 'easy',
     writeScope: ['docs/**'],
   });
   company.createTicket({
@@ -115,6 +129,7 @@ export async function seedDemo(company: Company, orch: Orchestrator, dataDir: st
     purpose: L('파티를 해산할 수 있게 한다', 'Allow disbanding a party'),
     requirements: [{ text: L('해산 함수와 단위 테스트', 'Disband function with unit tests'), evidenceType: 'unit_test' }],
     doneCriteria: L('단위 테스트 통과', 'Unit tests pass'),
+    difficulty: 'easy',
     writeScope: ['src/disband/**'],
   });
 }

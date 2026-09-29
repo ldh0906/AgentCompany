@@ -3,8 +3,12 @@
 import { tr } from './i18n.ts';
 
 import {
+  DIFFICULTY_RANK,
   EVIDENCE_STRENGTH,
+  RANK_ORDER,
   TERMINAL_STATUSES,
+  difficultyOf,
+  type Rank,
   type EvidenceType,
   type Hold,
   type HoldReason,
@@ -24,7 +28,15 @@ export interface RequirementCheck {
 export type TicketCommand =
   | { type: 'analyze' }
   | { type: 'accept_to_backlog' }
-  | { type: 'assign'; assigneeId: string; reviewerId: string; activeEmployeeIds: string[] }
+  | {
+      type: 'assign';
+      assigneeId: string;
+      reviewerId: string;
+      ownerId?: string;
+      activeEmployeeIds: string[];
+      /** 직원 직급. 주어지면 난이도·검수 직급 규칙을 강제한다. */
+      ranks?: Record<string, Rank>;
+    }
   | { type: 'start_work'; dependenciesDone: boolean; locksAcquired: boolean }
   | { type: 'submit' }
   | { type: 'deliberation_done'; claims: number; escalated: number }
@@ -152,10 +164,32 @@ export function applyTicketCommand(ticket: Ticket, cmd: TicketCommand, actor: Ac
         return reject(tr('담당자가 활성 직원이 아닙니다.', 'The assignee is not active.'));
       if (!cmd.activeEmployeeIds.includes(cmd.reviewerId))
         return reject(tr('검수자가 활성 직원이 아닙니다.', 'The reviewer is not active.'));
-      return next({ status: 'assigned', assigneeId: cmd.assigneeId, reviewerId: cmd.reviewerId }, 'ticket.assigned', {
-        assigneeId: cmd.assigneeId,
-        reviewerId: cmd.reviewerId,
-      });
+      if (cmd.ownerId && !cmd.activeEmployeeIds.includes(cmd.ownerId))
+        return reject(tr('책임자가 활성 직원이 아닙니다.', 'The owner is not active.'));
+      if (cmd.ranks) {
+        const rk = (id: string) => RANK_ORDER[cmd.ranks![id] ?? 'senior'];
+        const need = DIFFICULTY_RANK[difficultyOf(ticket)];
+        if (rk(cmd.assigneeId) < RANK_ORDER[need])
+          return reject(
+            tr(
+              `이 난이도는 ${need === 'lead' ? '팀장' : need === 'senior' ? '선임' : '사원'} 이상만 맡을 수 있습니다.`,
+              `This difficulty needs a ${need} or higher.`,
+            ),
+          );
+        if (rk(cmd.reviewerId) < rk(cmd.assigneeId))
+          return reject(
+            tr('검수자는 담당자와 같거나 높은 직급이어야 합니다.', 'The reviewer must be the same rank as the assignee or higher.'),
+          );
+        if (cmd.ownerId && rk(cmd.ownerId) < rk(cmd.assigneeId))
+          return reject(
+            tr('책임자는 담당자와 같거나 높은 직급이어야 합니다.', 'The owner must be the same rank as the assignee or higher.'),
+          );
+      }
+      return next(
+        { status: 'assigned', assigneeId: cmd.assigneeId, reviewerId: cmd.reviewerId, ownerId: cmd.ownerId ?? null },
+        'ticket.assigned',
+        { assigneeId: cmd.assigneeId, reviewerId: cmd.reviewerId, ownerId: cmd.ownerId ?? null },
+      );
     }
 
     case 'start_work': {

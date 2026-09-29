@@ -12,12 +12,27 @@ export type AccessLevel =
 
 export const MAX_ACTIVE_EMPLOYEES = 4;
 
+/** 담당 업무: 이 직원이 어떤 일을 맡는지(배정 대상 결정). */
 export type RoleTemplate = 'chief-of-staff' | 'planner' | 'architect' | 'implementer' | 'ux' | 'qa' | 'recorder';
+
+/** 직급: 높은 직급이 일을 맡기고 책임지며, 어려운 일을 맡고, 같거나 낮은 직급의 작업을 검수한다. */
+export type Rank = 'junior' | 'senior' | 'lead';
+export const RANKS: readonly Rank[] = ['junior', 'senior', 'lead'];
+export const RANK_ORDER: Record<Rank, number> = { junior: 1, senior: 2, lead: 3 };
+/** 직급이 없는 예전 기록은 선임으로 본다. */
+export const rankOf = (e: { rank?: Rank | null }): Rank => e.rank ?? 'senior';
+
+/** 업무 난이도와, 그 업무를 맡을 수 있는 최소 직급. */
+export type Difficulty = 'easy' | 'normal' | 'hard';
+export const DIFFICULTIES: readonly Difficulty[] = ['easy', 'normal', 'hard'];
+export const DIFFICULTY_RANK: Record<Difficulty, Rank> = { easy: 'junior', normal: 'senior', hard: 'lead' };
+export const difficultyOf = (t: { difficulty?: Difficulty | null }): Difficulty => t.difficulty ?? 'normal';
 
 export interface Employee {
   id: string;
   name: string;
   roles: RoleTemplate[];
+  rank?: Rank; // 없으면 선임(예전 기록)
   cli: CliKind;
   model: string | null;
   accessLevel: AccessLevel;
@@ -123,6 +138,8 @@ export interface Ticket {
   requesterId: string; // 'ceo' 또는 직원 ID
   assigneeId: string | null;
   reviewerId: string | null;
+  ownerId?: string | null; // 책임자: 일을 맡긴 가장 높은 직급 직원
+  difficulty?: Difficulty; // 없으면 보통
   priority: 1 | 2 | 3;
   status: TicketStatus;
   hold: Hold | null;

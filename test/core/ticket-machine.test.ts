@@ -81,6 +81,39 @@ test('비활성 직원은 배정할 수 없음', () => {
   assert.equal(r.ok, false);
 });
 
+test('직급: 검수자가 담당자보다 낮은 직급이면 배정 거부 (대표 배정도 마찬가지)', () => {
+  const t = run(ticket(), TO_REVIEW.slice(0, 2));
+  const ranks = { 'e-impl': 'senior', 'e-qa': 'junior' } as const;
+  const r = applyTicketCommand(t, { type: 'assign', assigneeId: 'e-impl', reviewerId: 'e-qa', activeEmployeeIds: ACTIVE, ranks }, CEO, NOW);
+  assert.equal(r.ok, false);
+  assert.match(!r.ok ? r.error : '', /검수자|reviewer/i);
+});
+
+test('직급: 어려운 업무를 팀장이 아닌 직원에게 배정하면 거부', () => {
+  const t = run(ticket({ difficulty: 'hard' }), TO_REVIEW.slice(0, 2));
+  const ranks = { 'e-impl': 'senior', 'e-qa': 'lead' } as const;
+  const r = applyTicketCommand(
+    t,
+    { type: 'assign', assigneeId: 'e-impl', reviewerId: 'e-qa', activeEmployeeIds: ACTIVE, ranks },
+    ORCH,
+    NOW,
+  );
+  assert.equal(r.ok, false);
+});
+
+test('직급: 규칙을 지키면 책임자까지 기록', () => {
+  const t = run(ticket({ difficulty: 'easy' }), TO_REVIEW.slice(0, 2));
+  const ranks = { 'e-impl': 'junior', 'e-qa': 'lead' } as const;
+  const r = applyTicketCommand(
+    t,
+    { type: 'assign', assigneeId: 'e-impl', reviewerId: 'e-qa', ownerId: 'e-qa', activeEmployeeIds: ACTIVE, ranks },
+    ORCH,
+    NOW,
+  );
+  assert.ok(r.ok);
+  assert.equal(r.ok && r.ticket.ownerId, 'e-qa');
+});
+
 test('직원의 "완료했습니다"는 제출이 아니다: 직원은 submit 불가', () => {
   const t = run(ticket(), TO_REVIEW.slice(0, 4));
   const r = applyTicketCommand(t, { type: 'submit' }, IMPL, NOW);

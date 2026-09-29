@@ -6,6 +6,7 @@ import path from 'node:path';
 import { ADAPTERS } from '../adapters/index.ts';
 import type { Orchestrator } from '../app/orchestrator.ts';
 import { diffText, projectPaths } from '../workspace/workspace.ts';
+import { DIFFICULTIES, RANKS } from '../core/types.ts';
 import type { AccessLevel, CliKind, EvidenceType, RoleTemplate, TicketType, VerifyCommand } from '../core/types.ts';
 import { doctor, type DoctorReport, installInfo } from '../app/doctor.ts';
 
@@ -123,10 +124,13 @@ export class Api {
           roles,
           cli,
           model: str(b, 'model', { optional: true, max: 100 }) || null,
+          rank: oneOf(b, 'rank', RANKS, 'senior'),
           accessLevel: level,
           allowedCommands: Array.isArray(b.allowedCommands) ? (b.allowedCommands as string[][]) : [],
         });
       }
+      case 'POST employees/:id/rank':
+        return this.company.setEmployeeRank(id!, oneOf(b, 'rank', RANKS));
       case 'POST employees/:id/active':
         return this.company.setEmployeeActive(id!, Boolean(b.active));
       case 'POST employees/:id/access': {
@@ -177,6 +181,7 @@ export class Api {
           doneCriteria: str(b, 'doneCriteria'),
           writeScope: strList(b, 'writeScope'),
           priority: ([1, 2, 3] as const).find((p) => p === b.priority) ?? 2,
+          difficulty: oneOf(b, 'difficulty', DIFFICULTIES, 'normal'),
           dependsOn: strList(b, 'dependsOn'),
         });
       }
