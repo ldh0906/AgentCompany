@@ -24,6 +24,7 @@ import type { Actor } from '../core/ticket-machine.ts';
 import type { Claim, Employee, Evidence, FailureClass, Project, Ticket, TicketStatus } from '../core/types.ts';
 import { DEFAULT_BUDGET, DIFFICULTIES, DIFFICULTY_RANK, RANK_ORDER, TERMINAL_STATUSES, difficultyOf, rankOf } from '../core/types.ts';
 import { pickPanel, pickStaff } from '../core/staffing.ts';
+import { judgeToolRequest } from '../core/guard.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
 import { locateExecutable } from '../runner/locate.ts';
 import { abandonAndTerminate, isSameProcessAlive, readExitRecord, reapGroup, startProcess, waitForExit } from '../runner/process.ts';
@@ -1300,6 +1301,45 @@ ${failure.detail.slice(0, 400)}`,
         });
         this.changed('approval', run.ticketId);
       }
+    }
+    await this.delegateToolApprovals();
+  }
+
+  /** 권한 요청 위임 처리자: 활성 직원 중 전체 자동(4) 등급, 직급이 가장 높은 직원. 없으면 대표가 처리한다. */
+  permissionDelegate(): Employee | null {
+    return (
+      this.company
+        .activeEmployees()
+        .filter((e) => e.accessLevel === 'full-auto')
+        .sort((a, b) => RANK_ORDER[rankOf(b)] - RANK_ORDER[rankOf(a)])[0] ?? null
+    );
+  }
+
+  /** 대기 중인 권한 요청을 위임 처리자가 대신 결정한다: 치명적인 것만 막고 나머지는 허용(대표 결정, 2026-09-30). */
+  private async delegateToolApprovals(): Promise<void> {
+    const delegate = this.permissionDelegate();
+    if (!delegate) return;
+    for (const a of this.records.approvals('pending').filter((x) => x.kind === 'tool_permission')) {
+      const d = a.detail as { requestId: string; runId: string; approvalDir: string; tool: string; input: unknown };
+      const run = this.records.run(d.runId);
+      const verdict = judgeToolRequest({ tool: d.tool, input: d.input, workspace: run?.worktreePath ?? '' });
+      await writeDecision(d.approvalDir, d.requestId, {
+        decision: verdict.allow ? 'allow' : 'deny',
+        ...(verdict.allow
+          ? {}
+          : { message: tr(`${delegate.name}이(가) 차단: ${verdict.reason}`, `Blocked by ${delegate.name}: ${verdict.reason}`) }),
+      });
+      this.records.setApprovalState(a.id, verdict.allow ? 'approved' : 'rejected', delegate.id, {
+        delegated: true,
+        reason: verdict.reason ?? null,
+      });
+      this.company.store.appendEvent(delegate.id, 'approval.delegated', a.ticketId ?? a.id, {
+        allow: verdict.allow,
+        tool: d.tool,
+        reason: verdict.reason ?? null,
+        summary: a.summary,
+      });
+      this.changed('approval', a.ticketId ?? a.id);
     }
   }
 

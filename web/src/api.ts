@@ -70,6 +70,8 @@ export interface State {
   events: DomainEvent[];
   requests: CeoRequest[];
   chiefOfStaff: string | null;
+  /** 권한 요청을 대표 대신 처리하는 전체 자동 직원(없으면 null → 대표가 처리). */
+  permissionDelegate?: string | null;
   usage?: UsageSummary;
 }
 

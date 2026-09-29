@@ -5,3 +5,4 @@ dist/
 
 # Private design brief (kept locally, not published)
 docs/design/00-design-prompt.md
+.gstack/

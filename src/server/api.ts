@@ -283,6 +283,7 @@ export class Api {
       events: this.company.store.events(undefined, 60),
       requests: r.requests(),
       chiefOfStaff: this.orch.chiefOfStaff()?.id ?? null,
+      permissionDelegate: this.orch.permissionDelegate()?.id ?? null,
       usage: r.usageSummary(),
     };
   }

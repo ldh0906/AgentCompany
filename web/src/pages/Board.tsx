@@ -158,7 +158,7 @@ export function Board({ onNewTicket }: { onNewTicket?: () => void }) {
                   const tokens = usage?.byTicket[x.id]?.total ?? 0;
                   const live = LIVE.includes(x.status) && !x.hold;
                   return (
-                    <Link to={`/tickets/${x.id}`} className={`tcard ${live ? 'live' : ''} ${x.hold ? 'held' : ''}`} key={x.id}>
+                    <Link to={`/tickets/${x.id}`} className={`tcard ${live ? 'is-live' : ''} ${x.hold ? 'held' : ''}`} key={x.id}>
                       <div className="spread">
                         <span className="id">
                           {live && <span className="live-dot" />}

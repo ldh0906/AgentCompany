@@ -83,6 +83,14 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
       return ko ? `승인 요청: ${p.summary}` : `Approval requested: ${p.summary}`;
     case 'orchestrator.recovered':
       return ko ? '재시작 복구 완료' : 'Recovered after restart';
+    case 'approval.delegated':
+      return p.allow
+        ? ko
+          ? `${who(e.actor)}이(가) 권한 요청 허용: ${p.summary ?? ''}`
+          : `${who(e.actor)} allowed: ${p.summary ?? ''}`
+        : ko
+          ? `⛔ ${who(e.actor)}이(가) 권한 요청 차단: ${p.reason ?? ''}`
+          : `⛔ ${who(e.actor)} blocked: ${p.reason ?? ''}`;
     case 'approval.approved':
       return ko ? `대표 승인: ${p.ticketId ?? ''}` : `CEO approved ${p.ticketId ?? ''}`;
     case 'approval.rejected':
@@ -273,6 +281,13 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
               </span>
               <span className="chip warn">{state.approvals.length}</span>
             </h2>
+            {state.permissionDelegate && (
+              <div className="note" style={{ margin: '10px 18px 0' }}>
+                {ko
+                  ? `권한 요청은 ${empName(state.employees, state.permissionDelegate)}(전체 자동)이 대신 처리합니다. 드라이브·시스템 폴더 삭제, 포맷, PC 종료 같은 치명적인 명령만 막고 나머지는 허용합니다. 결과는 최근 활동에 남습니다.`
+                  : `Permission requests are handled by ${empName(state.employees, state.permissionDelegate)} (full auto): only catastrophic commands (drive/system deletes, formats, shutdown) are blocked. Results appear in recent activity.`}
+              </div>
+            )}
             <div className="list">
               {state.approvals.length === 0 ? (
                 <EmptyState icon="inbox">{t('noApprovals')}</EmptyState>
