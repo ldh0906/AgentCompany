@@ -41,6 +41,15 @@ export interface Employee {
   createdAt: string;
 }
 
+/** 한 실행의 토큰 사용량(CLI가 보고한 값). input은 캐시 읽기를 포함한 전체 입력. */
+export interface TokenUsage {
+  input: number;
+  cacheRead: number;
+  output: number;
+  total: number;
+  costUsd: number | null; // Claude만 추정 비용을 보고한다
+}
+
 export type IntegrationMode = 'manual' | 'auto_after_approval';
 
 export interface VerifyCommand {
@@ -184,6 +193,7 @@ export interface Run {
   runDir: string;
   exitCode: number | null;
   failureClass: FailureClass | null;
+  usage?: TokenUsage | null; // CLI가 보고한 토큰 사용량(없으면 모름)
   startedAt: string;
   endedAt: string | null;
 }

@@ -9,6 +9,23 @@ import type { DeliberationPhase } from '../agents/deliberation.ts';
 import { TERMINAL_STATUSES } from '../core/types.ts';
 import { scopesOverlap } from '../workspace/workspace.ts';
 
+export interface UsageTotals {
+  input: number;
+  cacheRead: number;
+  output: number;
+  total: number;
+  costUsd: number;
+  runs: number;
+}
+export interface UsageSummary {
+  all: UsageTotals;
+  today: UsageTotals;
+  byEmployee: Record<string, UsageTotals>;
+  byCli: Record<string, UsageTotals>;
+  byTicket: Record<string, UsageTotals>;
+  daily: Record<string, UsageTotals>; // YYYY-MM-DD(현지)
+}
+
 export interface RunRecord extends Run {
   round: number;
   cli: string;
@@ -89,6 +106,56 @@ export class Records {
   recentRuns(limit = 100): RunRecord[] {
     return this.store.list<RunRecord>('runs', 'ORDER BY started_at DESC LIMIT ?', limit);
   }
+  /** 토큰 사용량 합계(실행 기록의 usage 칸만 읽는다). 날짜는 이 컴퓨터의 현지 시간 기준. */
+  usageSummary(now = new Date()): UsageSummary {
+    const localDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const today = localDay(now);
+    const rows = this.store.db
+      .prepare(
+        `SELECT ticket_id AS ticketId,
+                json_extract(data, '$.employeeId') AS employeeId,
+                json_extract(data, '$.cli') AS cli,
+                started_at AS startedAt,
+                json_extract(data, '$.usage.input') AS input,
+                json_extract(data, '$.usage.cacheRead') AS cacheRead,
+                json_extract(data, '$.usage.output') AS output,
+                json_extract(data, '$.usage.total') AS total,
+                json_extract(data, '$.usage.costUsd') AS costUsd
+           FROM runs WHERE json_extract(data, '$.usage.total') IS NOT NULL`,
+      )
+      .all() as {
+      ticketId: string;
+      employeeId: string;
+      cli: string;
+      startedAt: string;
+      input: number;
+      cacheRead: number;
+      output: number;
+      total: number;
+      costUsd: number | null;
+    }[];
+    const zero = (): UsageTotals => ({ input: 0, cacheRead: 0, output: 0, total: 0, costUsd: 0, runs: 0 });
+    const add = (t: UsageTotals, r: (typeof rows)[number]) => {
+      t.input += r.input ?? 0;
+      t.cacheRead += r.cacheRead ?? 0;
+      t.output += r.output ?? 0;
+      t.total += r.total ?? 0;
+      t.costUsd += r.costUsd ?? 0;
+      t.runs += 1;
+    };
+    const s: UsageSummary = { all: zero(), today: zero(), byEmployee: {}, byCli: {}, byTicket: {}, daily: {} };
+    for (const r of rows) {
+      add(s.all, r);
+      const day = localDay(new Date(r.startedAt));
+      if (day === today) add(s.today, r);
+      add((s.byEmployee[r.employeeId] ??= zero()), r);
+      add((s.byCli[r.cli] ??= zero()), r);
+      add((s.byTicket[r.ticketId] ??= zero()), r);
+      add((s.daily[day] ??= zero()), r);
+    }
+    return s;
+  }
+
   /** 이 회차의 마지막 성공한 작업 실행(제출). */
   latestSubmission(ticket: Ticket): RunRecord | null {
     const runs = this.runsForTicket(ticket.id).filter((r) => r.kind === 'work' && r.status === 'succeeded' && r.round === ticket.round);

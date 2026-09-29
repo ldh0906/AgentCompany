@@ -6,7 +6,17 @@
 // 앱 전용 프로필 폴더 환경변수는 확인하지 못했다.
 import { tr } from '../core/i18n.ts';
 
-import { classifyCommon, obj, type CliAdapter, type Invocation, type InvocationRequest, type ParsedRun } from './types.ts';
+import {
+  addUsage,
+  classifyCommon,
+  obj,
+  usageFrom,
+  type CliAdapter,
+  type Invocation,
+  type InvocationRequest,
+  type ParsedRun,
+} from './types.ts';
+import type { TokenUsage } from '../core/types.ts';
 
 export const AGY_MAX_PROMPT_CHARS = 28_000;
 
@@ -57,6 +67,7 @@ export const agyAdapter: CliAdapter = {
     let sessionId: string | null = null;
     let finalText: string | null = null;
     let errorText: string | null = null;
+    let usage: TokenUsage | null = null;
     for (const raw of events) {
       const e = obj(raw);
       if (!e) continue;
@@ -66,6 +77,8 @@ export const agyAdapter: CliAdapter = {
       if (e.type === 'result' && typeof e.result === 'string') finalText = e.result;
       // 실측(1.2.12): {"event":"result","result":{"conversation_id","status":"SUCCESS","response"}}
       const result = e.event === 'result' ? obj(e.result) : null;
+      const u = obj(result?.usage);
+      if (u) usage = addUsage(usage, usageFrom('agy', u));
       if (result) {
         if (!sessionId && typeof result.conversation_id === 'string') sessionId = result.conversation_id;
         // 헤드리스(--sandbox)에서 권한이 필요한 도구는 자동 거부되고, 빈 응답의 SUCCESS가 온다(사유는 stderr).
@@ -87,7 +100,7 @@ export const agyAdapter: CliAdapter = {
       }
       if (e.type === 'error') errorText = String(e.message ?? 'error');
     }
-    return { sessionId, finalText, errorText };
+    return { sessionId, finalText, errorText, usage };
   },
 
   classifyFailure: classifyCommon,

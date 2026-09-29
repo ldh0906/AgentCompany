@@ -1,4 +1,4 @@
-import type { AccessLevel, CliKind, FailureClass } from '../core/types.ts';
+import type { AccessLevel, CliKind, FailureClass, TokenUsage } from '../core/types.ts';
 
 export interface InvocationRequest {
   prompt: string;
@@ -27,6 +27,44 @@ export interface ParsedRun {
   sessionId: string | null;
   finalText: string | null;
   errorText: string | null;
+  usage?: TokenUsage | null;
+}
+
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+
+/** 사용량 합산 도우미. */
+export function addUsage(a: TokenUsage | null, b: TokenUsage): TokenUsage {
+  if (!a) return b;
+  return {
+    input: a.input + b.input,
+    cacheRead: a.cacheRead + b.cacheRead,
+    output: a.output + b.output,
+    total: a.total + b.total,
+    costUsd: a.costUsd === null && b.costUsd === null ? null : (a.costUsd ?? 0) + (b.costUsd ?? 0),
+  };
+}
+
+/** 실측 형식별 사용량 객체 → 공통 형식. */
+export function usageFrom(kind: 'claude' | 'codex' | 'agy', u: Record<string, unknown>, costUsd: unknown = null): TokenUsage {
+  if (kind === 'claude') {
+    const input = num(u.input_tokens) + num(u.cache_creation_input_tokens) + num(u.cache_read_input_tokens);
+    const output = num(u.output_tokens);
+    return {
+      input,
+      cacheRead: num(u.cache_read_input_tokens),
+      output,
+      total: input + output,
+      costUsd: typeof costUsd === 'number' ? costUsd : null,
+    };
+  }
+  if (kind === 'codex') {
+    const input = num(u.input_tokens);
+    const output = num(u.output_tokens);
+    return { input, cacheRead: num(u.cached_input_tokens), output, total: input + output, costUsd: null };
+  }
+  const input = num(u.input_tokens);
+  const output = num(u.output_tokens);
+  return { input, cacheRead: num(u.cache_read_tokens), output, total: num(u.total_tokens) || input + output, costUsd: null };
 }
 
 export interface AdapterCapabilities {

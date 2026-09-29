@@ -50,6 +50,18 @@ for await (const line of createInterface({ input: process.stdin })) {
         method: 'item/completed',
         params: { item: { type: 'agentMessage', id: 'a1', text: `decisions done: ${m.result?.decision}` } },
       });
+      // 실측 스키마(0.153.4): 누적 사용량은 thread/tokenUsage/updated 의 tokenUsage.total
+      send({
+        method: 'thread/tokenUsage/updated',
+        params: {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          tokenUsage: {
+            total: { inputTokens: 1200, cachedInputTokens: 800, outputTokens: 34, reasoningOutputTokens: 0, totalTokens: 1234 },
+            last: { inputTokens: 1200, cachedInputTokens: 800, outputTokens: 34, reasoningOutputTokens: 0, totalTokens: 1234 },
+          },
+        },
+      });
       send({
         method: 'turn/completed',
         params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', items: [], error: null } },

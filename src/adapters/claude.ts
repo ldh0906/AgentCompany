@@ -7,7 +7,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import type { AccessLevel } from '../core/types.ts';
-import { classifyCommon, obj, type CliAdapter, type Invocation, type InvocationRequest, type ParsedRun } from './types.ts';
+import {
+  addUsage,
+  classifyCommon,
+  obj,
+  usageFrom,
+  type CliAdapter,
+  type Invocation,
+  type InvocationRequest,
+  type ParsedRun,
+} from './types.ts';
+import type { TokenUsage } from '../core/types.ts';
 
 const READ_TOOLS = ['Read', 'Glob', 'Grep'];
 const WRITE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
@@ -93,6 +103,7 @@ export const claudeAdapter: CliAdapter = {
     let sessionId: string | null = null;
     let finalText: string | null = null;
     let errorText: string | null = null;
+    let usage: TokenUsage | null = null;
     for (const raw of events) {
       const e = obj(raw);
       if (!e) continue;
@@ -100,9 +111,11 @@ export const claudeAdapter: CliAdapter = {
       if (e.type === 'result') {
         if (typeof e.result === 'string') finalText = e.result;
         if (e.is_error === true) errorText = typeof e.result === 'string' ? e.result : String(e.subtype ?? 'error');
+        const u = obj(e.usage);
+        if (u) usage = addUsage(usage, usageFrom('claude', u, e.total_cost_usd));
       }
     }
-    return { sessionId, finalText, errorText };
+    return { sessionId, finalText, errorText, usage };
   },
 
   classifyFailure: classifyCommon,

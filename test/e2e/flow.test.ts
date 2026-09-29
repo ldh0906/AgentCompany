@@ -29,6 +29,14 @@ test('정상 흐름: 작업 → 검증 증거 → 독립 검수 → 대표 승�
   assert.ok((await gitOut(['rev-parse', 'ac/T-1'], env.origin)).length === 40, '원본에 ac/T-1 브랜치');
   assert.equal(await gitOut(['rev-parse', 'main'], env.origin), mainBefore, 'manual 모드는 main을 건드리지 않음');
   assert.equal(env.store.verifyEventChain().ok, true);
+
+  // 토큰 사용량: 작업·검수 실행이 보고한 사용량이 업무·직원·오늘 합계에 쌓인다
+  const usage = env.orch.records.usageSummary();
+  assert.ok(usage.byTicket[ticket.id]!.runs >= 2, '작업과 검수 실행');
+  assert.ok(usage.byTicket[ticket.id]!.total > 0);
+  assert.equal(usage.all.total, usage.today.total);
+  assert.ok(usage.byEmployee[waiting.assigneeId!]!.total > 0);
+  assert.ok(usage.byEmployee[waiting.reviewerId!]!.total > 0);
 });
 
 test('게으른 직원: 변경 없이 "완료" 주장 → 시스템 검증에서 거부 → 2회차에 실제 작업', { timeout: 120_000 }, async (t) => {

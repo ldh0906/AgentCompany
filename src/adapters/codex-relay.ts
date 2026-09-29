@@ -54,6 +54,7 @@ async function main(): Promise<void> {
   const pending = new Map<number, (m: { result?: unknown; error?: unknown }) => void>();
   let nextId = 1;
   let threadId: string | null = null;
+  let usageTotal: { inputTokens?: number; cachedInputTokens?: number; outputTokens?: number } | null = null;
   // 파일 변경 승인 요청에는 itemId뿐이다. 바뀔 파일·diff는 먼저 온 item/started(fileChange)에 있다.
   const fileItems = new Map<string, { path: string; kind: string; diff: string }[]>();
   let finished!: (ok: boolean) => void;
@@ -95,6 +96,9 @@ async function main(): Promise<void> {
         })),
       );
     }
+    if (m.method === 'thread/tokenUsage/updated' && m.params?.threadId === threadId && m.params?.tokenUsage?.total) {
+      usageTotal = m.params.tokenUsage.total;
+    }
     if (m.method === 'item/completed' && m.params?.item?.type === 'agentMessage') {
       out({ type: 'item.completed', item: { type: 'agent_message', text: m.params.item.text } });
     } else if (m.method === 'item/completed' && m.params?.item?.type === 'commandExecution') {
@@ -103,7 +107,19 @@ async function main(): Promise<void> {
       const status = m.params.turn?.status;
       if (status !== 'completed')
         out({ type: 'turn.failed', error: { message: `turn ${status}: ${JSON.stringify(m.params.turn?.error ?? '')}` } });
-      else out({ type: 'turn.completed' });
+      else
+        out({
+          type: 'turn.completed',
+          ...(usageTotal
+            ? {
+                usage: {
+                  input_tokens: usageTotal.inputTokens ?? 0,
+                  cached_input_tokens: usageTotal.cachedInputTokens ?? 0,
+                  output_tokens: usageTotal.outputTokens ?? 0,
+                },
+              }
+            : {}),
+        });
       finished(status === 'completed');
     }
   });

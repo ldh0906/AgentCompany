@@ -76,4 +76,6 @@ test('Codex 중계: 허용 목록 명령은 자동 승인, 나머지는 파일 �
   assert.deepEqual(fileReq?.detail.files, [{ path: 'src/party.js', kind: 'update' }], '어떤 파일을 바꾸는지 대표가 볼 수 있음');
   assert.match(fileReq?.detail.diff ?? '', /export const x/);
   assert.ok(events.some((e) => e.type === 'item.completed' && e.item?.type === 'agent_message'));
+  const done = events.find((e) => e.type === 'turn.completed');
+  assert.deepEqual(done?.usage, { input_tokens: 1200, cached_input_tokens: 800, output_tokens: 34 }, '토큰 사용량을 exec 형식으로 전달');
 });

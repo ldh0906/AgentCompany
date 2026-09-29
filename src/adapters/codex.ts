@@ -7,7 +7,17 @@ import { tr } from '../core/i18n.ts';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { classifyCommon, obj, type CliAdapter, type Invocation, type InvocationRequest, type ParsedRun } from './types.ts';
+import {
+  addUsage,
+  classifyCommon,
+  obj,
+  usageFrom,
+  type CliAdapter,
+  type Invocation,
+  type InvocationRequest,
+  type ParsedRun,
+} from './types.ts';
+import type { TokenUsage } from '../core/types.ts';
 
 function relayScript(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -79,6 +89,7 @@ export const codexAdapter: CliAdapter = {
     let sessionId: string | null = null;
     let finalText: string | null = null;
     let errorText: string | null = null;
+    let usage: TokenUsage | null = null;
     for (const raw of events) {
       const e = obj(raw);
       if (!e) continue;
@@ -89,8 +100,10 @@ export const codexAdapter: CliAdapter = {
         const err = obj(e.error);
         errorText = String(err?.message ?? e.message ?? 'error');
       }
+      const u = e.type === 'turn.completed' ? obj(e.usage) : null;
+      if (u) usage = addUsage(usage, usageFrom('codex', u));
     }
-    return { sessionId, finalText, errorText };
+    return { sessionId, finalText, errorText, usage };
   },
 
   classifyFailure: classifyCommon,

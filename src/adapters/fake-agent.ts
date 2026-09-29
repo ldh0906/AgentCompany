@@ -231,7 +231,19 @@ async function main(): Promise<void> {
             : kind === 'responses'
               ? responses(h)
               : review(h, prompt);
-  emit({ type: 'result', result: text, is_error: false });
+  // 실제 Claude와 같은 형식의 사용량(프롬프트·응답 길이로 만든 그럴듯한 값)
+  const input = Math.round(prompt.length / 3.5) + 18_000;
+  emit({
+    type: 'result',
+    result: text,
+    is_error: false,
+    usage: {
+      input_tokens: input,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: Math.round(input * 0.6),
+      output_tokens: Math.round(text.length / 3) + 120,
+    },
+  });
 }
 
 main().catch((error) => {

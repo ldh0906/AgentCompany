@@ -656,6 +656,7 @@ export class Orchestrator {
     const parsed = adapter.parse(out.events);
     run.cliSessionId = parsed.sessionId;
     run.finalText = parsed.finalText;
+    run.usage = parsed.usage ?? null;
     run.exitCode = outcome?.exitCode ?? null;
 
     const fresh = run;
