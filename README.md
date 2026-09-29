@@ -59,7 +59,7 @@ agent-company shortcut   # Windows: desktop + Start menu icon that starts it wit
 3. **Create a ticket** from a template (feature, bug fix, docs, review…), pick the difficulty and click the folders it may change.
 4. Approve or reject in the **CEO inbox**. That's the only place work reaches your repo.
 
-**Ranks.** Duties decide *what kind* of work an employee takes; ranks (junior · senior · lead) decide *who* takes it. A ticket's difficulty sets the minimum rank, the duty-fit employee of the lowest adequate rank does the work, the highest-ranked other employee owns it, and the reviewer must be the same rank or higher. The state machine enforces this for your manual assignments too.
+**Ranks.** Duties decide *what kind* of work an employee takes; ranks (junior · senior · lead) decide *who* takes it. A ticket's difficulty sets the minimum rank, the duty-fit employee of the lowest adequate rank does the work, the highest-ranked other employee owns it, and the reviewer must be the same rank or higher. When nobody qualifies (say, the only lead does a hard ticket), the highest remaining rank on a different CLI reviews it and the CEO inbox flags it as a lower-rank review. The state machine enforces this for your manual assignments too.
 
 By default employees run in **app-only CLI profiles** (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) so your personal plugins, hooks and MCP servers do not leak into employee runs. Log in once per profile — `doctor` prints the exact command. Agent Company never reads credential files.
 

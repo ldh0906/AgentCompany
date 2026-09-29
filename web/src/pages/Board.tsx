@@ -170,6 +170,7 @@ export function Board({ onNewTicket }: { onNewTicket?: () => void }) {
                           <span className={`chip ${x.difficulty === 'hard' ? 'warn' : ''}`}>{difficulty(x.difficulty)}</span>
                         )}
                         {x.round > 1 && <span className="chip accent">{`R${x.round}`}</span>}
+                        {x.reviewBelowRank && <span className="chip warn">{ko ? '하위 검수' : 'Lower review'}</span>}
                         <span title={ko ? '요구사항' : 'Requirements'}>
                           <Icon name="check" size={12} /> {x.requirements.length}
                         </span>

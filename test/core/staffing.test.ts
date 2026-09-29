@@ -48,11 +48,29 @@ test('어려운 업무를 맡을 팀장이 없으면 배정하지 않고 사유�
   assert.equal(!r.ok && r.reason, 'no_assignee_rank');
 });
 
-test('담당자보다 같거나 높은 직급의 검수자가 없으면 배정하지 않는다', () => {
+test('담당자보다 같거나 높은 직급의 검수자가 없어도 멈추지 않고 하위 직급 검수로 표시', () => {
   // 팀장 한 명만 어려운 업무를 할 수 있고, 나머지는 모두 낮은 직급
   const r = pickStaff({ type: 'impl', difficulty: 'hard' }, [emp('lead', ['implementer']), emp('junior', ['qa'])], noLoad);
-  assert.equal(r.ok, false);
-  assert.equal(!r.ok && r.reason, 'no_reviewer_rank');
+  assert.ok(r.ok, '팀장이 한 명뿐이어도 멈추지 않는다');
+  assert.equal(r.reviewBelowRank, true, '하위 직급 검수로 표시 → 대표 최종 확인');
+});
+
+test('팀장 한 명: 남은 직원 중 가장 높은 직급, 다른 CLI가 검수', () => {
+  const lead = emp('lead', ['implementer', 'planner'], 'claude', 'lead');
+  const seniorOther = emp('senior', ['qa'], 'codex', 'seniorOther');
+  const seniorSame = emp('senior', ['qa'], 'claude', 'seniorSame');
+  const junior = emp('junior', ['qa'], 'agy', 'junior');
+  const r = pickStaff({ type: 'impl', difficulty: 'hard' }, [lead, junior, seniorSame, seniorOther], noLoad);
+  assert.ok(r.ok);
+  assert.equal(r.assigneeId, 'lead');
+  assert.equal(r.reviewerId, 'seniorOther', '가장 높은 직급 중 다른 CLI');
+  assert.equal(r.reviewBelowRank, true);
+});
+
+test('같은 직급 이상 검수자가 있으면 하위 직급 검수는 쓰지 않는다', () => {
+  const r = pickStaff({ type: 'impl', difficulty: 'normal' }, [emp('senior', ['implementer']), emp('lead', ['qa'])], noLoad);
+  assert.ok(r.ok);
+  assert.equal(r.reviewBelowRank, false);
 });
 
 test('검수자 선택: 같은/높은 직급 중 다른 CLI > QA 담당 > 책임자 순으로 우선', () => {

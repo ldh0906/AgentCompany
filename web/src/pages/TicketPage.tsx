@@ -53,6 +53,7 @@ export function TicketPage({ id }: { id: string }) {
           </div>
           <h1>
             {tk.title} <StatusChip status={tk.status} /> <HoldChip ticket={tk} />
+            {tk.reviewBelowRank && <span className="chip warn">{ko ? '하위 직급 검수' : 'Lower-rank review'}</span>}
           </h1>
           <div className="sub">
             {tk.ownerId && (
@@ -386,7 +387,9 @@ function AssignModal({ ticket, onClose }: { ticket: Ticket; onClose: () => void 
         <label>
           {t('reviewer')}{' '}
           <span className="hint">
-            {lang === 'ko' ? '담당자와 같거나 높은 직급만 검수할 수 있습니다.' : 'Must be the same rank as the assignee or higher.'}
+            {lang === 'ko'
+              ? '담당자와 같거나 높은 직급만 검수할 수 있습니다. 그런 직원이 없을 때만 남은 최고 직급이 검수합니다.'
+              : 'Same rank as the assignee or higher; only when none exists may the highest remaining rank review.'}
           </span>
           <select value={r} onChange={(e) => setR(e.target.value)}>
             {active.map((e) => (

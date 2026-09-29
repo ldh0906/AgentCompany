@@ -166,6 +166,7 @@ export interface Ticket {
   assigneeId: string | null;
   reviewerId: string | null;
   ownerId?: string | null; // 책임자: 일을 맡긴 가장 높은 직급 직원
+  reviewBelowRank?: boolean; // 같은 직급 이상 검수자가 없어 하위 직급이 검수(대표 최종 확인 강조)
   difficulty?: Difficulty; // 없으면 보통
   priority: 1 | 2 | 3;
   status: TicketStatus;

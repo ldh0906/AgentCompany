@@ -89,6 +89,24 @@ test('직급: 검수자가 담당자보다 낮은 직급이면 배정 거부 (�
   assert.match(!r.ok ? r.error : '', /검수자|reviewer/i);
 });
 
+test('직급: 같은 직급 이상이 아무도 없을 때만 하위 직급 검수 허용(표시와 함께)', () => {
+  const t = run(ticket({ difficulty: 'hard' }), TO_REVIEW.slice(0, 2));
+  const ranks = { 'e-impl': 'lead', 'e-qa': 'senior' } as const;
+  const cmd = { type: 'assign', assigneeId: 'e-impl', reviewerId: 'e-qa', activeEmployeeIds: ACTIVE, ranks } as const;
+  assert.equal(applyTicketCommand(t, cmd, ORCH, NOW).ok, false, '표시 없이는 거부');
+  const r = applyTicketCommand(t, { ...cmd, reviewBelowRank: true }, ORCH, NOW);
+  assert.ok(r.ok);
+  assert.equal(r.ok && r.ticket.reviewBelowRank, true);
+  // 같은 직급 이상의 다른 직원이 있으면 표시가 있어도 거부
+  const withLead = {
+    ...cmd,
+    reviewBelowRank: true,
+    activeEmployeeIds: [...ACTIVE, 'e-lead2'],
+    ranks: { ...ranks, 'e-lead2': 'lead' as const },
+  };
+  assert.equal(applyTicketCommand(t, withLead, ORCH, NOW).ok, false);
+});
+
 test('직급: 어려운 업무를 팀장이 아닌 직원에게 배정하면 거부', () => {
   const t = run(ticket({ difficulty: 'hard' }), TO_REVIEW.slice(0, 2));
   const ranks = { 'e-impl': 'senior', 'e-qa': 'lead' } as const;

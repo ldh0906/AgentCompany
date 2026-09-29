@@ -33,6 +33,8 @@ export type TicketCommand =
       assigneeId: string;
       reviewerId: string;
       ownerId?: string;
+      /** 같은 직급 이상의 검수자가 아무도 없을 때만: 남은 최고 직급이 검수한다(대표 최종 확인 강조). */
+      reviewBelowRank?: boolean;
       activeEmployeeIds: string[];
       /** 직원 직급. 주어지면 난이도·검수 직급 규칙을 강제한다. */
       ranks?: Record<string, Rank>;
@@ -176,19 +178,37 @@ export function applyTicketCommand(ticket: Ticket, cmd: TicketCommand, actor: Ac
               `This difficulty needs a ${need} or higher.`,
             ),
           );
-        if (rk(cmd.reviewerId) < rk(cmd.assigneeId))
-          return reject(
-            tr('검수자는 담당자와 같거나 높은 직급이어야 합니다.', 'The reviewer must be the same rank as the assignee or higher.'),
-          );
+        if (rk(cmd.reviewerId) < rk(cmd.assigneeId)) {
+          // 하위 직급 검수는 같은 직급 이상이 아무도 없을 때만, 그리고 남은 직원 중 최고 직급만.
+          const others = cmd.activeEmployeeIds.filter((id) => id !== cmd.assigneeId);
+          const noPeer = others.every((id) => rk(id) < rk(cmd.assigneeId));
+          const topOfRest = others.every((id) => rk(id) <= rk(cmd.reviewerId));
+          if (!cmd.reviewBelowRank || !noPeer || !topOfRest)
+            return reject(
+              tr(
+                '검수자는 담당자와 같거나 높은 직급이어야 합니다. (같은 직급 이상이 아무도 없을 때만 남은 최고 직급이 검수할 수 있습니다.)',
+                'The reviewer must be the same rank as the assignee or higher (a lower rank may review only when nobody qualifies, and then the highest remaining rank).',
+              ),
+            );
+        }
         if (cmd.ownerId && rk(cmd.ownerId) < rk(cmd.assigneeId))
           return reject(
             tr('책임자는 담당자와 같거나 높은 직급이어야 합니다.', 'The owner must be the same rank as the assignee or higher.'),
           );
       }
+      const below = Boolean(
+        cmd.ranks && RANK_ORDER[cmd.ranks[cmd.reviewerId] ?? 'senior'] < RANK_ORDER[cmd.ranks[cmd.assigneeId] ?? 'senior'],
+      );
       return next(
-        { status: 'assigned', assigneeId: cmd.assigneeId, reviewerId: cmd.reviewerId, ownerId: cmd.ownerId ?? null },
+        {
+          status: 'assigned',
+          assigneeId: cmd.assigneeId,
+          reviewerId: cmd.reviewerId,
+          ownerId: cmd.ownerId ?? null,
+          reviewBelowRank: below,
+        },
         'ticket.assigned',
-        { assigneeId: cmd.assigneeId, reviewerId: cmd.reviewerId, ownerId: cmd.ownerId ?? null },
+        { assigneeId: cmd.assigneeId, reviewerId: cmd.reviewerId, ownerId: cmd.ownerId ?? null, reviewBelowRank: below },
       );
     }
 

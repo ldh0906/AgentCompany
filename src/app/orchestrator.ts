@@ -419,15 +419,10 @@ export class Orchestrator {
               '담당자와 검수자를 나누려면 활성 직원이 2명 이상 필요합니다.',
               'At least two active employees are needed for separate assignee and reviewer roles.',
             )
-          : pick.reason === 'no_assignee_rank'
-            ? tr(
-                `이 업무(난이도 ${difficultyOf(t)})는 ${need === 'lead' ? '팀장' : '선임'} 이상만 맡을 수 있는데, 그런 직원이 없습니다. 난이도를 낮추거나 직원의 직급을 올리세요.`,
-                `This ticket (difficulty ${difficultyOf(t)}) needs a ${need} or higher, and there is none. Lower the difficulty or promote an employee.`,
-              )
-            : tr(
-                '담당자와 같거나 높은 직급의 검수자가 없습니다. 직원의 직급을 조정하세요.',
-                'No reviewer of the same or higher rank than the assignee. Adjust employee ranks.',
-              );
+          : tr(
+              `이 업무(난이도 ${difficultyOf(t)})는 ${need === 'lead' ? '팀장' : '선임'} 이상만 맡을 수 있는데, 그런 직원이 없습니다. 난이도를 낮추거나 직원의 직급을 올리세요.`,
+              `This ticket (difficulty ${difficultyOf(t)}) needs a ${need} or higher, and there is none. Lower the difficulty or promote an employee.`,
+            );
       this.apply(t.id, { type: 'hold', reason: 'needs_decision', note });
       return;
     }
@@ -436,6 +431,7 @@ export class Orchestrator {
       assigneeId: pick.assigneeId,
       reviewerId: pick.reviewerId,
       ownerId: pick.ownerId,
+      reviewBelowRank: pick.reviewBelowRank,
       activeEmployeeIds: active.map((e) => e.id),
       ranks: Object.fromEntries(active.map((e) => [e.id, rankOf(e)])),
     });
@@ -1731,7 +1727,16 @@ export class Orchestrator {
     const ownerId = top && ranks[assigneeId] && RANK_ORDER[rankOf(top)] >= RANK_ORDER[ranks[assigneeId]!] ? top.id : assigneeId;
     return this.apply(
       ticketId,
-      { type: 'assign', assigneeId, reviewerId, ownerId, activeEmployeeIds: active.map((e) => e.id), ranks },
+      // 하위 직급 검수 표시는 상태기계가 "같은 직급 이상이 아무도 없음"을 다시 확인한다.
+      {
+        type: 'assign',
+        assigneeId,
+        reviewerId,
+        ownerId,
+        reviewBelowRank: RANK_ORDER[ranks[reviewerId] ?? 'senior'] < RANK_ORDER[ranks[assigneeId] ?? 'senior'],
+        activeEmployeeIds: active.map((e) => e.id),
+        ranks,
+      },
       CEO,
     );
   }

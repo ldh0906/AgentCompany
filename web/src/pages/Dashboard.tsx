@@ -120,6 +120,7 @@ export function ApprovalItem({ a }: { a: Approval }) {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
   const d = (a.detail ?? {}) as Record<string, unknown>;
+  const tk = a.ticketId ? state?.tickets.find((x) => x.id === a.ticketId) : undefined;
   const decide = (decision: 'approved' | 'rejected', mode?: string) =>
     run(
       () => api(`approvals/${a.id}/decide`, { body: { decision, ...(mode ? { mode } : {}), reason } }),
@@ -173,6 +174,13 @@ export function ApprovalItem({ a }: { a: Approval }) {
         </pre>
       )}
       {a.kind === 'integrate' && typeof d.summary === 'string' && d.summary && <div className="note">{d.summary}</div>}
+      {a.kind === 'integrate' && tk?.reviewBelowRank && (
+        <div className="banner warn" style={{ margin: '8px 0 0' }}>
+          {lang === 'ko'
+            ? `하위 직급 검수: ${empName(state?.employees ?? [], tk.assigneeId)}의 작업을 더 낮은 직급인 ${empName(state?.employees ?? [], tk.reviewerId)}이(가) 검수했습니다(같은 직급 이상 직원 없음). 변경 내용을 더 꼼꼼히 확인하고 승인하세요.`
+            : `Lower-rank review: ${empName(state?.employees ?? [], tk.reviewerId)} reviewed work by a higher-ranked ${empName(state?.employees ?? [], tk.assigneeId)} (no peer available). Check the changes more closely before approving.`}
+        </div>
+      )}
       {d.mode === 'review' && Array.isArray(d.escalated) && (d.escalated as { id: string; text: string }[]).length > 0 && (
         <div className="note">
           {lang === 'ko' ? '미해결 이견 (대표 판단 필요):' : 'Unresolved disputes:'}

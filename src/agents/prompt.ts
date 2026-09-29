@@ -118,7 +118,7 @@ export function buildReviewPrompt(i: ReviewPromptInput): string {
 You are "${i.employee.name}", an independent reviewer at an AI development company run by a human CEO.
 Review ticket ${i.ticket.id} (round ${i.ticket.round}). Your current directory is a READ-ONLY copy of the submitted commit.
 Do not modify any file. Do not trust the implementer's self-assessment: check the diff and the system-generated evidence yourself.
-
+${i.ticket.reviewBelowRank ? '\nThe implementer outranks you (no reviewer of equal rank exists). Do not defer to rank: judge only the diff and the evidence, and request changes whenever a requirement is not proven. The CEO will read your verdict closely.\n' : ''}
 ## Ticket
 Title: ${i.ticket.title}
 Purpose: ${i.ticket.purpose}
