@@ -149,6 +149,24 @@ export class Company {
     });
   }
 
+  updateEmployeeProfile(id: string, patch: { name?: string; roles?: RoleTemplate[] }, actor: Actor = { kind: 'ceo' }): Employee {
+    if (actor.kind !== 'ceo') throw new DomainError(tr('직원 정보는 대표만 바꿀 수 있습니다.', 'Only the CEO can edit employees.'));
+    if (patch.name !== undefined && !patch.name.trim()) throw new DomainError(tr('직원 이름이 비어 있습니다.', 'Employee name is empty.'));
+    if (patch.roles !== undefined && patch.roles.length === 0)
+      throw new DomainError(tr('담당 업무를 하나 이상 골라야 합니다.', 'Select at least one duty.'));
+    return this.store.transact(() => {
+      const e = this.requireEmployee(id);
+      const updated = {
+        ...e,
+        ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
+        ...(patch.roles ? { roles: patch.roles } : {}),
+      };
+      this.saveEmployee(updated);
+      this.store.appendEvent('ceo', 'employee.profile_changed', id, { name: updated.name, roles: updated.roles }, this.clock());
+      return updated;
+    });
+  }
+
   setEmployeeRank(id: string, rank: Rank, actor: Actor = { kind: 'ceo' }): Employee {
     if (actor.kind !== 'ceo') throw new DomainError(tr('직급은 대표만 바꿀 수 있습니다.', 'Only the CEO can change ranks.'));
     if (!RANKS.includes(rank)) throw new DomainError(tr('알 수 없는 직급입니다.', 'Unknown rank.'));
@@ -209,11 +227,19 @@ export class Company {
   }
 
   /** 접근 등급 변경. full-auto로 올리는 것은 승인 절차(approvals)에서만 호출된다. */
-  setAccessLevel(id: string, level: AccessLevel, actor: Actor): Employee {
+  setAccessLevel(id: string, level: AccessLevel, actor: Actor, allowedCommands?: string[][]): Employee {
     if (actor.kind !== 'ceo') throw new DomainError(tr('접근 등급은 대표만 바꿀 수 있습니다.', 'Only the CEO can change access levels.'));
+    // 허용 목록은 argv 접두사다. 셸 연결·치환 문자가 든 항목은 받지 않는다(중계기도 이런 명령은 자동 허용하지 않는다).
+    if (allowedCommands?.some((argv) => !argv.length || argv.some((a) => !a.trim() || /[;&|`$<>()\n]/.test(a))))
+      throw new DomainError(
+        tr(
+          '허용 목록에는 셸 연결 문자(; & | ` $ < > 괄호) 없는 명령만 넣을 수 있습니다.',
+          'Allowlist entries must be plain commands without shell operators.',
+        ),
+      );
     return this.store.transact(() => {
       const e = this.requireEmployee(id);
-      const updated = { ...e, accessLevel: level };
+      const updated = { ...e, accessLevel: level, ...(allowedCommands ? { allowedCommands } : {}) };
       this.saveEmployee(updated);
       this.store.appendEvent('ceo', 'employee.access_changed', id, { from: e.accessLevel, to: level }, this.clock());
       return updated;
@@ -234,6 +260,27 @@ export class Company {
 
   projects(): Project[] {
     return this.store.list<Project>('projects', 'ORDER BY created_at');
+  }
+
+  /** 프로젝트 삭제: 진행 중인 업무가 있으면 거부. 기록용으로 행은 남기고 removedAt으로 표시한다. */
+  removeProject(id: string, actor: Actor = { kind: 'ceo' }): Project {
+    if (actor.kind !== 'ceo') throw new DomainError(tr('프로젝트 삭제는 대표만 할 수 있습니다.', 'Only the CEO can remove projects.'));
+    return this.store.transact(() => {
+      const p = this.requireProject(id);
+      if (p.removedAt) throw new DomainError(tr('이미 삭제된 프로젝트입니다.', 'This project was already removed.'));
+      const open = this.tickets().filter((t) => t.projectId === id && !TERMINAL_STATUSES.includes(t.status));
+      if (open.length)
+        throw new DomainError(
+          tr(
+            `진행 중인 업무가 있습니다: ${open.map((t) => t.id).join(', ')}. 먼저 끝내거나 취소하세요.`,
+            `Open tickets remain: ${open.map((t) => t.id).join(', ')}. Finish or cancel them first.`,
+          ),
+        );
+      const updated = { ...p, removedAt: this.clock() };
+      this.store.put('projects', id, updated, { created_at: p.createdAt });
+      this.store.appendEvent(actorId(actor), 'project.removed', id, { name: p.name }, this.clock());
+      return updated;
+    });
   }
 
   registerProject(input: NewProject): Project {
@@ -295,7 +342,8 @@ export class Company {
         ),
       );
     }
-    this.requireProject(input.projectId);
+    if (this.requireProject(input.projectId).removedAt)
+      throw new DomainError(tr('삭제된 프로젝트에는 업무를 만들 수 없습니다.', 'Cannot create tickets in a removed project.'));
     if (!input.title.trim()) throw new DomainError(tr('티켓 제목이 비어 있습니다.', 'Ticket title is empty.'));
     const now = this.clock();
     return this.store.transact(() => {

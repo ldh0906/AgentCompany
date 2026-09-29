@@ -82,6 +82,41 @@ function Shell() {
   const pending = state?.approvals.length ?? 0;
   const held = state?.tickets.filter((x) => x.hold).length ?? 0;
 
+  // 승인 알림: 탭 제목에 건수, 켜 두면 새 승인 요청마다 데스크톱 알림.
+  const [notify, setNotify] = useState(() => {
+    try {
+      return localStorage.getItem('ac-notify') === '1' && 'Notification' in window && Notification.permission === 'granted';
+    } catch {
+      return false;
+    }
+  });
+  const seen = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    document.title = pending + held > 0 ? `(${pending + held}) Agent Company` : 'Agent Company';
+    if (!state) return;
+    const fresh = state.approvals.filter((a) => !seen.current?.has(a.id));
+    const first = seen.current === null;
+    seen.current = new Set(state.approvals.map((a) => a.id));
+    if (first || !notify || !fresh.length) return;
+    for (const a of fresh.slice(0, 3))
+      new Notification(lang === 'ko' ? '대표 승인 필요' : 'Approval needed', { body: a.summary, tag: a.id });
+  }, [state, pending, held, notify, lang]);
+  const toggleNotify = async () => {
+    if (notify) {
+      setNotify(false);
+      try {
+        localStorage.setItem('ac-notify', '0');
+      } catch {}
+      return;
+    }
+    if (!('Notification' in window)) return;
+    const ok = (await Notification.requestPermission()) === 'granted';
+    setNotify(ok);
+    try {
+      localStorage.setItem('ac-notify', ok ? '1' : '0');
+    } catch {}
+  };
+
   let page: React.ReactNode;
   if (path.startsWith('/tickets/')) page = <TicketPage id={decodeURIComponent(path.slice('/tickets/'.length))} />;
   else if (path.startsWith('/board')) page = <Board onNewTicket={() => setNewTicket(true)} />;
@@ -134,6 +169,14 @@ function Shell() {
             <span className={`live ${live ? '' : 'off'}`} /> {live ? 'Live' : 'Offline'}
           </span>
           <span style={{ flex: 1 }} />
+          <button
+            className={`btn small ${notify ? 'ok' : ''}`}
+            onClick={() => void toggleNotify()}
+            title={lang === 'ko' ? `승인 알림 ${notify ? '끄기' : '켜기'}` : `${notify ? 'Disable' : 'Enable'} approval alerts`}
+            aria-pressed={notify}
+          >
+            <Icon name="bell" size={13} />
+          </button>
           <select value={lang} onChange={(e) => setLang(e.target.value as Lang)}>
             <option value="ko">한국어</option>
             <option value="en">English</option>

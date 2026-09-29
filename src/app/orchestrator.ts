@@ -309,7 +309,8 @@ export class Orchestrator {
     this.ticking = true;
     try {
       await this.pollToolApprovals();
-      for (const t of this.company.tickets()) {
+      // 우선순위(1 높음 → 3 낮음) 순, 같으면 먼저 만든 순: 쓰기 범위가 겹칠 때 높은 업무가 먼저 잠금을 잡는다.
+      for (const t of [...this.company.tickets()].sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2))) {
         if (t.hold?.reason === 'waiting_dependency' && t.dependsOn.every((d) => this.company.requireTicket(d).status === 'done')) {
           this.apply(t.id, { type: 'release_hold' }); // 선행 업무가 끝나면 오케스트레이터가 스스로 해제
           continue;
@@ -489,6 +490,7 @@ export class Orchestrator {
     const feedback = this.lastFeedback(next);
     const prompt = buildWorkPrompt({
       employee,
+      owner: next.ownerId ? this.company.employees().find((e) => e.id === next.ownerId) : null,
       project,
       ticket: next,
       nonce,

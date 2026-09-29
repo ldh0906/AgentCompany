@@ -14,6 +14,8 @@ export function RequestBox() {
   const [projectId, setProjectId] = useState('');
   const [excluded, setExcluded] = useState<Record<string, number[]>>({});
   // 대표가 바꾼 난이도(요청 → 초안 번호 → 난이도). 없으면 비서실장 제안값.
+  const [edits, setEdits] = useState<Record<string, { title: string; reqs: string[] }>>({});
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const [diffs, setDiffs] = useState<Record<string, Record<number, 'easy' | 'normal' | 'hard'>>>({});
   if (!state || state.projects.length === 0) return null;
   const ko = lang === 'ko';
@@ -98,6 +100,9 @@ export function RequestBox() {
                   <tbody>
                     {r.drafts.map((d, i) => {
                       const off = excluded[r.id]?.includes(i);
+                      const key = `${r.id}:${i}`;
+                      const ed = edits[key] ?? { title: d.title, reqs: d.requirements.map((q) => q.text) };
+                      const setEd = (next: typeof ed) => setEdits({ ...edits, [key]: next });
                       return (
                         <tr key={i} style={{ opacity: off ? 0.4 : 1 }}>
                           <td>
@@ -114,12 +119,38 @@ export function RequestBox() {
                             />
                           </td>
                           <td>
-                            <b>
-                              {i + 1}. {d.title}
-                            </b>{' '}
-                            <span className="chip">{d.type}</span>
-                            {d.dependsOn.length > 0 && <span className="sub"> ← {d.dependsOn.map((x) => x + 1).join(', ')}</span>}
-                            <div className="sub">{d.requirements.map((q) => `${q.text} [${evidence(q.evidenceType)}]`).join(' · ')}</div>
+                            {editingKey === key ? (
+                              <div className="form" style={{ gap: 6 }}>
+                                <input value={ed.title} onChange={(e) => setEd({ ...ed, title: e.target.value })} />
+                                {d.requirements.map((q, j) => (
+                                  <div className="req-row" key={j}>
+                                    <span className="req-id">R{j + 1}</span>
+                                    <input
+                                      value={ed.reqs[j] ?? ''}
+                                      onChange={(e) => setEd({ ...ed, reqs: ed.reqs.map((x, k) => (k === j ? e.target.value : x)) })}
+                                    />
+                                    <span className="sub">{evidence(q.evidenceType)}</span>
+                                  </div>
+                                ))}
+                                <button className="btn small" style={{ justifySelf: 'start' }} onClick={() => setEditingKey(null)}>
+                                  {ko ? '완료' : 'Done'}
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <b>
+                                  {i + 1}. {ed.title}
+                                </b>{' '}
+                                <span className="chip">{d.type}</span>
+                                {d.dependsOn.length > 0 && <span className="sub"> ← {d.dependsOn.map((x) => x + 1).join(', ')}</span>}{' '}
+                                <button className="btn small" onClick={() => setEditingKey(key)}>
+                                  {ko ? '수정' : 'Edit'}
+                                </button>
+                                <div className="sub">
+                                  {d.requirements.map((q, j) => `${ed.reqs[j] ?? q.text} [${evidence(q.evidenceType)}]`).join(' · ')}
+                                </div>
+                              </>
+                            )}
                             <div className="row" style={{ marginTop: 6 }}>
                               <span className="sub">{ko ? '난이도' : 'Difficulty'}</span>
                               <Segmented
@@ -164,6 +195,11 @@ export function RequestBox() {
                       const remap = new Map(keep.map(({ i }, n) => [i, n]));
                       const drafts = keep.map(({ d, i }) => ({
                         ...d,
+                        title: edits[`${r.id}:${i}`]?.title.trim() || d.title,
+                        requirements: d.requirements.map((q, j) => ({
+                          ...q,
+                          text: edits[`${r.id}:${i}`]?.reqs[j]?.trim() || q.text,
+                        })),
                         difficulty: diffs[r.id]?.[i] ?? d.difficulty ?? 'normal',
                         dependsOn: d.dependsOn.filter((x) => remap.has(x)).map((x) => remap.get(x)!),
                       }));

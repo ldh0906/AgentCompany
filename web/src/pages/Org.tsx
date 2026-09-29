@@ -17,6 +17,7 @@ export function Org() {
   const [editing, setEditing] = useState<Employee | null>(null);
   const [modeling, setModeling] = useState<Employee | null>(null);
   const [removing, setRemoving] = useState<Employee | null>(null);
+  const [profiling, setProfiling] = useState<Employee | null>(null);
   if (!state) return <Skeleton />;
   const ko = lang === 'ko';
   const activeCount = state.employees.filter((e) => e.active).length;
@@ -96,6 +97,9 @@ export function Org() {
                   ` · ${ko ? '토큰' : 'tokens'} ${fmtTokens(state.usage!.byEmployee[e.id]!.total, lang)}`}
               </div>
               <div className="row" style={{ marginTop: 12 }}>
+                <button className="btn small" onClick={() => setProfiling(e)}>
+                  {ko ? '정보 수정' : 'Edit'}
+                </button>
                 <button className="btn small" onClick={() => setEditing(e)}>
                   {t('access')}
                 </button>
@@ -177,6 +181,7 @@ export function Org() {
       {hiring && <HireModal onClose={() => setHiring(false)} />}
       {editing && <AccessModal employee={editing} onClose={() => setEditing(null)} />}
       {modeling && <ModelModal employee={modeling} onClose={() => setModeling(null)} />}
+      {profiling && <ProfileModal employee={profiling} onClose={() => setProfiling(null)} />}
       {removing && (
         <Modal
           title={ko ? `${removing.name}을(를) 삭제할까요?` : `Remove ${removing.name}?`}
@@ -429,6 +434,55 @@ function HireModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function ProfileModal({ employee, onClose }: { employee: Employee; onClose: () => void }) {
+  const { reload } = useCompany();
+  const { t, lang, role } = useT();
+  const { busy, run } = useAction();
+  const ko = lang === 'ko';
+  const [name, setName] = useState(employee.name);
+  const [roles, setRoles] = useState<string[]>(employee.roles);
+  return (
+    <Modal
+      title={`${employee.name} · ${ko ? '정보 수정' : 'Edit profile'}`}
+      onClose={onClose}
+      actions={
+        <button
+          className="btn primary"
+          disabled={busy || !name.trim() || !roles.length}
+          onClick={() =>
+            run(
+              () => api(`employees/${employee.id}/profile`, { body: { name: name.trim(), roles } }),
+              ko ? '직원 정보를 바꿨습니다.' : 'Profile updated.',
+            ).then((ok) => ok && (reload(), onClose()))
+          }
+        >
+          {t('save')}
+        </button>
+      }
+    >
+      <div className="form">
+        <label>
+          {t('name')}
+          <input value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label>
+          {t('roles')}
+          <ChipToggles
+            options={ROLES.map((r) => ({ value: r, label: role(r) }))}
+            selected={roles}
+            onToggle={(r) => setRoles(roles.includes(r) ? roles.filter((x) => x !== r) : [...roles, r])}
+          />
+        </label>
+        <div className="hint">
+          {ko
+            ? '이미 맡은 업무는 그대로 두고, 다음 배정부터 적용됩니다.'
+            : 'Open tickets keep their assignee; applies to the next assignment.'}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function ModelModal({ employee, onClose }: { employee: Employee; onClose: () => void }) {
   const { reload } = useCompany();
   const { lang } = useT();
@@ -479,6 +533,7 @@ function AccessModal({ employee, onClose }: { employee: Employee; onClose: () =>
   const { busy, run } = useAction();
   const [level, setLevel] = useState<string>(employee.accessLevel);
   const [confirmText, setConfirmText] = useState('');
+  const [allowText, setAllowText] = useState(employee.allowedCommands.map((a) => a.join(' ')).join('\n'));
   const levels = state?.adapters.find((a) => a.kind === employee.cli)?.capabilities.accessLevels ?? [];
   const ko = lang === 'ko';
   return (
@@ -490,9 +545,24 @@ function AccessModal({ employee, onClose }: { employee: Employee; onClose: () =>
           className="btn primary"
           disabled={busy || (level === 'full-auto' && confirmText !== 'full-auto')}
           onClick={() =>
-            run(() => api(`employees/${employee.id}/access`, { body: { accessLevel: level, confirm: confirmText } }), 'OK').then(
-              (ok) => ok && (reload(), onClose()),
-            )
+            run(
+              () =>
+                api(`employees/${employee.id}/access`, {
+                  body: {
+                    accessLevel: level,
+                    confirm: confirmText,
+                    ...(level === 'write-allowlist'
+                      ? {
+                          allowedCommands: allowText
+                            .split('\n')
+                            .map((l) => l.trim())
+                            .filter(Boolean),
+                        }
+                      : {}),
+                  },
+                }),
+              'OK',
+            ).then((ok) => ok && (reload(), onClose()))
           }
         >
           {t('save')}
@@ -510,6 +580,22 @@ function AccessModal({ employee, onClose }: { employee: Employee; onClose: () =>
             ))}
           </select>
         </label>
+        {level === 'write-allowlist' && (
+          <label>
+            {ko ? '자동 허용할 명령 (한 줄에 하나)' : 'Commands to allow automatically (one per line)'}{' '}
+            <span className="hint">
+              {ko
+                ? '이 명령으로 시작하는 실행은 묻지 않고 허용합니다. ; & | $ 같은 셸 연결 문자는 넣을 수 없습니다. 예: npm test'
+                : 'Runs starting with these are allowed without asking. No shell operators (; & | $). e.g. npm test'}
+            </span>
+            <textarea
+              className="mono"
+              value={allowText}
+              onChange={(e) => setAllowText(e.target.value)}
+              placeholder={'npm test\ngit status\ndotnet build'}
+            />
+          </label>
+        )}
         {level === 'full-auto' && (
           <div className="banner bad">
             {ko

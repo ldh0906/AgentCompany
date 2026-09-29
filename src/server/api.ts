@@ -159,6 +159,19 @@ export class Api {
           str(b, 'model', { optional: true, max: 100 }) || null,
           str(b, 'effort', { optional: true, max: 20 }) || null,
         );
+      case 'POST employees/:id/profile':
+        return this.company.updateEmployeeProfile(id!, {
+          ...(b.name !== undefined ? { name: str(b, 'name', { max: 60 }) } : {}),
+          ...(b.roles !== undefined
+            ? {
+                roles: (() => {
+                  const roles = strList(b, 'roles') as RoleTemplate[];
+                  if (!roles.every((r) => ROLES.includes(r))) throw new ApiError(400, tr('알 수 없는 담당 업무입니다.', 'Unknown duty.'));
+                  return roles;
+                })(),
+              }
+            : {}),
+        });
       case 'POST employees/:id/rank':
         return this.company.setEmployeeRank(id!, oneOf(b, 'rank', RANKS));
       case 'POST employees/:id/remove':
@@ -172,7 +185,11 @@ export class Api {
           throw new ApiError(400, tr('이 CLI가 지원하지 않는 등급입니다.', 'This CLI does not support this access level.'));
         if (level === 'full-auto' && b.confirm !== 'full-auto')
           throw new ApiError(400, tr('전체 자동 등급은 확인 문구가 필요합니다.', 'Full-auto access requires confirmation text.'));
-        return this.company.setAccessLevel(id!, level, { kind: 'ceo' });
+        // 허용 목록: 한 줄에 명령 하나("npm test") → argv 접두사
+        const allowed = Array.isArray(b.allowedCommands)
+          ? (b.allowedCommands as unknown[]).map((x) => String(x).trim().split(/\s+/).filter(Boolean)).filter((a) => a.length)
+          : undefined;
+        return this.company.setAccessLevel(id!, level, { kind: 'ceo' }, allowed);
       }
 
       case 'POST projects':
@@ -185,6 +202,8 @@ export class Api {
           verifyCommands: verifyCommands(b) ?? [],
           docRules: str(b, 'docRules', { optional: true }),
         });
+      case 'POST projects/:id/remove':
+        return this.company.removeProject(id!);
       case 'PATCH projects/:id': {
         const patch: Record<string, unknown> = {};
         if (b.integrationMode !== undefined)
@@ -273,12 +292,15 @@ export class Api {
     const r = this.orch.records;
     return {
       employees: this.company.employees(),
-      projects: this.company.projects(),
+      projects: this.company.projects().filter((p) => !p.removedAt),
       tickets: this.company.tickets(),
       approvals: r.approvals('pending'),
       recentApprovals: r.approvals().slice(0, 50),
       runs: r.recentRuns(50).map(({ report, finalText, refsBefore, ...rest }) => ({ ...rest, hasReport: Boolean(report) })),
-      decisions: this.company.projects().flatMap((p) => r.decisions(p.id)),
+      decisions: this.company
+        .projects()
+        .filter((p) => !p.removedAt)
+        .flatMap((p) => r.decisions(p.id)),
       adapters: Object.values(ADAPTERS).map((a) => ({ kind: a.kind, displayName: a.displayName, capabilities: a.capabilities })),
       events: this.company.store.events(undefined, 60),
       requests: r.requests(),

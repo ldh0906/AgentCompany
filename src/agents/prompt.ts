@@ -35,6 +35,8 @@ function requirementsText(t: Ticket): string {
 
 export interface WorkPromptInput {
   employee: Employee;
+  /** 책임자: 이 일을 맡긴 직원(담당자 본인이면 생략). */
+  owner?: Employee | null;
   project: Project;
   ticket: Ticket;
   nonce: string;
@@ -57,7 +59,12 @@ export function buildWorkPrompt(i: WorkPromptInput): string {
   return `${TASK_HEADER_PREFIX}${JSON.stringify(header)} -->
 You are "${i.employee.name}", the ${roles} at an AI development company run by a human CEO.
 You are working on ticket ${i.ticket.id} (round ${i.ticket.round}) in a dedicated git worktree (your current directory).
-
+${
+  i.owner && i.owner.id !== i.employee.id
+    ? `This ticket was assigned to you by "${i.owner.name}" (${i.owner.rank ?? 'senior'}), who owns the result and will read your report.
+`
+    : ''
+}
 ## Hard rules (enforced by the system after you finish)
 - Only modify files matching these globs: ${i.ticket.writeScope.map((g) => `\`${g}\``).join(', ') || '(none: read-only task)'}.
   Changes outside this scope are detected automatically and your whole submission is quarantined.

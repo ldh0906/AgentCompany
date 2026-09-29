@@ -6,9 +6,11 @@ import { EmptyState, Icon, Modal, useAction, Skeleton } from '../components/ui.t
 import { ChipToggles, FolderPicker, Segmented } from '../components/kit.tsx';
 
 export function Projects() {
-  const { state } = useCompany();
+  const { state, reload } = useCompany();
   const { t, lang } = useT();
+  const { busy, run } = useAction();
   const [editing, setEditing] = useState<Project | 'new' | null>(null);
+  const [removing, setRemoving] = useState<Project | null>(null);
   if (!state) return <Skeleton />;
   const ko = lang === 'ko';
   return (
@@ -48,9 +50,14 @@ export function Projects() {
           <div className="card" key={p.id}>
             <div className="card-head">
               <span>{p.name}</span>
-              <button className="btn small" onClick={() => setEditing(p)}>
-                {ko ? '설정' : 'Settings'}
-              </button>
+              <span className="row">
+                <button className="btn small" onClick={() => setEditing(p)}>
+                  {ko ? '설정' : 'Settings'}
+                </button>
+                <button className="btn small danger" onClick={() => setRemoving(p)}>
+                  {ko ? '삭제' : 'Remove'}
+                </button>
+              </span>
             </div>
             <div className="body">
               <div className="sub mono">{p.originPath}</div>
@@ -101,6 +108,31 @@ export function Projects() {
         ))}
       </div>
       {editing && <ProjectModal project={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
+      {removing && (
+        <Modal
+          title={ko ? `${removing.name} 프로젝트를 삭제할까요?` : `Remove project ${removing.name}?`}
+          onClose={() => setRemoving(null)}
+          actions={
+            <button
+              className="btn danger"
+              disabled={busy}
+              onClick={() =>
+                run(() => api(`projects/${removing.id}/remove`, { body: {} }), ko ? '프로젝트를 삭제했습니다.' : 'Project removed.').then(
+                  (ok) => (reload(), ok && setRemoving(null)),
+                )
+              }
+            >
+              {ko ? '삭제' : 'Remove'}
+            </button>
+          }
+        >
+          <div className="sub" style={{ lineHeight: 1.7 }}>
+            {ko
+              ? '목록에서 빠지고 새 업무를 받지 않습니다. 원본 저장소와 지난 업무 기록은 건드리지 않습니다. 진행 중인 업무가 있으면 먼저 끝내거나 취소해야 합니다.'
+              : 'It leaves the list and takes no new tickets. Your repo and past records are untouched. Finish or cancel open tickets first.'}
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

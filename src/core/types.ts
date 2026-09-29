@@ -87,6 +87,7 @@ export interface Project {
   protectedPaths: string[]; // glob. 어떤 직원도 대표 승인 없이 수정 불가
   verifyCommands: VerifyCommand[]; // 대표가 승인한 검증 명령 (argv 배열, shell 없음)
   docRules: string; // 직원 컨텍스트에 주입할 프로젝트별 문서 권한 규칙
+  removedAt?: string | null; // 삭제(목록에서 숨김, 새 업무 불가). 지난 업무 기록용으로 남는다.
   createdAt: string;
 }
 

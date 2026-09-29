@@ -122,6 +122,8 @@ export function NewTicket({ onClose }: { onClose: () => void }) {
   const [scope, setScope] = useState<string[]>([]);
   const [customScope, setCustomScope] = useState('');
   const [dirs, setDirs] = useState<string[] | null>(null);
+  const [priority, setPriority] = useState<'1' | '2' | '3'>('2');
+  const [dependsOn, setDependsOn] = useState<string[]>([]);
 
   const template = TEMPLATES.find((x) => x.key === tpl)!;
   const applyTemplate = (key: string) => {
@@ -138,6 +140,7 @@ export function NewTicket({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     if (!projectId) return;
     setDirs(null);
+    setDependsOn([]);
     api<string[]>(`projects/${projectId}/dirs`)
       .then((d) => {
         setDirs(d);
@@ -162,6 +165,8 @@ export function NewTicket({ onClose }: { onClose: () => void }) {
             projectId,
             type,
             difficulty,
+            priority: Number(priority),
+            dependsOn,
             title,
             purpose,
             requirements: reqs.filter((r) => r.text.trim()),
@@ -179,6 +184,9 @@ export function NewTicket({ onClose }: { onClose: () => void }) {
     { value: '**', label: ko ? '저장소 전체' : 'Whole repository' },
     ...(dirs ?? []).map((d) => ({ value: `${d}/**`, label: `${d}/` })),
   ];
+  const openTickets = (state?.tickets ?? []).filter(
+    (x) => x.projectId === projectId && !['done', 'failed', 'cancelled'].includes(x.status),
+  );
   const needRank = difficulty === 'hard' ? 'lead' : difficulty === 'normal' ? 'senior' : 'junior';
   const order = { junior: 1, senior: 2, lead: 3 } as const;
   const capable = (state?.employees ?? []).filter((e) => e.active && order[e.rank ?? 'senior'] >= order[needRank]).length;
@@ -234,6 +242,17 @@ export function NewTicket({ onClose }: { onClose: () => void }) {
                 ? `${needRank === 'lead' ? '팀장' : needRank === 'senior' ? '선임' : '사원'} 이상이 맡습니다 · 가능한 직원 ${capable}명`
                 : `Needs ${needRank} or higher · ${capable} eligible`}
             </span>
+          </label>
+          <label>
+            {ko ? '우선순위' : 'Priority'}
+            <Segmented
+              value={priority}
+              onChange={setPriority}
+              options={(['1', '2', '3'] as const).map((p, i) => ({
+                value: p,
+                label: ko ? ['높음', '보통', '낮음'][i]! : ['High', 'Normal', 'Low'][i]!,
+              }))}
+            />
           </label>
         </div>
 
@@ -325,6 +344,18 @@ export function NewTicket({ onClose }: { onClose: () => void }) {
               <summary>{ko ? '직접 입력 (glob, 한 줄에 하나)' : 'Custom globs (one per line)'}</summary>
               <textarea className="mono" value={customScope} onChange={(e) => setCustomScope(e.target.value)} placeholder="src/party/**" />
             </details>
+          </label>
+        )}
+
+        {openTickets.length > 0 && (
+          <label>
+            {ko ? '먼저 끝나야 하는 업무' : 'Waits for'}{' '}
+            <span className="hint">{ko ? '고른 업무가 끝난 뒤에 시작합니다.' : 'Starts after the selected tickets are done.'}</span>
+            <ChipToggles
+              options={openTickets.map((x) => ({ value: x.id, label: `${x.id} ${x.title}` }))}
+              selected={dependsOn}
+              onToggle={(v) => setDependsOn(dependsOn.includes(v) ? dependsOn.filter((x) => x !== v) : [...dependsOn, v])}
+            />
           </label>
         )}
       </div>

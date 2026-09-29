@@ -128,6 +128,8 @@ export function ApprovalItem({ a }: { a: Approval }) {
   const { busy, run } = useAction();
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
+  const [deciding, setDeciding] = useState<{ id: string; text: string } | null>(null);
+  const [recorded, setRecorded] = useState<string[]>([]);
   const d = (a.detail ?? {}) as Record<string, unknown>;
   const tk = a.ticketId ? state?.tickets.find((x) => x.id === a.ticketId) : undefined;
   const decide = (decision: 'approved' | 'rejected', mode?: string) =>
@@ -193,9 +195,51 @@ export function ApprovalItem({ a }: { a: Approval }) {
       {d.mode === 'review' && Array.isArray(d.escalated) && (d.escalated as { id: string; text: string }[]).length > 0 && (
         <div className="note">
           {lang === 'ko' ? '미해결 이견 (대표 판단 필요):' : 'Unresolved disputes:'}
-          {'\n'}
-          {(d.escalated as { id: string; text: string }[]).map((c) => `• ${c.text}`).join('\n')}
+          {(d.escalated as { id: string; text: string }[]).map((c) => (
+            <div key={c.id} className="spread" style={{ marginTop: 6, gap: 8 }}>
+              <span>• {c.text}</span>
+              {tk && (
+                <button
+                  className="btn small"
+                  disabled={busy || recorded.includes(c.id)}
+                  onClick={() => setDeciding({ id: c.id, text: c.text })}
+                >
+                  {recorded.includes(c.id) ? (lang === 'ko' ? '기록함' : 'Recorded') : lang === 'ko' ? '결정으로 기록' : 'Record decision'}
+                </button>
+              )}
+            </div>
+          ))}
         </div>
+      )}
+      {deciding && tk && (
+        <Modal
+          title={lang === 'ko' ? '결정으로 기록' : 'Record a decision'}
+          onClose={() => setDeciding(null)}
+          actions={
+            <button
+              className="btn primary"
+              disabled={busy || !deciding.text.trim()}
+              onClick={() =>
+                run(
+                  () =>
+                    api('decisions', {
+                      body: { projectId: tk.projectId, text: deciding.text.trim(), sourceRefs: [deciding.id, tk.id] },
+                    }),
+                  lang === 'ko' ? '결정을 기록했습니다.' : 'Decision recorded.',
+                ).then((ok) => ok && (setRecorded([...recorded, deciding.id]), setDeciding(null), reload()))
+              }
+            >
+              {t('save')}
+            </button>
+          }
+        >
+          <div className="form">
+            <label>
+              {lang === 'ko' ? '대표 결정 (이후 업무에 현재 결정으로 전달됩니다)' : 'Your decision (sent to later tickets as current)'}
+              <textarea value={deciding.text} onChange={(e) => setDeciding({ ...deciding, text: e.target.value })} autoFocus />
+            </label>
+          </div>
+        </Modal>
       )}
       {rejecting && (
         <Modal
