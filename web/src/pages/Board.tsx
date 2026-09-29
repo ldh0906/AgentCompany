@@ -14,7 +14,7 @@ const COLUMNS: { key: string; statuses: string[]; dot: string }[] = [
 
 export function Board() {
   const { state } = useCompany();
-  const { t, status, lang } = useT();
+  const { t, status, lang, difficulty } = useT();
   if (!state) return <Skeleton />;
   const label = (k: string) =>
     k === 'verifying' ? (lang === 'ko' ? '검증·검수' : 'Verify · review') : k === 'todo' ? (lang === 'ko' ? '할 일' : 'To do') : status(k);
@@ -45,6 +45,9 @@ export function Board() {
                   <div className="spread">
                     <span className="id">{x.id}</span>
                     <span className="row" style={{ gap: 4 }}>
+                      {x.difficulty && x.difficulty !== 'normal' && (
+                        <span className={`chip ${x.difficulty === 'hard' ? 'warn' : ''}`}>{difficulty(x.difficulty)}</span>
+                      )}
                       {x.round > 1 && <span className="chip accent">{`R${x.round}`}</span>}
                       <span className="chip">{x.type}</span>
                     </span>

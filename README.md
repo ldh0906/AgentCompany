@@ -50,13 +50,16 @@ The demo company has four fake employees: a diligent one, a **lazy** one who cla
 
 ```bash
 agent-company doctor     # which CLIs are installed and logged in
-agent-company start      # opens the dashboard at http://127.0.0.1:4777
+agent-company start      # opens the dashboard in its own app window (Edge/Chrome app mode)
+agent-company shortcut   # Windows: desktop + Start menu icon that starts it without a console
 ```
 
-1. **Register a project**: path to a git repo, base branch, verify commands (`npm test`, `dotnet test`…), protected paths.
-2. **Hire up to 4 employees**: pick the CLI, the model and an access level.
-3. **Create a ticket** with requirements and the minimum evidence for each.
+1. **Register a project**: browse to a git repo; the base branch, verify commands (from `package.json`, `Cargo.toml`, `go.mod`, pytest…) and protected paths are filled in for you.
+2. **Hire up to 4 employees**: pick a preset (implementer, QA, lead, docs), the CLI, a model from the CLI's own list, and a **rank**.
+3. **Create a ticket** from a template (feature, bug fix, docs, review…), pick the difficulty and click the folders it may change.
 4. Approve or reject in the **CEO inbox**. That's the only place work reaches your repo.
+
+**Ranks.** Duties decide *what kind* of work an employee takes; ranks (junior · senior · lead) decide *who* takes it. A ticket's difficulty sets the minimum rank, the duty-fit employee of the lowest adequate rank does the work, the highest-ranked other employee owns it, and the reviewer must be the same rank or higher. The state machine enforces this for your manual assignments too.
 
 By default employees run in **app-only CLI profiles** (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) so your personal plugins, hooks and MCP servers do not leak into employee runs. Log in once per profile — `doctor` prints the exact command. Agent Company never reads credential files.
 

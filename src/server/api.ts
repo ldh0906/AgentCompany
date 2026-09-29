@@ -71,6 +71,8 @@ export class Api {
   readonly orch: Orchestrator;
   readonly dataDir: string;
   private doctorCache: { at: number; report: DoctorReport } | null = null;
+  /** 대시보드의 "종료" 버튼. 앱을 창 없이 켰을 때 끌 방법이 필요하다. */
+  onShutdown: (() => void) | null = null;
 
   constructor(orch: Orchestrator, dataDir: string) {
     this.orch = orch;
@@ -105,6 +107,10 @@ export class Api {
         return this.doctor(query.get('refresh') === '1');
       case 'GET install':
         return installInfo(this.dataDir);
+      case 'POST shutdown':
+        if (!this.onShutdown) throw new ApiError(400, tr('이 실행에서는 종료할 수 없습니다.', 'Shutdown is not available here.'));
+        setTimeout(() => this.onShutdown?.(), 300);
+        return { ok: true };
       case 'GET models':
         return listModels(this.dataDir, oneOf(Object.fromEntries(query), 'cli', CLIS));
       case 'GET dirs':

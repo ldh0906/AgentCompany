@@ -1,6 +1,6 @@
 import { setLanguage, tr } from '../core/i18n.ts';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -15,14 +15,17 @@ import { startServer } from '../server/http.ts';
 import { Store } from '../store/db.ts';
 import { git } from '../workspace/git.ts';
 import { seedDemo } from './demo.ts';
+import { createShortcuts, openAppWindow, removeShortcuts } from './app-window.ts';
 
 const HELP = () =>
   tr(
     `Agent Company — 로컬 AI 개발 조직
 
 사용법:
-  agent-company start [--port 4777] [--data-dir DIR] [--no-open] [--user-profiles] [--language ko|en]
+  agent-company start [--port 4777] [--data-dir DIR] [--no-open] [--browser] [--user-profiles] [--language ko|en]
+                                                      전용 앱 창으로 엽니다(--browser: 일반 브라우저 탭)
   agent-company demo  [--port 4777] [--no-open]      구독 없이 가짜 직원으로 체험
+  agent-company shortcut [--remove]                   바탕화면·시작 메뉴 바로가기 만들기(Windows)
   agent-company doctor [--data-dir DIR]               CLI 설치·로그인 상태 점검
   agent-company info   [--data-dir DIR]               설치 위치·용량·생성 파일
   agent-company uninstall [--data-dir DIR] [--yes]    데이터 정리(미리보기 후 확인)
@@ -32,8 +35,10 @@ const HELP = () =>
     `Agent Company — Local AI development team
 
 Usage:
-  agent-company start [--port 4777] [--data-dir DIR] [--no-open] [--user-profiles] [--language ko|en]
+  agent-company start [--port 4777] [--data-dir DIR] [--no-open] [--browser] [--user-profiles] [--language ko|en]
+                                                      Opens a dedicated app window (--browser: a normal tab)
   agent-company demo  [--port 4777] [--no-open]      Try fake employees without a subscription
+  agent-company shortcut [--remove]                   Desktop and Start menu shortcut (Windows)
   agent-company doctor [--data-dir DIR]               Check CLI installation and login status
   agent-company info   [--data-dir DIR]               Installation paths, size, and generated files
   agent-company uninstall [--data-dir DIR] [--yes]    Clean up data (preview, then confirm)
@@ -120,6 +125,8 @@ async function start(argv: string[], demo: boolean): Promise<void> {
       port: { type: 'string' },
       'data-dir': { type: 'string' },
       'no-open': { type: 'boolean' },
+      browser: { type: 'boolean' },
+      background: { type: 'boolean' },
       'user-profiles': { type: 'boolean' },
       language: { type: 'string' },
     },
@@ -128,6 +135,17 @@ async function start(argv: string[], demo: boolean): Promise<void> {
   const language = values.language ?? (Intl.DateTimeFormat().resolvedOptions().locale.startsWith('ko') ? 'ko' : 'en');
   setLanguage(language === 'en' ? 'en' : 'ko');
   mkdirSync(dataDir, { recursive: true });
+  if (values.background) {
+    // 바로가기로 창 없이 켜진 경우: 콘솔 대신 로그 파일에 남긴다.
+    const log = path.join(dataDir, 'server.log');
+    const write = (...a: unknown[]) => appendFileSync(log, `${new Date().toISOString()} ${a.map(String).join(' ')}\n`);
+    console.log = write;
+    console.error = write;
+  }
+  const open = (url: string) => {
+    if (values['no-open']) return;
+    if (values.browser || !openAppWindow(url, dataDir)) openBrowser(url);
+  };
   if (!acquireLock(dataDir)) {
     const existing = readLock(dataDir);
     console.log(
@@ -136,7 +154,7 @@ async function start(argv: string[], demo: boolean): Promise<void> {
         `Already running (pid ${existing?.pid ?? '?'}).\nDashboard: ${existing?.url || '(starting)'}`,
       ),
     );
-    if (existing?.url && !values['no-open']) openBrowser(existing.url);
+    if (existing?.url) open(existing.url);
     return;
   }
 
@@ -152,7 +170,8 @@ async function start(argv: string[], demo: boolean): Promise<void> {
   const recovery = await orch.recover();
   if (demo) await seedDemo(company, orch, dataDir, language);
 
-  const server = await startServer({ api: new Api(orch, dataDir), port: Number(values.port ?? (demo ? 4778 : 4777)), webRoot: webRoot() });
+  const api = new Api(orch, dataDir);
+  const server = await startServer({ api, port: Number(values.port ?? (demo ? 4778 : 4777)), webRoot: webRoot() });
   broadcast = server.broadcast;
   writeFileSync(
     path.join(dataDir, 'daemon.lock'),
@@ -191,7 +210,7 @@ async function start(argv: string[], demo: boolean): Promise<void> {
       '  Exit: Ctrl+C (active employee runs continue and reconnect on next startup)\n',
     ),
   );
-  if (!values['no-open']) openBrowser(server.url);
+  open(server.url);
 
   const shutdown = async () => {
     await orch.stop();
@@ -201,6 +220,7 @@ async function start(argv: string[], demo: boolean): Promise<void> {
     releaseLock();
     process.exit(0);
   };
+  api.onShutdown = () => void shutdown();
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());
 }
@@ -284,11 +304,53 @@ async function uninstall(argv: string[]): Promise<void> {
     console.log(tr('\n실제로 지우려면 --yes 를 붙여 다시 실행하세요.', '\nRun again with --yes to delete.'));
     return;
   }
+  for (const lnk of await removeShortcuts(dataDir)) console.log(tr(`바로가기 삭제: ${lnk}`, `Removed shortcut: ${lnk}`));
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
   console.log(
     existsSync(dataDir)
       ? tr('일부 파일을 지우지 못했습니다(사용 중일 수 있음).', 'Some files could not be deleted (they may be in use).')
       : tr('삭제했습니다. 남은 파일이 없습니다.', 'Deleted. No files remain.'),
+  );
+}
+
+async function shortcut(argv: string[]): Promise<void> {
+  const { values } = parseArgs({
+    args: argv,
+    options: { 'data-dir': { type: 'string' }, remove: { type: 'boolean' }, language: { type: 'string' } },
+  });
+  selectLanguage(values.language);
+  const dataDir = path.resolve(values['data-dir'] ?? defaultDataDir(false));
+  if (values.remove) {
+    const gone = await removeShortcuts(dataDir);
+    console.log(
+      gone.length
+        ? gone.map((g) => tr(`삭제: ${g}`, `Removed: ${g}`)).join('\n')
+        : tr('지울 바로가기가 없습니다.', 'No shortcuts to remove.'),
+    );
+    return;
+  }
+  if (process.platform !== 'win32') {
+    console.log(
+      tr(
+        '바로가기는 Windows에서만 만듭니다. `agent-company start` 로 앱 창을 여세요.',
+        'Shortcuts are Windows-only. Run `agent-company start` to open the app window.',
+      ),
+    );
+    return;
+  }
+  mkdirSync(dataDir, { recursive: true });
+  const web = webRoot();
+  const made = await createShortcuts({
+    dataDir,
+    mainPath: path.resolve(process.argv[1]!),
+    iconPath: web && existsSync(path.join(web, 'icon.ico')) ? path.join(web, 'icon.ico') : null,
+  });
+  for (const m of made) console.log(tr(`만들었습니다: ${m}`, `Created: ${m}`));
+  console.log(
+    tr(
+      '바로가기를 두 번 누르면 창 없이 서버가 켜지고 Agent Company 창이 열립니다. 창을 닫아도 직원 작업은 계속되며, 종료는 시스템 화면에서 합니다.',
+      'Double-click to start the server without a console and open the Agent Company window. Closing the window keeps employees working; stop it from the System page.',
+    ),
   );
 }
 
@@ -305,6 +367,8 @@ export async function main(argv: string[]): Promise<void> {
       return runInfo(rest);
     case 'uninstall':
       return uninstall(rest);
+    case 'shortcut':
+      return shortcut(rest);
     case undefined:
     case 'help':
     case '--help':

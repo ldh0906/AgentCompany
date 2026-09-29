@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { api, type Approval, type DomainEvent, type State } from '../api.ts';
 import { Link, useCompany, useRoute } from '../App.tsx';
 import { useT } from '../i18n.ts';
-import { empName, EmptyState, HoldChip, Icon, Modal, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
+import { Avatar, empName, EmptyState, HoldChip, Icon, Modal, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
+import { useCliStatus } from '../components/kit.tsx';
 import { RequestBox } from './Requests.tsx';
 
 const ACTIVE = ['assigned', 'in_progress', 'verifying', 'in_review', 'changes_requested', 'integrating'];
@@ -313,6 +314,7 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
         </div>
 
         <div className="grid" style={{ alignContent: 'start' }}>
+          <TeamPanel />
           <div className="card">
             <h2>
               <span className="row">
@@ -340,6 +342,7 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
                     </div>
                     <div className="meta">
                       {t('assignee')} {empName(state.employees, x.assigneeId)} · {t('reviewer')} {empName(state.employees, x.reviewerId)} ·{' '}
+                      {x.ownerId ? `${ko ? '책임' : 'Owner'} ${empName(state.employees, x.ownerId)} · ` : ''}
                       {t('round')} {x.round}
                     </div>
                   </div>
@@ -347,6 +350,8 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
               )}
             </div>
           </div>
+          <ProjectsPanel />
+          <DecisionsPanel />
           <div className="card">
             <h2>
               <span className="row">
@@ -369,6 +374,166 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
         </div>
       </div>
     </>
+  );
+}
+
+/** 팀 현황: 직급·AI·지금 하는 일. */
+function TeamPanel() {
+  const { state } = useCompany();
+  const { lang, rank } = useT();
+  const { go } = useRoute();
+  const clis = useCliStatus();
+  if (!state) return null;
+  const ko = lang === 'ko';
+  const active = state.employees.filter((e) => e.active);
+  const order = { lead: 0, senior: 1, junior: 2 } as const;
+  const doing = (id: string) => {
+    const work = state.tickets.find((x) => x.assigneeId === id && ['in_progress', 'changes_requested'].includes(x.status));
+    if (work) return { tone: 'info', text: ko ? `${work.id} 작업 중` : `Working on ${work.id}`, to: work.id };
+    const review = state.tickets.find((x) => x.reviewerId === id && x.status === 'in_review');
+    if (review) return { tone: 'accent', text: ko ? `${review.id} 검수 중` : `Reviewing ${review.id}`, to: review.id };
+    const owns = state.tickets.filter((x) => x.ownerId === id && !['done', 'failed', 'cancelled'].includes(x.status)).length;
+    if (owns) return { tone: '', text: ko ? `책임 업무 ${owns}개` : `Owns ${owns}`, to: null };
+    return { tone: '', text: ko ? '대기 중' : 'Idle', to: null };
+  };
+  return (
+    <div className="card">
+      <h2>
+        <span className="row">
+          <Icon name="team" /> {ko ? '팀' : 'Team'} <span className="sub">{active.length}/4</span>
+        </span>
+        <button className="btn small" onClick={() => go('/org')}>
+          {ko ? '조직 관리' : 'Manage'}
+        </button>
+      </h2>
+      {active.length === 0 ? (
+        <EmptyState icon="team">
+          <div>{ko ? '아직 직원이 없습니다.' : 'No employees yet.'}</div>
+          <button className="btn small primary" style={{ marginTop: 10 }} onClick={() => go('/org')}>
+            <Icon name="plus" /> {ko ? '직원 채용' : 'Hire'}
+          </button>
+        </EmptyState>
+      ) : (
+        <div className="list">
+          {[...active]
+            .sort((a, b) => order[a.rank ?? 'senior'] - order[b.rank ?? 'senior'])
+            .map((e) => {
+              const d = doing(e.id);
+              const login = clis?.find((c) => c.kind === e.cli);
+              return (
+                <div className="member" key={e.id}>
+                  <Avatar employees={state.employees} id={e.id} />
+                  <div className="who">
+                    <div className="nm">
+                      {e.name} <span className={`chip rank-${e.rank ?? 'senior'}`}>{rank(e.rank)}</span>
+                    </div>
+                    <div className="sub">
+                      {state.adapters.find((a) => a.kind === e.cli)?.displayName ?? e.cli}
+                      {e.model ? ` · ${e.model}` : ''}
+                      {login && login.found && login.login === 'missing' && (
+                        <span className="chip warn" style={{ marginLeft: 6 }}>
+                          {ko ? '로그인 필요' : 'Login needed'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {d.to ? (
+                    <Link to={`/tickets/${d.to}`} className={`chip ${d.tone} pulse`}>
+                      {d.text}
+                    </Link>
+                  ) : (
+                    <span className="chip">{d.text}</span>
+                  )}
+                </div>
+              );
+            })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 프로젝트 요약. */
+function ProjectsPanel() {
+  const { state } = useCompany();
+  const { lang } = useT();
+  const { go } = useRoute();
+  if (!state || state.projects.length === 0) return null;
+  const ko = lang === 'ko';
+  return (
+    <div className="card">
+      <h2>
+        <span className="row">
+          <Icon name="folder" /> {ko ? '프로젝트' : 'Projects'}
+        </span>
+        <button className="btn small" onClick={() => go('/projects')}>
+          {ko ? '관리' : 'Manage'}
+        </button>
+      </h2>
+      <div className="list">
+        {state.projects.map((p) => {
+          const open = state.tickets.filter((x) => x.projectId === p.id && !['done', 'failed', 'cancelled'].includes(x.status)).length;
+          const done = state.tickets.filter((x) => x.projectId === p.id && x.status === 'done').length;
+          return (
+            <div className="item" key={p.id}>
+              <div className="spread">
+                <div className="title">{p.name}</div>
+                <span className="row" style={{ gap: 6 }}>
+                  <span className="chip info">{ko ? `진행 ${open}` : `${open} open`}</span>
+                  <span className="chip ok">{ko ? `완료 ${done}` : `${done} done`}</span>
+                </span>
+              </div>
+              <div className="meta mono">{p.originPath}</div>
+              <div className="meta">
+                {p.baseBranch} · {ko ? `검증 명령 ${p.verifyCommands.length}개` : `${p.verifyCommands.length} verify commands`} ·{' '}
+                {p.integrationMode === 'auto_after_approval' ? (ko ? '승인 후 자동 병합' : 'auto merge') : ko ? '브랜치만' : 'branch only'}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** 최근 결정(직원이 따라야 하는 현재 결정). */
+function DecisionsPanel() {
+  const { state } = useCompany();
+  const { lang } = useT();
+  const { go } = useRoute();
+  if (!state || state.projects.length === 0) return null;
+  const ko = lang === 'ko';
+  const current = state.decisions
+    .filter((d) => d.status === 'current')
+    .slice(-4)
+    .reverse();
+  return (
+    <div className="card">
+      <h2>
+        <span className="row">
+          <Icon name="book" /> {ko ? '현재 결정' : 'Current decisions'}
+        </span>
+        <button className="btn small" onClick={() => go('/decisions')}>
+          {ko ? '전체' : 'All'}
+        </button>
+      </h2>
+      {current.length === 0 ? (
+        <EmptyState icon="book">
+          {ko
+            ? '기록된 결정이 없습니다. 정한 규칙을 남겨 두면 모든 직원이 따릅니다.'
+            : 'No decisions yet. Recorded rules bind every employee.'}
+        </EmptyState>
+      ) : (
+        <div className="list">
+          {current.map((d) => (
+            <div className="item" key={d.id}>
+              <div style={{ fontSize: 13 }}>{d.text}</div>
+              <div className="meta">{when(d.createdAt)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

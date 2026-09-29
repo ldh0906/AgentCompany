@@ -38,7 +38,7 @@ const dict = {
     hire: '직원 추가',
     activeLimit: '활성 직원은 최대 4명입니다.',
     name: '이름',
-    roles: '역할',
+    roles: '담당 업무',
     cli: 'CLI',
     model: '모델',
     access: '접근 등급',
@@ -86,7 +86,7 @@ const dict = {
     hire: 'Add employee',
     activeLimit: 'Up to 4 active employees.',
     name: 'Name',
-    roles: 'Roles',
+    roles: 'Duties',
     cli: 'CLI',
     model: 'Model',
     access: 'Access level',
@@ -174,6 +174,16 @@ export const ROLE: Record<Lang, Record<string, string>> = {
   },
 };
 
+export const RANK: Record<Lang, Record<string, string>> = {
+  ko: { junior: '사원', senior: '선임', lead: '팀장' },
+  en: { junior: 'Junior', senior: 'Senior', lead: 'Lead' },
+};
+
+export const DIFFICULTY: Record<Lang, Record<string, string>> = {
+  ko: { easy: '쉬움', normal: '보통', hard: '어려움' },
+  en: { easy: 'Easy', normal: 'Normal', hard: 'Hard' },
+};
+
 export const ACCESS: Record<Lang, Record<string, string>> = {
   ko: {
     'read-only': '1 · 읽기 전용',
@@ -220,5 +230,7 @@ export function useT() {
     role: (s: string) => ROLE[lang][s] ?? s,
     access: (s: string) => ACCESS[lang][s] ?? s,
     evidence: (s: string) => EVIDENCE[lang][s] ?? s,
+    rank: (s: string | null | undefined) => RANK[lang][s ?? 'senior'] ?? s ?? '',
+    difficulty: (s: string | null | undefined) => DIFFICULTY[lang][s ?? 'normal'] ?? s ?? '',
   };
 }

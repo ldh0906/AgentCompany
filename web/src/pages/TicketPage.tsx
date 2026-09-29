@@ -16,7 +16,7 @@ interface Detail {
 
 export function TicketPage({ id }: { id: string }) {
   const { state, reload } = useCompany();
-  const { t, lang, evidence: evLabel, role, hold: holdLabel } = useT();
+  const { t, lang, evidence: evLabel, role, hold: holdLabel, difficulty: difficultyLabel } = useT();
   const [detail, setDetail] = useState<Detail | null>(null);
   const [tab, setTab] = useState<'timeline' | 'runs' | 'diff' | 'claims'>(() => {
     const q = new URLSearchParams(location.search).get('tab');
@@ -54,9 +54,14 @@ export function TicketPage({ id }: { id: string }) {
             {tk.title} <StatusChip status={tk.status} /> <HoldChip ticket={tk} />
           </h1>
           <div className="sub">
+            {tk.ownerId && (
+              <>
+                {ko ? '책임' : 'Owner'} <b>{empName(state.employees, tk.ownerId)}</b> ·{' '}
+              </>
+            )}
             {t('assignee')} <b>{empName(state.employees, tk.assigneeId)}</b> · {t('reviewer')}{' '}
-            <b>{empName(state.employees, tk.reviewerId)}</b> · {t('round')} {tk.round}/{tk.budget.maxRounds} · {ko ? '실행' : 'runs'}{' '}
-            {tk.runCount}/{tk.budget.maxRuns}
+            <b>{empName(state.employees, tk.reviewerId)}</b> · {ko ? '난이도' : 'Difficulty'} {difficultyLabel(tk.difficulty)} ·{' '}
+            {t('round')} {tk.round}/{tk.budget.maxRounds} · {ko ? '실행' : 'runs'} {tk.runCount}/{tk.budget.maxRuns}
           </div>
         </div>
         <div className="row">
@@ -340,7 +345,7 @@ export function TicketPage({ id }: { id: string }) {
 
 function AssignModal({ ticket, onClose }: { ticket: Ticket; onClose: () => void }) {
   const { state, reload } = useCompany();
-  const { t, lang } = useT();
+  const { t, lang, rank: rankName } = useT();
   const { busy, run } = useAction();
   const active = state?.employees.filter((e) => e.active) ?? [];
   const [a, setA] = useState(active[0]?.id ?? '');
@@ -369,17 +374,20 @@ function AssignModal({ ticket, onClose }: { ticket: Ticket; onClose: () => void 
           <select value={a} onChange={(e) => setA(e.target.value)}>
             {active.map((e) => (
               <option key={e.id} value={e.id}>
-                {e.name}
+                {e.name} · {rankName(e.rank)}
               </option>
             ))}
           </select>
         </label>
         <label>
-          {t('reviewer')}
+          {t('reviewer')}{' '}
+          <span className="hint">
+            {lang === 'ko' ? '담당자와 같거나 높은 직급만 검수할 수 있습니다.' : 'Must be the same rank as the assignee or higher.'}
+          </span>
           <select value={r} onChange={(e) => setR(e.target.value)}>
             {active.map((e) => (
               <option key={e.id} value={e.id}>
-                {e.name}
+                {e.name} · {rankName(e.rank)}
               </option>
             ))}
           </select>

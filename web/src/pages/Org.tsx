@@ -3,18 +3,13 @@ import { api, type Employee } from '../api.ts';
 import { useCompany } from '../App.tsx';
 import { ACCESS, ROLE, useT } from '../i18n.ts';
 import { Avatar, CliChip, EmptyState, Icon, Modal, useAction, Skeleton } from '../components/ui.tsx';
+import { ChipToggles, Segmented, useCliStatus, useModels } from '../components/kit.tsx';
 
 const ROLES = Object.keys(ROLE.ko);
-const MODEL_HINT: Record<string, string> = {
-  claude: 'opus / sonnet / (비우면 CLI 기본값)',
-  codex: 'gpt-6-astra (비우면 CLI 기본값)',
-  agy: 'agy models 로 확인 (비우면 기본값)',
-  fake: 'diligent · lazy · rogue · slow',
-};
 
 export function Org() {
   const { state, reload } = useCompany();
-  const { t, lang, role, access } = useT();
+  const { t, lang, role, access, rank: rankLabel } = useT();
   const { busy, run } = useAction();
   const [hiring, setHiring] = useState(false);
   const [editing, setEditing] = useState<Employee | null>(null);
@@ -77,6 +72,7 @@ export function Org() {
             </div>
             <div className="body">
               <div className="row">
+                <span className={`chip rank-${e.rank ?? 'senior'}`}>{rankLabel(e.rank)}</span>
                 <CliChip cli={e.cli} model={e.model} />
               </div>
               <div className="sub" style={{ marginTop: 8 }}>
@@ -94,6 +90,24 @@ export function Org() {
                 <button className="btn small" onClick={() => setEditing(e)}>
                   {t('access')}
                 </button>
+                <select
+                  className="small-select"
+                  value={e.rank ?? 'senior'}
+                  disabled={busy}
+                  aria-label={ko ? '직급' : 'Rank'}
+                  onChange={(ev) =>
+                    run(
+                      () => api(`employees/${e.id}/rank`, { body: { rank: ev.target.value } }),
+                      ko ? '직급을 바꿨습니다.' : 'Rank changed.',
+                    ).then(reload)
+                  }
+                >
+                  {(['junior', 'senior', 'lead'] as const).map((r) => (
+                    <option key={r} value={r}>
+                      {rankLabel(r)}
+                    </option>
+                  ))}
+                </select>
                 <button
                   className="btn small"
                   disabled={busy}
@@ -151,22 +165,88 @@ export function Org() {
   );
 }
 
+const PRESETS: {
+  key: string;
+  roles: string[];
+  rank: 'junior' | 'senior' | 'lead';
+  ko: [string, string];
+  en: [string, string];
+}[] = [
+  {
+    key: 'impl',
+    roles: ['implementer'],
+    rank: 'senior',
+    ko: ['구현 담당', '코드를 작성하고 고칩니다'],
+    en: ['Implementer', 'Writes and fixes code'],
+  },
+  {
+    key: 'qa',
+    roles: ['qa'],
+    rank: 'senior',
+    ko: ['검수 담당 (QA)', '다른 직원의 작업을 검수하고 반박합니다'],
+    en: ['Reviewer (QA)', 'Reviews and challenges others’ work'],
+  },
+  {
+    key: 'lead',
+    roles: ['chief-of-staff', 'planner', 'qa'],
+    rank: 'lead',
+    ko: ['팀장 · 비서실장', '요청을 업무로 나누고, 맡기고, 책임집니다'],
+    en: ['Lead · chief of staff', 'Splits requests into tickets, delegates, owns the result'],
+  },
+  {
+    key: 'docs',
+    roles: ['recorder', 'planner'],
+    rank: 'junior',
+    ko: ['문서 · 기록', '설계 문서와 결정 기록을 정리합니다'],
+    en: ['Docs · records', 'Keeps design docs and decisions tidy'],
+  },
+];
+const CLI_SHORT: Record<string, string> = { claude: 'Claude', codex: 'Codex', agy: 'Antigravity', fake: 'Demo' };
+
 function HireModal({ onClose }: { onClose: () => void }) {
   const { state, reload } = useCompany();
-  const { t, lang, role, access } = useT();
+  const { t, lang, role, access, rank: rankLabel } = useT();
   const { busy, run } = useAction();
-  const [name, setName] = useState('');
+  const ko = lang === 'ko';
+  const clis = useCliStatus();
+  const [preset, setPreset] = useState('impl');
   const [cli, setCli] = useState<Employee['cli']>('claude');
   const [model, setModel] = useState('');
+  const [customModel, setCustomModel] = useState(false);
   const [roles, setRoles] = useState<string[]>(['implementer']);
+  const [rank, setRank] = useState<'junior' | 'senior' | 'lead'>('senior');
+  const [name, setName] = useState('');
+  const [nameTouched, setNameTouched] = useState(false);
   const levels: Employee['accessLevel'][] =
     state?.adapters.find((a) => a.kind === cli)?.capabilities.accessLevels.filter((l) => l !== 'full-auto') ?? [];
   const [level, setLevel] = useState<string>('write-ask');
+  const { models, loading: modelsLoading, error: modelsError } = useModels(cli);
+
   useEffect(() => {
     if (!levels.includes(level as Employee['accessLevel']))
       setLevel(levels.includes('write-ask') ? 'write-ask' : (levels[0] ?? 'read-only'));
+    setModel('');
+    setCustomModel(false);
   }, [cli]); // eslint-disable-line react-hooks/exhaustive-deps
-  const ko = lang === 'ko';
+
+  // 이름 자동 제안: "Claude 구현", 겹치면 번호
+  const p = PRESETS.find((x) => x.key === preset);
+  const baseName = `${CLI_SHORT[cli] ?? cli} ${p ? (ko ? p.ko[0] : p.en[0]).split(' ')[0] : ko ? '직원' : 'Employee'}`;
+  const taken = new Set(state?.employees.map((e) => e.name));
+  let suggested = baseName;
+  for (let i = 2; taken.has(suggested); i++) suggested = `${baseName} ${i}`;
+  const finalName = nameTouched ? name : suggested;
+
+  const pickPreset = (key: string) => {
+    setPreset(key);
+    const x = PRESETS.find((y) => y.key === key);
+    if (x) {
+      setRoles(x.roles);
+      setRank(x.rank);
+    }
+  };
+  const status = (kind: string) => clis?.find((c) => c.kind === kind);
+  const realClis = state?.adapters.filter((a) => a.kind !== 'fake') ?? [];
 
   return (
     <Modal
@@ -175,63 +255,150 @@ function HireModal({ onClose }: { onClose: () => void }) {
       actions={
         <button
           className="btn primary"
-          disabled={busy || !name.trim() || !roles.length}
+          disabled={busy || !finalName.trim() || !roles.length}
           onClick={() =>
             run(
-              () => api('employees', { body: { name, cli, model: model || null, roles, accessLevel: level } }),
-              ko ? '직원을 추가했습니다.' : 'Hired.',
+              () => api('employees', { body: { name: finalName.trim(), cli, model: model || null, roles, rank, accessLevel: level } }),
+              ko ? `${finalName}을(를) 채용했습니다.` : `Hired ${finalName}.`,
             ).then((ok) => ok && (reload(), onClose()))
           }
         >
-          {t('create')}
+          <Icon name="plus" /> {ko ? '채용하기' : 'Hire'}
         </button>
       }
     >
       <div className="form">
+        <div className="field-label">{ko ? '어떤 직원이 필요하세요?' : 'What do you need?'}</div>
+        <div className="preset-grid">
+          {PRESETS.map((x) => (
+            <button key={x.key} type="button" className={`preset ${preset === x.key ? 'on' : ''}`} onClick={() => pickPreset(x.key)}>
+              <b>{ko ? x.ko[0] : x.en[0]}</b>
+              <span>{ko ? x.ko[1] : x.en[1]}</span>
+              <span className="chip">{rankLabel(x.rank)}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="field-label">{ko ? '어떤 AI로 할까요?' : 'Which AI?'}</div>
+        <div className="cli-grid">
+          {realClis.map((a) => {
+            const s = status(a.kind);
+            const tone = !clis ? '' : !s?.found ? 'bad' : s.login === 'ok' ? 'ok' : s.login === 'missing' ? 'warn' : '';
+            const label = !clis
+              ? ko
+                ? '확인 중…'
+                : 'Checking…'
+              : !s?.found
+                ? ko
+                  ? '설치 안 됨'
+                  : 'Not installed'
+                : s.login === 'ok'
+                  ? ko
+                    ? '준비됨'
+                    : 'Ready'
+                  : s.login === 'missing'
+                    ? ko
+                      ? '로그인 필요'
+                      : 'Login needed'
+                    : ko
+                      ? '첫 실행 때 확인'
+                      : 'Checked on first run';
+            return (
+              <button
+                key={a.kind}
+                type="button"
+                className={`cli-card ${cli === a.kind ? 'on' : ''}`}
+                disabled={Boolean(clis && s && !s.found)}
+                onClick={() => setCli(a.kind)}
+              >
+                <span className={`avatar ${a.kind}`}>{a.displayName[0]}</span>
+                <b>{a.displayName}</b>
+                <span className={`chip ${tone}`}>{label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="row" style={{ alignItems: 'flex-start' }}>
+          <label style={{ flex: 1 }}>
+            {t('model')}
+            {!customModel ? (
+              <select
+                value={model}
+                onChange={(e) => (e.target.value === '__custom' ? (setCustomModel(true), setModel('')) : setModel(e.target.value))}
+              >
+                <option value="">{ko ? '기본값 (CLI 설정을 따름)' : 'Default (CLI setting)'}</option>
+                {modelsLoading && <option disabled>{ko ? '모델 목록 불러오는 중…' : 'Loading models…'}</option>}
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                    {m.label !== m.id ? ` — ${m.id}` : ''}
+                  </option>
+                ))}
+                <option value="__custom">{ko ? '직접 입력…' : 'Type a model id…'}</option>
+              </select>
+            ) : (
+              <div className="row">
+                <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="model-id" autoFocus style={{ flex: 1 }} />
+                <button type="button" className="btn small" onClick={() => setCustomModel(false)}>
+                  {ko ? '목록' : 'List'}
+                </button>
+              </div>
+            )}
+            {modelsError && (
+              <span className="hint">
+                {ko ? '모델 목록을 가져오지 못했습니다. 기본값이나 직접 입력을 쓰세요.' : 'Could not load models; use default or type one.'}
+              </span>
+            )}
+          </label>
+          <label>
+            {ko ? '직급' : 'Rank'}
+            <Segmented
+              value={rank}
+              onChange={setRank}
+              options={(['junior', 'senior', 'lead'] as const).map((r) => ({ value: r, label: rankLabel(r) }))}
+            />
+          </label>
+        </div>
+        <div className="hint" style={{ marginTop: -6 }}>
+          {ko
+            ? '팀장이 일을 맡기고 책임지며 어려운 업무를 맡습니다. 검수는 같거나 높은 직급이 합니다.'
+            : 'Leads delegate, own results and take hard tickets. Reviews come from the same rank or higher.'}
+        </div>
+
         <label>
-          {t('name')}
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder={ko ? '예: 코덱스 QA' : 'e.g. Codex QA'} autoFocus />
+          {t('roles')}{' '}
+          <span className="hint">{ko ? '어떤 종류의 업무를 맡길지 정합니다.' : 'Which kinds of tickets this employee takes.'}</span>
+          <ChipToggles
+            options={ROLES.map((r) => ({ value: r, label: role(r) }))}
+            selected={roles}
+            onToggle={(r) => setRoles(roles.includes(r) ? roles.filter((x) => x !== r) : [...roles, r])}
+          />
         </label>
-        <label>
-          {t('cli')}
-          <select value={cli} onChange={(e) => setCli(e.target.value as Employee['cli'])}>
-            {state?.adapters.map((a) => (
-              <option key={a.kind} value={a.kind}>
-                {a.displayName}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          {t('model')} <span className="hint">{MODEL_HINT[cli]}</span>
-          <input value={model} onChange={(e) => setModel(e.target.value)} />
-        </label>
-        <label>
-          {t('roles')}
-          <div className="checks">
-            {ROLES.map((r) => (
-              <label key={r}>
-                <input
-                  type="checkbox"
-                  checked={roles.includes(r)}
-                  onChange={(e) => setRoles(e.target.checked ? [...roles, r] : roles.filter((x) => x !== r))}
-                />
-                {role(r)}
-              </label>
-            ))}
-          </div>
-        </label>
-        <label>
-          {t('access')}{' '}
-          <span className="hint">{ko ? '전체 자동은 직원을 만든 뒤 따로 올릴 수 있습니다.' : 'Full auto can be granted later.'}</span>
-          <select value={level} onChange={(e) => setLevel(e.target.value)}>
-            {levels.map((l) => (
-              <option key={l} value={l}>
-                {access(l)}
-              </option>
-            ))}
-          </select>
-        </label>
+
+        <div className="row" style={{ alignItems: 'flex-start' }}>
+          <label style={{ flex: 1 }}>
+            {t('name')}
+            <input
+              value={finalName}
+              onChange={(e) => {
+                setNameTouched(true);
+                setName(e.target.value);
+              }}
+            />
+          </label>
+          <label style={{ flex: 1 }}>
+            {t('access')}
+            <select value={level} onChange={(e) => setLevel(e.target.value)}>
+              {levels.map((l) => (
+                <option key={l} value={l}>
+                  {access(l)}
+                </option>
+              ))}
+            </select>
+            <span className="hint">{ko ? '전체 자동은 채용 후 따로 올릴 수 있습니다.' : 'Full auto can be granted later.'}</span>
+          </label>
+        </div>
       </div>
     </Modal>
   );

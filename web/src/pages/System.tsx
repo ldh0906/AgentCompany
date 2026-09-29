@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.ts';
 import { useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
+import { Modal, useToast } from '../components/ui.tsx';
 
 interface Doctor {
   node: string;
@@ -39,6 +40,9 @@ export function System() {
   const [doc, setDoc] = useState<Doctor | null>(null);
   const [inst, setInst] = useState<Install | null>(null);
   const [checking, setChecking] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [stopped, setStopped] = useState(false);
+  const toast = useToast();
   const ko = lang === 'ko';
   const check = (refresh = false) => {
     setChecking(true);
@@ -63,10 +67,39 @@ export function System() {
               : 'Nothing hidden: what is installed, where, and what is running.'}
           </div>
         </div>
-        <button className="btn" disabled={checking} onClick={() => check(true)}>
-          {checking ? t('loading') : ko ? '다시 점검' : 'Re-check'}
-        </button>
+        <div className="row">
+          <button className="btn" disabled={checking} onClick={() => check(true)}>
+            {checking ? t('loading') : ko ? '다시 점검' : 'Re-check'}
+          </button>
+          <button className="btn danger" onClick={() => setStopping(true)}>
+            {ko ? 'Agent Company 종료' : 'Quit Agent Company'}
+          </button>
+        </div>
       </div>
+      {stopping && (
+        <Modal
+          title={ko ? 'Agent Company를 종료할까요?' : 'Quit Agent Company?'}
+          onClose={() => setStopping(false)}
+          actions={
+            <button
+              className="btn danger"
+              onClick={() =>
+                api('shutdown', { body: {} })
+                  .then(() => setStopped(true))
+                  .catch((e) => toast(String((e as Error).message), true))
+                  .finally(() => setStopping(false))
+              }
+            >
+              {ko ? '종료' : 'Quit'}
+            </button>
+          }
+        >
+          {ko
+            ? '서버를 끕니다. 진행 중인 직원 작업은 계속되고, 다음에 켜면 이어받습니다. 다시 켜려면 바탕화면의 Agent Company 아이콘을 누르세요.'
+            : 'Stops the server. Running employee work continues and is picked up on next start. Use the desktop icon to start again.'}
+        </Modal>
+      )}
+      {stopped && <div className="banner info">{ko ? '종료했습니다. 이 창을 닫아도 됩니다.' : 'Stopped. You can close this window.'}</div>}
 
       {recovered && (
         <div className={`banner ${(recovered.payload as { chainOk: boolean }).chainOk ? 'info' : 'bad'}`}>
