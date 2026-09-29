@@ -105,6 +105,7 @@ function drafts(h: TaskHeader, prompt: string): string {
       tickets: [
         {
           type: 'impl',
+          difficulty: 'normal',
           title: `${L('구현', 'Implement')}: ${request.slice(0, 50)}`,
           purpose: request,
           requirements: [{ text: L('기능 구현과 단위 테스트', 'Implementation with unit tests'), evidenceType: 'unit_test' }],
@@ -114,6 +115,7 @@ function drafts(h: TaskHeader, prompt: string): string {
         },
         {
           type: 'doc',
+          difficulty: 'easy',
           title: `${L('문서화', 'Document')}: ${request.slice(0, 50)}`,
           purpose: L('설계 문서 반영', 'Reflect it in the design doc'),
           requirements: [{ text: L('설계 문서 갱신', 'Update the design doc'), evidenceType: 'inspection' }],

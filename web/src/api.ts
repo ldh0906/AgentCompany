@@ -50,6 +50,7 @@ export interface CeoRequest {
     doneCriteria: string;
     writeScope: string[];
     dependsOn: number[];
+    difficulty?: 'easy' | 'normal' | 'hard';
   }[];
   questions: string[];
   error: string | null;

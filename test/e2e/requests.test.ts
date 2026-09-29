@@ -30,6 +30,24 @@ test('대표 요청 → 비서실장 초안(읽기 전용) → 대표 확정 →
   assert.equal(d.status, 'awaiting_approval', `보류: ${d.hold?.note}`);
 });
 
+test('초안 난이도: 비서실장이 제안하고, 대표가 확정 전에 바꿀 수 있음', { timeout: 120_000 }, async (t) => {
+  const env = await setup(t);
+  env.company.hireEmployee({ name: '비서실장', roles: ['chief-of-staff', 'recorder'], cli: 'fake', model: 'diligent' });
+  const req = await env.orch.submitRequest(env.projectId, '파티 해산 기능');
+  await env.orch.idle();
+  const drafted = env.orch.records.request(req.id)!;
+  assert.deepEqual(
+    drafted.drafts.map((d) => d.difficulty),
+    ['normal', 'easy'],
+    '비서실장이 초안마다 난이도를 제안',
+  );
+  // 대표가 첫 초안을 쉬움으로 바꾸고, 잘못된 값은 보통으로 정리된다
+  const edited = drafted.drafts.map((d, i) => ({ ...d, difficulty: i === 0 ? 'easy' : 'extreme' })) as typeof drafted.drafts;
+  const [a, b] = env.orch.acceptRequest(req.id, edited);
+  assert.equal(a!.difficulty, 'easy');
+  assert.equal(b!.difficulty, 'normal');
+});
+
 test('비서실장이 없으면 요청을 거부하고 직접 업무를 만들라고 안내', { timeout: 60_000 }, async (t) => {
   const env = await setup(t);
   await assert.rejects(env.orch.submitRequest(env.projectId, 'x'), /비서실장/);

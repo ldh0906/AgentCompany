@@ -192,6 +192,7 @@ Rules:
 - Each requirement names the MINIMUM evidence that proves it: unit_test / static_check need a verify command to exist; runtime or visual checks need "human_attest"; documents need "inspection".
 - Do not decide product rules or numbers the CEO has not decided. Put them in "questions".
 - Prefer 1-5 tickets. Fewer is better.
+- Give each ticket a "difficulty": "easy" (small, local, low risk), "normal" (a typical feature or fix), or "hard" (cross-cutting, risky, or design-heavy). Difficulty decides the minimum rank: easy = junior+, normal = senior+, hard = lead.
 
 ${dataBlock('CEO request', i.request)}
 
@@ -206,7 +207,7 @@ ${dataBlock('Project document rules', i.project.docRules)}
 ## Final answer format (required)
 Write titles and text in language "${i.language}". End with exactly one JSON code block:
 ${fence}json
-{"nonce":"${i.nonce}","kind":"drafts","summary":"...","tickets":[{"type":"impl|doc|review|research","title":"...","purpose":"...","requirements":[{"text":"...","evidenceType":"unit_test"}],"doneCriteria":"...","writeScope":["src/feature/**"],"dependsOn":[]}],"questions":[]}
+{"nonce":"${i.nonce}","kind":"drafts","summary":"...","tickets":[{"type":"impl|doc|review|research","difficulty":"easy|normal|hard","title":"...","purpose":"...","requirements":[{"text":"...","evidenceType":"unit_test"}],"doneCriteria":"...","writeScope":["src/feature/**"],"dependsOn":[]}],"questions":[]}
 ${fence}
 `;
 }

@@ -22,7 +22,7 @@ import { parseDrafts, parseReport, type TicketDraft, type WorkReport } from '../
 import { writeDecision } from '../approvals/file-queue.ts';
 import type { Actor } from '../core/ticket-machine.ts';
 import type { Claim, Employee, Evidence, FailureClass, Project, Ticket, TicketStatus } from '../core/types.ts';
-import { DEFAULT_BUDGET, DIFFICULTY_RANK, RANK_ORDER, TERMINAL_STATUSES, difficultyOf, rankOf } from '../core/types.ts';
+import { DEFAULT_BUDGET, DIFFICULTIES, DIFFICULTY_RANK, RANK_ORDER, TERMINAL_STATUSES, difficultyOf, rankOf } from '../core/types.ts';
 import { pickStaff } from '../core/staffing.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
 import { locateExecutable } from '../runner/locate.ts';
@@ -1657,6 +1657,8 @@ export class Orchestrator {
               requirements: d.requirements.map((r) => ({ text: r.text, evidenceType: r.evidenceType as Evidence['type'] })),
               doneCriteria: d.doneCriteria,
               writeScope: d.writeScope,
+              // 대표가 확정 화면에서 보낸 값도 여기서 정리한다(모르는 값은 보통).
+              difficulty: (DIFFICULTIES as readonly string[]).includes(String(d.difficulty)) ? d.difficulty : 'normal',
               dependsOn: deps,
             },
             CEO,

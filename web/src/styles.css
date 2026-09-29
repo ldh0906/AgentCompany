@@ -1678,3 +1678,7 @@ details.advanced[open] summary {
   gap: 10px;
   flex-wrap: wrap;
 }
+.segmented.small button {
+  padding: 3px 9px;
+  font-size: 11.5px;
+}

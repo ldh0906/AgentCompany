@@ -3,15 +3,18 @@ import { api } from '../api.ts';
 import { Link, useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
 import { empName, useAction, when } from '../components/ui.tsx';
+import { Segmented } from '../components/kit.tsx';
 
 /** 대표 요청 → 비서실장 초안 → 대표 확정. 비서실장은 티켓을 직접 만들 수 없다. */
 export function RequestBox() {
   const { state, reload } = useCompany();
-  const { lang, evidence } = useT();
+  const { lang, evidence, difficulty } = useT();
   const { busy, run } = useAction();
   const [text, setText] = useState('');
   const [projectId, setProjectId] = useState('');
   const [excluded, setExcluded] = useState<Record<string, number[]>>({});
+  // 대표가 바꾼 난이도(요청 → 초안 번호 → 난이도). 없으면 비서실장 제안값.
+  const [diffs, setDiffs] = useState<Record<string, Record<number, 'easy' | 'normal' | 'hard'>>>({});
   if (!state || state.projects.length === 0) return null;
   const ko = lang === 'ko';
   const pid = projectId || state.projects[0]!.id;
@@ -117,6 +120,20 @@ export function RequestBox() {
                             <span className="chip">{d.type}</span>
                             {d.dependsOn.length > 0 && <span className="sub"> ← {d.dependsOn.map((x) => x + 1).join(', ')}</span>}
                             <div className="sub">{d.requirements.map((q) => `${q.text} [${evidence(q.evidenceType)}]`).join(' · ')}</div>
+                            <div className="row" style={{ marginTop: 6 }}>
+                              <span className="sub">{ko ? '난이도' : 'Difficulty'}</span>
+                              <Segmented
+                                small
+                                value={diffs[r.id]?.[i] ?? d.difficulty ?? 'normal'}
+                                onChange={(v) => setDiffs({ ...diffs, [r.id]: { ...diffs[r.id], [i]: v } })}
+                                options={(['easy', 'normal', 'hard'] as const).map((x) => ({ value: x, label: difficulty(x) }))}
+                              />
+                              {diffs[r.id]?.[i] && diffs[r.id]![i] !== (d.difficulty ?? 'normal') && (
+                                <span className="sub">
+                                  {ko ? `비서실장 제안: ${difficulty(d.difficulty)}` : `Proposed: ${difficulty(d.difficulty)}`}
+                                </span>
+                              )}
+                            </div>
                             <div className="row" style={{ marginTop: 4 }}>
                               {d.writeScope.map((g) => (
                                 <code key={g} className="chip">
@@ -145,8 +162,9 @@ export function RequestBox() {
                     onClick={() => {
                       const keep = r.drafts.map((d, i) => ({ d, i })).filter(({ i }) => !excluded[r.id]?.includes(i));
                       const remap = new Map(keep.map(({ i }, n) => [i, n]));
-                      const drafts = keep.map(({ d }) => ({
+                      const drafts = keep.map(({ d, i }) => ({
                         ...d,
+                        difficulty: diffs[r.id]?.[i] ?? d.difficulty ?? 'normal',
                         dependsOn: d.dependsOn.filter((x) => remap.has(x)).map((x) => remap.get(x)!),
                       }));
                       void run(

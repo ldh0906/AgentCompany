@@ -8,13 +8,15 @@ export function Segmented<T extends string>({
   value,
   options,
   onChange,
+  small = false,
 }: {
   value: T;
   options: { value: T; label: string; hint?: string }[];
   onChange: (v: T) => void;
+  small?: boolean;
 }) {
   return (
-    <div className="segmented" role="radiogroup">
+    <div className={`segmented ${small ? 'small' : ''}`} role="radiogroup">
       {options.map((o) => (
         <button
           key={o.value}

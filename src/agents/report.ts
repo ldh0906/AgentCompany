@@ -1,6 +1,7 @@
 // 직원 보고서: 실행 마지막에 nonce가 들어간 JSON을 내야 한다. 형식은 코드로 검증한다.
 // 보고서는 "주장"일 뿐이다. 완료 판정은 오케스트레이터가 만든 증거로 한다.
 import { tr } from '../core/i18n.ts';
+import { DIFFICULTIES, type Difficulty } from '../core/types.ts';
 
 export interface WorkReport {
   kind: 'work';
@@ -168,6 +169,7 @@ export interface TicketDraft {
   doneCriteria: string;
   writeScope: string[];
   dependsOn: number[]; // 같은 초안 목록 안의 앞선 인덱스
+  difficulty: Difficulty; // 비서실장 제안. 모르는 값은 보통
 }
 
 export interface DraftReport {
@@ -229,6 +231,7 @@ export function parseDrafts(
         .filter((r) => r.text),
       doneCriteria: isStr(d.doneCriteria) && d.doneCriteria ? d.doneCriteria : '요구사항 충족',
       writeScope,
+      difficulty: (DIFFICULTIES as readonly string[]).includes(String(d.difficulty)) ? (d.difficulty as Difficulty) : 'normal',
       dependsOn: Array.isArray(d.dependsOn)
         ? (d.dependsOn as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n < i)
         : [],
