@@ -90,4 +90,24 @@ test('서버: 토큰·Host·Origin 검사와 API 흐름', { timeout: 60_000 }, a
   assert.equal(JSON.parse(detail.body).ticket.status, 'received');
   const conflict = await post(`/api/tickets/${JSON.parse(tk.body).id}/cancel`, {});
   assert.equal(conflict.status, 200);
+
+  // 입력 도우미와 직급
+  const get = async (path: string) => {
+    const r = await raw(server.port, { path, headers: auth });
+    return { status: r.status, json: JSON.parse(r.body) };
+  };
+  assert.deepEqual(
+    (await get('/api/models?cli=claude')).json.models.map((m: { id: string }) => m.id),
+    ['opus', 'sonnet', 'haiku'],
+  );
+  assert.equal((await get('/api/models?cli=nope')).status, 400);
+  const inspect = await get(`/api/inspect?path=${encodeURIComponent(origin)}`);
+  assert.equal(inspect.json.isGit, true);
+  assert.deepEqual(inspect.json.dirs, ['src']);
+  assert.deepEqual((await get(`/api/projects/${p.id}/dirs`)).json, ['src']);
+  assert.ok((await get(`/api/dirs?path=${encodeURIComponent(root)}`)).json.dirs.some((d: { name: string }) => d.name === 'origin'));
+  const e2 = await post('/api/employees', { name: '팀장', roles: ['qa'], cli: 'fake', model: 'diligent', rank: 'lead' });
+  assert.equal(JSON.parse(e2.body).rank, 'lead');
+  assert.equal((await post(`/api/employees/${JSON.parse(e1.body).id}/rank`, { rank: 'junior' })).status, 200);
+  assert.equal((await post(`/api/employees/${JSON.parse(e1.body).id}/rank`, { rank: 'boss' })).status, 400);
 });

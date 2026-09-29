@@ -9,6 +9,8 @@ import { diffText, projectPaths } from '../workspace/workspace.ts';
 import { DIFFICULTIES, RANKS } from '../core/types.ts';
 import type { AccessLevel, CliKind, EvidenceType, RoleTemplate, TicketType, VerifyCommand } from '../core/types.ts';
 import { doctor, type DoctorReport, installInfo } from '../app/doctor.ts';
+import { listModels } from '../app/models.ts';
+import { inspectRepo, listDirs, trackedDirs } from '../app/repo-inspect.ts';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -103,6 +105,21 @@ export class Api {
         return this.doctor(query.get('refresh') === '1');
       case 'GET install':
         return installInfo(this.dataDir);
+      case 'GET models':
+        return listModels(this.dataDir, oneOf(Object.fromEntries(query), 'cli', CLIS));
+      case 'GET dirs':
+        return listDirs(query.get('path') ?? '').catch((error) => {
+          throw new ApiError(
+            400,
+            tr(`폴더를 열 수 없습니다: ${(error as Error).message}`, `Cannot open folder: ${(error as Error).message}`),
+          );
+        });
+      case 'GET inspect':
+        return inspectRepo(str(Object.fromEntries(query), 'path', { max: 1000 }));
+      case 'GET projects/:id/dirs': {
+        const p = this.company.requireProject(id!);
+        return trackedDirs(p.originPath, p.baseBranch, query.get('sub') ?? '');
+      }
 
       case 'POST employees': {
         const cli = oneOf(b, 'cli', CLIS);

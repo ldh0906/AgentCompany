@@ -6,6 +6,7 @@ import { mkdirSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { ADAPTERS } from '../adapters/index.ts';
+import type { CliKind } from '../core/types.ts';
 import { locateExecutable } from '../runner/locate.ts';
 
 export interface CliCheck {
@@ -48,13 +49,19 @@ export function appProfileDir(root: string, cli: string): string {
   return dir;
 }
 
+/** CLI를 실행할 환경: 앱 전용 프로필을 쓰면 프로필 폴더 환경변수를 더한다. */
+export function cliEnv(dataDir: string, kind: CliKind, useAppProfiles = true): { env: NodeJS.ProcessEnv; profileDir: string | null } {
+  const v = ADAPTERS[kind].capabilities.profileEnvVar;
+  const profileDir = useAppProfiles && v ? appProfileDir(profileRoot(dataDir), kind) : null;
+  return { env: { ...process.env, ...(profileDir && v ? { [v]: profileDir } : {}) }, profileDir };
+}
+
 export async function doctor(dataDir: string, useAppProfiles = true): Promise<DoctorReport> {
   const git = await run('git', ['--version'], process.env);
   const clis: CliCheck[] = [];
   for (const a of Object.values(ADAPTERS)) {
     if (a.kind === 'fake') continue;
-    const profileDir = useAppProfiles && a.capabilities.profileEnvVar ? appProfileDir(profileRoot(dataDir), a.kind) : null;
-    const env = { ...process.env, ...(profileDir && a.capabilities.profileEnvVar ? { [a.capabilities.profileEnvVar]: profileDir } : {}) };
+    const { env, profileDir } = cliEnv(dataDir, a.kind, useAppProfiles);
     const located = await locateExecutable(a.executable, env);
     const check: CliCheck = {
       kind: a.kind,
