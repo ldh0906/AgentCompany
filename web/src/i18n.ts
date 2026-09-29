@@ -184,6 +184,11 @@ export const DIFFICULTY: Record<Lang, Record<string, string>> = {
   en: { easy: 'Easy', normal: 'Normal', hard: 'Hard' },
 };
 
+export const EFFORT: Record<Lang, Record<string, string>> = {
+  ko: { minimal: '최소', low: '낮음', medium: '보통', high: '높음', xhigh: '매우 높음', max: '최대', ultra: '울트라' },
+  en: { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'X-High', max: 'Max', ultra: 'Ultra' },
+};
+
 export const ACCESS: Record<Lang, Record<string, string>> = {
   ko: {
     'read-only': '1 · 읽기 전용',
@@ -232,5 +237,6 @@ export function useT() {
     evidence: (s: string) => EVIDENCE[lang][s] ?? s,
     rank: (s: string | null | undefined) => RANK[lang][s ?? 'senior'] ?? s ?? '',
     difficulty: (s: string | null | undefined) => DIFFICULTY[lang][s ?? 'normal'] ?? s ?? '',
+    effort: (s: string | null | undefined) => (s ? (EFFORT[lang][s] ?? s) : ''),
   };
 }

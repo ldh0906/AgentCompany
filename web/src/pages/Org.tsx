@@ -3,7 +3,7 @@ import { api, type Employee } from '../api.ts';
 import { useCompany } from '../App.tsx';
 import { ACCESS, ROLE, useT } from '../i18n.ts';
 import { Avatar, CliChip, EmptyState, Icon, Modal, useAction, Skeleton } from '../components/ui.tsx';
-import { ChipToggles, Segmented, useCliStatus, useModels } from '../components/kit.tsx';
+import { ChipToggles, ModelPicker, Segmented, useCliStatus } from '../components/kit.tsx';
 import { fmtTokens } from '../components/usage.tsx';
 
 const ROLES = Object.keys(ROLE.ko);
@@ -14,6 +14,7 @@ export function Org() {
   const { busy, run } = useAction();
   const [hiring, setHiring] = useState(false);
   const [editing, setEditing] = useState<Employee | null>(null);
+  const [modeling, setModeling] = useState<Employee | null>(null);
   if (!state) return <Skeleton />;
   const ko = lang === 'ko';
   const activeCount = state.employees.filter((e) => e.active).length;
@@ -74,7 +75,7 @@ export function Org() {
             <div className="body">
               <div className="row">
                 <span className={`chip rank-${e.rank ?? 'senior'}`}>{rankLabel(e.rank)}</span>
-                <CliChip cli={e.cli} model={e.model} />
+                <CliChip cli={e.cli} model={e.model} effort={e.effort} />
               </div>
               <div className="sub" style={{ marginTop: 8 }}>
                 {e.roles.map(role).join(' · ')}
@@ -92,6 +93,9 @@ export function Org() {
               <div className="row" style={{ marginTop: 12 }}>
                 <button className="btn small" onClick={() => setEditing(e)}>
                   {t('access')}
+                </button>
+                <button className="btn small" onClick={() => setModeling(e)}>
+                  {ko ? '모델' : 'Model'}
                 </button>
                 <select
                   className="small-select"
@@ -164,6 +168,7 @@ export function Org() {
 
       {hiring && <HireModal onClose={() => setHiring(false)} />}
       {editing && <AccessModal employee={editing} onClose={() => setEditing(null)} />}
+      {modeling && <ModelModal employee={modeling} onClose={() => setModeling(null)} />}
     </>
   );
 }
@@ -215,7 +220,7 @@ function HireModal({ onClose }: { onClose: () => void }) {
   const [preset, setPreset] = useState('impl');
   const [cli, setCli] = useState<Employee['cli']>('claude');
   const [model, setModel] = useState('');
-  const [customModel, setCustomModel] = useState(false);
+  const [effort, setEffort] = useState('');
   const [roles, setRoles] = useState<string[]>(['implementer']);
   const [rank, setRank] = useState<'junior' | 'senior' | 'lead'>('senior');
   const [name, setName] = useState('');
@@ -223,13 +228,12 @@ function HireModal({ onClose }: { onClose: () => void }) {
   const levels: Employee['accessLevel'][] =
     state?.adapters.find((a) => a.kind === cli)?.capabilities.accessLevels.filter((l) => l !== 'full-auto') ?? [];
   const [level, setLevel] = useState<string>('write-ask');
-  const { models, loading: modelsLoading, error: modelsError } = useModels(cli);
 
   useEffect(() => {
     if (!levels.includes(level as Employee['accessLevel']))
       setLevel(levels.includes('write-ask') ? 'write-ask' : (levels[0] ?? 'read-only'));
     setModel('');
-    setCustomModel(false);
+    setEffort('');
   }, [cli]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 이름 자동 제안: "Claude 구현", 겹치면 번호
@@ -261,7 +265,10 @@ function HireModal({ onClose }: { onClose: () => void }) {
           disabled={busy || !finalName.trim() || !roles.length}
           onClick={() =>
             run(
-              () => api('employees', { body: { name: finalName.trim(), cli, model: model || null, roles, rank, accessLevel: level } }),
+              () =>
+                api('employees', {
+                  body: { name: finalName.trim(), cli, model: model || null, effort: effort || null, roles, rank, accessLevel: level },
+                }),
               ko ? `${finalName}을(를) 채용했습니다.` : `Hired ${finalName}.`,
             ).then((ok) => ok && (reload(), onClose()))
           }
@@ -325,34 +332,16 @@ function HireModal({ onClose }: { onClose: () => void }) {
         <div className="row" style={{ alignItems: 'flex-start' }}>
           <label style={{ flex: 1 }}>
             {t('model')}
-            {!customModel ? (
-              <select
-                value={model}
-                onChange={(e) => (e.target.value === '__custom' ? (setCustomModel(true), setModel('')) : setModel(e.target.value))}
-              >
-                <option value="">{ko ? '기본값 (CLI 설정을 따름)' : 'Default (CLI setting)'}</option>
-                {modelsLoading && <option disabled>{ko ? '모델 목록 불러오는 중…' : 'Loading models…'}</option>}
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                    {m.label !== m.id ? ` — ${m.id}` : ''}
-                  </option>
-                ))}
-                <option value="__custom">{ko ? '직접 입력…' : 'Type a model id…'}</option>
-              </select>
-            ) : (
-              <div className="row">
-                <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="model-id" autoFocus style={{ flex: 1 }} />
-                <button type="button" className="btn small" onClick={() => setCustomModel(false)}>
-                  {ko ? '목록' : 'List'}
-                </button>
-              </div>
-            )}
-            {modelsError && (
-              <span className="hint">
-                {ko ? '모델 목록을 가져오지 못했습니다. 기본값이나 직접 입력을 쓰세요.' : 'Could not load models; use default or type one.'}
-              </span>
-            )}
+            <ModelPicker
+              autoSelect
+              cli={cli}
+              model={model}
+              effort={effort}
+              onChange={(m, e) => {
+                setModel(m);
+                setEffort(e);
+              }}
+            />
           </label>
           <label>
             {ko ? '직급' : 'Rank'}
@@ -401,6 +390,50 @@ function HireModal({ onClose }: { onClose: () => void }) {
             </select>
             <span className="hint">{ko ? '전체 자동은 채용 후 따로 올릴 수 있습니다.' : 'Full auto can be granted later.'}</span>
           </label>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ModelModal({ employee, onClose }: { employee: Employee; onClose: () => void }) {
+  const { reload } = useCompany();
+  const { lang } = useT();
+  const { busy, run } = useAction();
+  const ko = lang === 'ko';
+  const [model, setModel] = useState(employee.model ?? '');
+  const [effort, setEffort] = useState(employee.effort ?? '');
+  return (
+    <Modal
+      title={`${employee.name} · ${ko ? '모델' : 'Model'}`}
+      onClose={onClose}
+      actions={
+        <button
+          className="btn primary"
+          disabled={busy}
+          onClick={() =>
+            run(
+              () => api(`employees/${employee.id}/model`, { body: { model, effort } }),
+              ko ? '모델을 바꿨습니다.' : 'Model updated.',
+            ).then((ok) => ok && (reload(), onClose()))
+          }
+        >
+          {ko ? '저장' : 'Save'}
+        </button>
+      }
+    >
+      <div className="form">
+        <ModelPicker
+          cli={employee.cli}
+          model={model}
+          effort={effort}
+          onChange={(m, e) => {
+            setModel(m);
+            setEffort(e);
+          }}
+        />
+        <div className="hint">
+          {ko ? '다음 실행부터 적용됩니다. 진행 중인 실행은 그대로 끝납니다.' : 'Applies from the next run; running work finishes as is.'}
         </div>
       </div>
     </Modal>

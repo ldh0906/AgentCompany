@@ -69,12 +69,14 @@ export const codexAdapter: CliAdapter = {
           AC_APPROVAL_DIR: req.approvalDir ?? '',
           AC_ALLOWED_COMMANDS: JSON.stringify(req.accessLevel === 'write-allowlist' ? req.allowedCommands : []),
           ...(req.model ? { AC_CODEX_MODEL: req.model } : {}),
+          ...(req.effort ? { AC_CODEX_EFFORT: req.effort } : {}),
         },
         stdinText: req.prompt,
         files: [],
       };
     }
-    const model = req.model ? ['-m', req.model] : [];
+    // 실측(0.153.4): effort는 설정값 model_reasoning_effort(TOML 문자열)로 넘긴다.
+    const model = [...(req.model ? ['-m', req.model] : []), ...(req.effort ? ['-c', `model_reasoning_effort="${req.effort}"`] : [])];
     let args: string[];
     if (req.resumeSessionId) {
       args = ['exec', 'resume', req.resumeSessionId, '--json', '--skip-git-repo-check', ...model, '-'];

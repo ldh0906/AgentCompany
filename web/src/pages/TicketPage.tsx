@@ -290,7 +290,7 @@ export function TicketPage({ id }: { id: string }) {
                     <td>{r.kind === 'work' ? (ko ? '작업' : 'work') : ko ? '검수' : 'review'}</td>
                     <td>
                       {emp?.name}
-                      <div>{emp && <CliChip cli={emp.cli} model={emp.model} />}</div>
+                      <div>{emp && <CliChip cli={emp.cli} model={emp.model} effort={emp.effort} />}</div>
                       <div className="sub">{emp?.roles.map(role).join(', ')}</div>
                     </td>
                     <td>

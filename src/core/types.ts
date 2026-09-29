@@ -35,6 +35,7 @@ export interface Employee {
   rank?: Rank; // 없으면 선임(예전 기록)
   cli: CliKind;
   model: string | null;
+  effort?: string | null; // 추론 강도(없으면 CLI 기본값)
   accessLevel: AccessLevel;
   allowedCommands: string[][]; // write-allowlist 등급에서 자동 허용할 argv 접두사
   active: boolean;

@@ -4,6 +4,8 @@ export interface InvocationRequest {
   prompt: string;
   cwd: string;
   model: string | null;
+  /** 추론 강도(effort). null이면 CLI 기본값. */
+  effort?: string | null;
   accessLevel: AccessLevel;
   allowedCommands: string[][];
   /** 앱 전용 프로필 폴더 등 추가 환경변수. */

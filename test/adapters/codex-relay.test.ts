@@ -36,6 +36,8 @@ test('Codex 중계: 허용 목록 명령은 자동 승인, 나머지는 파일 �
       AC_CODEX_CWD: dir,
       AC_APPROVAL_DIR: dir,
       AC_ALLOWED_COMMANDS: JSON.stringify([['npm', 'test']]),
+      AC_CODEX_EFFORT: 'high',
+      AC_EXPECT_EFFORT: 'high', // 가짜 app-server가 turn/start.effort를 확인한다
     },
     stdio: ['pipe', 'pipe', 'inherit'],
     windowsHide: true,

@@ -57,7 +57,8 @@ export const agyAdapter: CliAdapter = {
     const args = ['--output-format', 'stream-json'];
     if (req.accessLevel === 'read-only') args.push('--sandbox');
     else args.push('--dangerously-skip-permissions');
-    if (req.model) args.push('--model', req.model);
+    // agy는 effort가 모델 ID 끝에 붙는다(gemini-3.8-flash-high 등).
+    if (req.model) args.push('--model', req.effort ? `${req.model}-${req.effort}` : req.model);
     if (req.resumeSessionId) args.push('--conversation', req.resumeSessionId);
     args.push(`--print=${req.prompt}`);
     return { file: 'agy', args, env: { ...process.env, ...req.profileEnv }, stdinText: null, files: [] };

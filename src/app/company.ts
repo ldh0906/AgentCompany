@@ -34,6 +34,7 @@ export interface NewEmployee {
   roles: RoleTemplate[];
   cli: CliKind;
   model: string | null;
+  effort?: string | null;
   rank?: Rank;
   accessLevel?: AccessLevel;
   allowedCommands?: string[][];
@@ -111,6 +112,7 @@ export class Company {
         rank: input.rank ?? 'senior',
         cli: input.cli,
         model: input.model,
+        effort: input.effort ?? null,
         accessLevel,
         allowedCommands: input.allowedCommands ?? [],
         active: true,
@@ -121,10 +123,28 @@ export class Company {
         actorId(actor),
         'employee.hired',
         employee.id,
-        { name: employee.name, cli: employee.cli, model: employee.model, roles: employee.roles, rank: employee.rank },
+        {
+          name: employee.name,
+          cli: employee.cli,
+          model: employee.model,
+          effort: employee.effort,
+          roles: employee.roles,
+          rank: employee.rank,
+        },
         this.clock(),
       );
       return employee;
+    });
+  }
+
+  setEmployeeModel(id: string, model: string | null, effort: string | null, actor: Actor = { kind: 'ceo' }): Employee {
+    if (actor.kind !== 'ceo') throw new DomainError(tr('모델은 대표만 바꿀 수 있습니다.', 'Only the CEO can change models.'));
+    return this.store.transact(() => {
+      const e = this.requireEmployee(id);
+      const updated = { ...e, model, effort };
+      this.saveEmployee(updated);
+      this.store.appendEvent('ceo', 'employee.model_changed', id, { from: [e.model, e.effort ?? null], to: [model, effort] }, this.clock());
+      return updated;
     });
   }
 

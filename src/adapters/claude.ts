@@ -95,6 +95,7 @@ export const claudeAdapter: CliAdapter = {
     }
     args.push(...permissionArgs(req.accessLevel, req.allowedCommands, relay));
     if (req.model) args.push('--model', req.model);
+    if (req.effort) args.push('--effort', req.effort); // 실측(2.1.202): low|medium|high|xhigh|max
     if (req.resumeSessionId) args.push('--resume', req.resumeSessionId);
     return { file: 'claude', args, env: { ...process.env, ...req.profileEnv }, stdinText: req.prompt, files };
   },

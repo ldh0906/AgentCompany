@@ -1,5 +1,5 @@
 // 입력 도우미 부품: 세그먼트 버튼, 토글 칩, 폴더 찾아보기, CLI 상태·모델 목록 훅.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.ts';
 import { useT } from '../i18n.ts';
 import { Icon, Modal } from './ui.tsx';
@@ -88,27 +88,154 @@ export interface ModelOption {
   id: string;
   label: string;
   note?: string;
+  efforts?: string[];
+  defaultEffort?: string;
+  effortRequired?: boolean;
 }
-const modelCache = new Map<string, Promise<{ models: ModelOption[]; error?: string }>>();
-export function useModels(cli: string): { models: ModelOption[]; loading: boolean; error?: string } {
-  const [st, setSt] = useState<{ models: ModelOption[]; loading: boolean; error?: string }>({ models: [], loading: true });
+type ModelList = { models: ModelOption[]; defaultModel?: string; error?: string };
+const modelCache = new Map<string, Promise<ModelList>>();
+export function useModels(cli: string): ModelList & { loading: boolean; forCli: string } {
+  const [st, setSt] = useState<ModelList & { loading: boolean; forCli: string }>({ models: [], loading: true, forCli: cli });
   useEffect(() => {
     let live = true;
-    setSt({ models: [], loading: true });
+    setSt({ models: [], loading: true, forCli: cli });
     if (!modelCache.has(cli))
       modelCache.set(
         cli,
-        api<{ models: ModelOption[]; error?: string }>(`models?cli=${cli}`).catch((e) => {
+        api<ModelList>(`models?cli=${cli}`).catch((e) => {
           modelCache.delete(cli);
           return { models: [], error: String((e as Error).message) };
         }),
       );
-    modelCache.get(cli)!.then((r) => live && setSt({ models: r.models, loading: false, error: r.error }));
+    modelCache.get(cli)!.then((r) => live && setSt({ ...r, loading: false, forCli: cli }));
     return () => {
       live = false;
     };
   }, [cli]);
   return st;
+}
+
+/** 정확한 모델명 + effort 선택. 모델이 지원하는 effort만 보여 준다. */
+export function ModelPicker({
+  cli,
+  model,
+  effort,
+  onChange,
+  autoSelect = false,
+}: {
+  cli: string;
+  model: string;
+  effort: string;
+  onChange: (model: string, effort: string) => void;
+  /** 새로 고를 때: 목록이 오면 첫 모델과 그 모델의 기본 effort를 명시적으로 고른다. */
+  autoSelect?: boolean;
+}) {
+  const { lang, effort: effortLabel } = useT();
+  const ko = lang === 'ko';
+  const { models, loading, error, defaultModel, forCli } = useModels(cli);
+  const [custom, setCustom] = useState(false);
+  const picked = useRef<string | null>(null);
+  useEffect(() => {
+    // 목록이 이 CLI의 것일 때만(바꾼 직후에는 이전 CLI 목록이 잠깐 남아 있다).
+    if (!autoSelect || loading || forCli !== cli || !models.length || picked.current === cli) return;
+    picked.current = cli;
+    if (model === '') onChange(models[0]!.id, models[0]!.defaultEffort ?? '');
+  }, [autoSelect, loading, models, cli, forCli, model]); // eslint-disable-line react-hooks/exhaustive-deps
+  const known = models.find((m) => m.id === model);
+  const isCustom = custom || (model !== '' && !known && !loading);
+  // 기본값을 고르면 목록의 첫 모델(대개 CLI 기본 계열)의 effort를 보여 준다.
+  const ref = model === '' ? models[0] : known;
+  const efforts = ref?.efforts ?? [];
+  const pickModel = (id: string) => {
+    const next = models.find((m) => m.id === id);
+    onChange(id, next?.efforts?.includes(effort) ? effort : next?.effortRequired ? (next.defaultEffort ?? next.efforts?.[0] ?? '') : '');
+  };
+  return (
+    <div className="model-picker">
+      {!isCustom ? (
+        <select
+          value={model}
+          onChange={(e) => (e.target.value === '__custom' ? (setCustom(true), onChange('', '')) : pickModel(e.target.value))}
+        >
+          <option value="">
+            {ko ? 'CLI 기본값' : 'CLI default'}
+            {defaultModel ? ` — ${defaultModel}` : ''}
+          </option>
+          {loading && <option disabled>{ko ? '모델 목록 불러오는 중…' : 'Loading models…'}</option>}
+          {models.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label === m.id ? m.id : `${m.label} — ${m.id}`}
+            </option>
+          ))}
+          <option value="__custom">{ko ? '직접 입력…' : 'Type an exact model id…'}</option>
+        </select>
+      ) : (
+        <div className="row">
+          <input
+            className="mono"
+            value={model}
+            onChange={(e) => onChange(e.target.value, effort)}
+            placeholder="model-id"
+            autoFocus
+            style={{ flex: 1 }}
+          />
+          <button
+            type="button"
+            className="btn small"
+            onClick={() => {
+              setCustom(false);
+              onChange('', '');
+            }}
+          >
+            {ko ? '목록' : 'List'}
+          </button>
+        </div>
+      )}
+      {loading && <span className="hint">{ko ? 'CLI에서 모델 목록을 가져오는 중…' : 'Fetching the model list from the CLI…'}</span>}
+      <div className="model-id mono">
+        {ko ? '실행 모델: ' : 'Runs as: '}
+        <b>{model ? (cli === 'agy' && effort ? `${model}-${effort}` : model) : (defaultModel ?? (ko ? 'CLI 설정값' : 'CLI setting'))}</b>
+        {known?.note && <span className="sub"> · {known.note}</span>}
+      </div>
+      {efforts.length > 0 && (
+        <div className="effort-row">
+          <span className="field-label" style={{ margin: 0 }}>
+            {ko ? '추론 강도 (effort)' : 'Reasoning effort'}
+          </span>
+          <Segmented
+            value={effort}
+            onChange={(v) => onChange(model, v)}
+            options={[
+              // agy 계열은 effort가 모델 ID의 일부라 "기본"이 없다.
+              ...(ref?.effortRequired
+                ? []
+                : [
+                    {
+                      value: '',
+                      label: ko
+                        ? `기본${ref?.defaultEffort ? ` (${effortLabel(ref.defaultEffort)})` : ''}`
+                        : `Default${ref?.defaultEffort ? ` (${ref.defaultEffort})` : ''}`,
+                    },
+                  ]),
+              ...efforts.map((e) => ({ value: e, label: effortLabel(e) })),
+            ]}
+          />
+        </div>
+      )}
+      {error && (
+        <span className="hint bad-text">
+          {ko ? '모델 목록을 가져오지 못했습니다. 기본값이나 직접 입력을 쓰세요.' : 'Could not load models; use the default or type one.'}
+        </span>
+      )}
+      {cli === 'claude' && (
+        <span className="hint">
+          {ko
+            ? 'Claude Code 2.1.202에서 별칭이 가리키는 정확한 모델명을 실측한 목록입니다.'
+            : 'Exact names measured from Claude Code 2.1.202 aliases.'}
+        </span>
+      )}
+    </div>
+  );
 }
 
 // ---- 폴더 찾아보기 ----

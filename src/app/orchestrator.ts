@@ -552,6 +552,7 @@ export class Orchestrator {
       prompt: p.prompt,
       cwd: p.cwd,
       model: p.employee.model,
+      effort: p.employee.effort ?? null,
       accessLevel: p.accessLevel,
       allowedCommands: p.employee.allowedCommands,
       profileEnv: this.profileEnv(p.employee),
@@ -607,6 +608,7 @@ export class Orchestrator {
       runId,
       cli: p.employee.cli,
       model: p.employee.model,
+      effort: p.employee.effort ?? null,
     });
 
     if (!located?.launch) {

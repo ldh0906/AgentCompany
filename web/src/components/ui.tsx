@@ -27,12 +27,13 @@ export function HoldChip({ ticket }: { ticket: Ticket }) {
   );
 }
 
-export function CliChip({ cli, model }: { cli: string; model?: string | null }) {
+export function CliChip({ cli, model, effort }: { cli: string; model?: string | null; effort?: string | null }) {
   const names: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', agy: 'Antigravity', fake: 'Demo' };
+  const { lang, effort: effortLabel } = useT();
   return (
-    <span className="chip accent" title={model ?? ''}>
-      {names[cli] ?? cli}
-      {model ? ` · ${model}` : ''}
+    <span className="chip accent" title={`${model ?? ''}${effort ? ` / effort ${effort}` : ''}`}>
+      {names[cli] ?? cli} · {model || (lang === 'ko' ? '기본 모델' : 'default model')}
+      {effort ? ` · ${effortLabel(effort)}` : ''}
     </span>
   );
 }

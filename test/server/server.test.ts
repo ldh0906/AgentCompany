@@ -98,7 +98,7 @@ test('서버: 토큰·Host·Origin 검사와 API 흐름', { timeout: 60_000 }, a
   };
   assert.deepEqual(
     (await get('/api/models?cli=claude')).json.models.map((m: { id: string }) => m.id),
-    ['opus', 'sonnet', 'haiku'],
+    ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'],
   );
   assert.equal((await get('/api/models?cli=nope')).status, 400);
   const inspect = await get(`/api/inspect?path=${encodeURIComponent(origin)}`);

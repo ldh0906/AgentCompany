@@ -147,11 +147,18 @@ export class Api {
           roles,
           cli,
           model: str(b, 'model', { optional: true, max: 100 }) || null,
+          effort: str(b, 'effort', { optional: true, max: 20 }) || null,
           rank: oneOf(b, 'rank', RANKS, 'senior'),
           accessLevel: level,
           allowedCommands: Array.isArray(b.allowedCommands) ? (b.allowedCommands as string[][]) : [],
         });
       }
+      case 'POST employees/:id/model':
+        return this.company.setEmployeeModel(
+          id!,
+          str(b, 'model', { optional: true, max: 100 }) || null,
+          str(b, 'effort', { optional: true, max: 20 }) || null,
+        );
       case 'POST employees/:id/rank':
         return this.company.setEmployeeRank(id!, oneOf(b, 'rank', RANKS));
       case 'POST employees/:id/active':

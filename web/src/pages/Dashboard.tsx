@@ -382,7 +382,7 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
 /** 팀 현황: 직급·AI·지금 하는 일. */
 function TeamPanel() {
   const { state } = useCompany();
-  const { lang, rank } = useT();
+  const { lang, rank, effort } = useT();
   const { go } = useRoute();
   const clis = useCliStatus();
   if (!state) return null;
@@ -432,6 +432,7 @@ function TeamPanel() {
                     <div className="sub">
                       {state.adapters.find((a) => a.kind === e.cli)?.displayName ?? e.cli}
                       {e.model ? ` · ${e.model}` : ''}
+                      {e.effort ? ` · ${effort(e.effort)}` : ''}
                       {login && login.found && login.login === 'missing' && (
                         <span className="chip warn" style={{ marginLeft: 6 }}>
                           {ko ? '로그인 필요' : 'Login needed'}

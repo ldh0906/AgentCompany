@@ -10,6 +10,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       process.exit(3);
     send({ id: m.id, result: { thread: { id: 'thread-1' } } });
   } else if (m.method === 'turn/start') {
+    if (process.env.AC_EXPECT_EFFORT && m.params.effort !== process.env.AC_EXPECT_EFFORT) process.exit(5);
     send({ id: m.id, result: { turn: { id: 'turn-1', status: 'inProgress', items: [], error: null } } });
     send({
       id: 'c1',

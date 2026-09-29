@@ -176,7 +176,11 @@ async function main(): Promise<void> {
     return;
   }
   out({ type: 'thread.started', thread_id: threadId });
-  await request('turn/start', { threadId, input: [{ type: 'text', text: prompt, text_elements: [] }] });
+  await request('turn/start', {
+    threadId,
+    input: [{ type: 'text', text: prompt, text_elements: [] }],
+    ...(env.AC_CODEX_EFFORT ? { effort: env.AC_CODEX_EFFORT } : {}),
+  });
   const ok = await done;
   child.stdin.end();
   child.kill();
