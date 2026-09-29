@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyCommon } from '../../src/adapters/types.ts';
-import { annotateClaudeModels, CLAUDE_MODELS } from '../../src/app/models.ts';
+import { annotateClaudeModels, claudeDefaultModel, CLAUDE_MODELS } from '../../src/app/models.ts';
 
 const MSG =
   "API Error: 400 Claude Code 2.1.202 does not support this model; version 2.1.280 or newer is required. Run 'claude update', or update the Claude desktop app, then try again.";
@@ -24,4 +24,11 @@ test('Claude 모델 목록: Opus 5.5는 2.1.280 미만에서 잠김, 이상에�
   const fresh = annotateClaudeModels('2.1.281 (Claude Code)');
   assert.equal(fresh.find((m) => m.id === 'claude-opus-5-5')!.unavailable, undefined);
   assert.equal(annotateClaudeModels(null).find((m) => m.id === 'claude-opus-5-5')!.unavailable, undefined, '버전을 모르면 막지 않는다');
+});
+
+test('Claude CLI 기본 모델: 2.1.280 이상은 Opus 5.5, 그 전은 Opus 4.8(1M)', () => {
+  assert.equal(claudeDefaultModel('2.1.284 (Claude Code)'), 'claude-opus-5-5');
+  assert.equal(claudeDefaultModel('2.1.202 (Claude Code)'), 'claude-opus-4-8[1m]');
+  assert.equal(claudeDefaultModel(null), undefined);
+  assert.ok(CLAUDE_MODELS.some((m) => m.id === 'claude-sonnet-5-5'));
 });

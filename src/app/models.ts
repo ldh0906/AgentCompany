@@ -23,20 +23,23 @@ const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']; // 실측: cla
 
 /**
  * Claude Code는 목록 명령이 없다. 후보 모델명을 실제로 호출해 확인한 목록
- * (2026-09-30, Claude Code 2.1.202, 앱 전용 프로필, 시스템 프롬프트·도구 없이 한 줄 응답):
+ * (2026-09-30, 앱 전용 프로필, 시스템 프롬프트·도구 없이 한 줄 응답):
+ * - Claude Code 2.1.202: Fable 5, Opus 5, Sonnet 5, Opus 4.8/4.7/4.6/4.5, Sonnet 4.6/4.5, Haiku 4.5 동작.
+ *   Opus 5.5는 2.1.280+, Fable 5.1은 2.1.251+ 가 필요하다는 400 응답.
+ * - Claude Code 2.1.284: 위에 더해 Opus 5.5, Fable 5.1, Sonnet 5.5 동작. 별칭은 opus→claude-opus-5-5,
+ *   fable→claude-fable-5-1, sonnet→claude-sonnet-5-5, haiku→claude-haiku-4-5-20251001, 기본값→claude-opus-5-5.
  * - 모두 --effort low/max 를 오류 없이 받았다(지원하지 않는 모델은 CLI가 무시할 수 있다).
  * - claude-opus-4-1 / 4-0 은 실제로 claude-opus-4-8로 실행돼 목록에서 뺐다(오해 방지).
- * - claude-sonnet-4-0, claude-3-x 는 "모델이 없거나 접근할 수 없음".
- * - Opus 5.5, Fable 5.1 은 더 새 Claude Code가 필요하다는 400 응답(필요 버전을 그대로 기록).
- * CLI 기본값(모델 미지정)은 claude-opus-4-8[1m].
+ * - claude-sonnet-4-0, claude-3-x, claude-*-5-1(fable 제외), claude-haiku-5* 등은 "모델이 없거나 접근할 수 없음".
  */
 export const CLAUDE_MODELS: ModelOption[] = [
-  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', efforts: CLAUDE_EFFORTS, minCliVersion: '2.1.280' },
-  { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', efforts: CLAUDE_EFFORTS, minCliVersion: '2.1.251' },
-  { id: 'claude-fable-5', label: 'Claude Fable 5', note: 'alias fable', efforts: CLAUDE_EFFORTS },
+  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', note: 'alias opus', efforts: CLAUDE_EFFORTS, minCliVersion: '2.1.280' },
+  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', note: 'alias sonnet', efforts: CLAUDE_EFFORTS },
+  { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', note: 'alias fable', efforts: CLAUDE_EFFORTS, minCliVersion: '2.1.251' },
+  { id: 'claude-fable-5', label: 'Claude Fable 5', efforts: CLAUDE_EFFORTS },
   { id: 'claude-opus-5', label: 'Claude Opus 5', efforts: CLAUDE_EFFORTS },
-  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', note: 'alias sonnet', efforts: CLAUDE_EFFORTS },
-  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', note: 'alias opus', efforts: CLAUDE_EFFORTS },
+  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', efforts: CLAUDE_EFFORTS },
+  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', efforts: CLAUDE_EFFORTS },
   { id: 'claude-opus-4-7', label: 'Claude Opus 4.7', efforts: CLAUDE_EFFORTS },
   { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', efforts: CLAUDE_EFFORTS },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', efforts: CLAUDE_EFFORTS },
@@ -44,7 +47,13 @@ export const CLAUDE_MODELS: ModelOption[] = [
   { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', efforts: CLAUDE_EFFORTS },
   { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', note: 'alias haiku', efforts: CLAUDE_EFFORTS },
 ];
-export const CLAUDE_DEFAULT_MODEL = 'claude-opus-4-8[1m]';
+
+/** 모델을 지정하지 않았을 때 CLI가 쓰는 모델(실측): 2.1.280+ 는 claude-opus-5-5, 그 전은 claude-opus-4-8[1m]. */
+export function claudeDefaultModel(versionText: string | null): string | undefined {
+  const v = versionOf(versionText);
+  if (!v) return undefined;
+  return lessThan(v, [2, 1, 280]) ? 'claude-opus-4-8[1m]' : 'claude-opus-5-5';
+}
 
 /** "2.1.202 (Claude Code)" → [2,1,202] */
 function versionOf(text: string | null): number[] | null {
@@ -167,12 +176,11 @@ export async function listModels(
   cli: CliKind,
   useAppProfiles = true,
 ): Promise<{ models: ModelOption[]; source: 'cli' | 'builtin'; defaultModel?: string; error?: string }> {
-  if (cli === 'claude')
-    return {
-      models: annotateClaudeModels(await claudeVersion(dataDir, useAppProfiles)),
-      source: 'builtin',
-      defaultModel: CLAUDE_DEFAULT_MODEL,
-    };
+  if (cli === 'claude') {
+    const version = await claudeVersion(dataDir, useAppProfiles);
+    const defaultModel = claudeDefaultModel(version);
+    return { models: annotateClaudeModels(version), source: 'builtin', ...(defaultModel ? { defaultModel } : {}) };
+  }
   if (cli === 'fake') return { models: FAKE_MODELS, source: 'builtin' };
   const hit = cache.get(cli);
   if (hit && Date.now() - hit.at < TTL_MS) return { models: hit.models, source: 'cli' };
