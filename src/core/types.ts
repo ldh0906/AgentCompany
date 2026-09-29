@@ -39,6 +39,7 @@ export interface Employee {
   accessLevel: AccessLevel;
   allowedCommands: string[][]; // write-allowlist 등급에서 자동 허용할 argv 접두사
   active: boolean;
+  removedAt?: string | null; // 퇴사(삭제). 기록의 이름 표시용으로 남고 다시 활성화할 수 없다.
   createdAt: string;
 }
 

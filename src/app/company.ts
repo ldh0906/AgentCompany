@@ -8,6 +8,7 @@ import { applyTicketCommand, type Actor, type TicketCommand } from '../core/tick
 import {
   DEFAULT_BUDGET,
   MAX_ACTIVE_EMPLOYEES,
+  TERMINAL_STATUSES,
   RANKS,
   rankOf,
   type AccessLevel,
@@ -160,11 +161,41 @@ export class Company {
     });
   }
 
+  /**
+   * 직원 삭제(퇴사). 과거 업무·실행 기록이 이 직원을 가리키므로 행은 남기고 removedAt으로 표시한다.
+   * 진행 중인 업무 확인은 호출하는 쪽(오케스트레이터)이 한다.
+   */
+  removeEmployee(id: string, actor: Actor = { kind: 'ceo' }): Employee {
+    if (actor.kind !== 'ceo') throw new DomainError(tr('직원 삭제는 대표만 할 수 있습니다.', 'Only the CEO can remove employees.'));
+    return this.store.transact(() => {
+      const e = this.requireEmployee(id);
+      if (e.removedAt) throw new DomainError(tr('이미 삭제된 직원입니다.', 'This employee was already removed.'));
+      const open = this.tickets().filter(
+        (t) => !TERMINAL_STATUSES.includes(t.status) && (t.assigneeId === id || t.reviewerId === id || t.ownerId === id),
+      );
+      if (open.length)
+        throw new DomainError(
+          tr(
+            `${e.name}이(가) 맡은 진행 중 업무가 있습니다: ${open.map((t) => t.id).join(', ')}. 먼저 재배정하거나 취소하세요.`,
+            `${e.name} still has open tickets: ${open.map((t) => t.id).join(', ')}. Reassign or cancel them first.`,
+          ),
+        );
+      const updated = { ...e, active: false, removedAt: this.clock() };
+      this.saveEmployee(updated);
+      this.store.appendEvent(actorId(actor), 'employee.removed', id, { name: e.name }, this.clock());
+      return updated;
+    });
+  }
+
   setEmployeeActive(id: string, active: boolean, actor: Actor = { kind: 'ceo' }): Employee {
     if (actor.kind !== 'ceo')
       throw new DomainError(tr('직원 활성 상태는 대표만 바꿀 수 있습니다.', 'Only the CEO can change employee active status.'));
     return this.store.transact(() => {
       const e = this.requireEmployee(id);
+      if (active && e.removedAt)
+        throw new DomainError(
+          tr('삭제된 직원은 다시 활성화할 수 없습니다. 새로 채용하세요.', 'Removed employees cannot be reactivated. Hire again instead.'),
+        );
       if (active && !e.active && this.activeEmployees().length >= MAX_ACTIVE_EMPLOYEES) {
         throw new DomainError(
           tr(`활성 직원은 최대 ${MAX_ACTIVE_EMPLOYEES}명입니다.`, `At most ${MAX_ACTIVE_EMPLOYEES} employees can be active.`),

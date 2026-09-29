@@ -1725,6 +1725,25 @@ ${failure.detail.slice(0, 400)}`,
     return this.apply(ticketId, { type: 'release_hold' }, CEO);
   }
 
+  /** 직원 삭제: 실행 중인 작업이나 작성 중인 초안이 있으면 거부한다(업무 확인은 Company가 한다). */
+  removeEmployee(employeeId: string): Employee {
+    const running = this.records.runsByStatus('running').filter((r) => r.employeeId === employeeId);
+    if (running.length)
+      throw new DomainError(
+        tr(
+          `이 직원의 실행이 아직 진행 중입니다(${running.map((r) => r.ticketId).join(', ')}). 끝난 뒤 삭제하세요.`,
+          `This employee still has running work (${running.map((r) => r.ticketId).join(', ')}). Remove after it finishes.`,
+        ),
+      );
+    if (this.records.requests().some((q) => q.employeeId === employeeId && q.status === 'drafting'))
+      throw new DomainError(
+        tr('이 직원이 업무 초안을 작성 중입니다. 끝난 뒤 삭제하세요.', 'This employee is drafting tickets. Remove after it finishes.'),
+      );
+    const e = this.company.removeEmployee(employeeId);
+    this.changed('employee', employeeId);
+    return e;
+  }
+
   cancel(ticketId: string, reason: string): Ticket {
     return this.apply(ticketId, { type: 'cancel', reason }, CEO);
   }

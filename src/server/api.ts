@@ -161,6 +161,8 @@ export class Api {
         );
       case 'POST employees/:id/rank':
         return this.company.setEmployeeRank(id!, oneOf(b, 'rank', RANKS));
+      case 'POST employees/:id/remove':
+        return this.orch.removeEmployee(id!);
       case 'POST employees/:id/active':
         return this.company.setEmployeeActive(id!, Boolean(b.active));
       case 'POST employees/:id/access': {

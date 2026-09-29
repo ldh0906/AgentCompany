@@ -15,9 +15,12 @@ export function Org() {
   const [hiring, setHiring] = useState(false);
   const [editing, setEditing] = useState<Employee | null>(null);
   const [modeling, setModeling] = useState<Employee | null>(null);
+  const [removing, setRemoving] = useState<Employee | null>(null);
   if (!state) return <Skeleton />;
   const ko = lang === 'ko';
   const activeCount = state.employees.filter((e) => e.active).length;
+  const staff = state.employees.filter((e) => !e.removedAt);
+  const removedCount = state.employees.length - staff.length;
   const workload = (id: string) =>
     state.tickets.filter((x) => (x.assigneeId === id || x.reviewerId === id) && !['done', 'failed', 'cancelled'].includes(x.status)).length;
 
@@ -29,6 +32,7 @@ export function Org() {
           <div className="sub">
             {t('activeLimit')} ({activeCount}/4) ·{' '}
             {ko ? '역할은 프롬프트 장식이 아니라 권한과 배정 규칙입니다.' : 'Roles are enforced permissions, not prompt decoration.'}
+            {removedCount > 0 && (ko ? ` · 삭제한 직원 ${removedCount}명(기록에만 남음)` : ` · ${removedCount} removed (kept in history)`)}
           </div>
         </div>
         <button className="btn primary" disabled={activeCount >= 4} onClick={() => setHiring(true)}>
@@ -49,7 +53,7 @@ export function Org() {
             </div>
           </div>
         </div>
-        {state.employees.length === 0 && (
+        {staff.length === 0 && (
           <div className="card" style={{ gridColumn: '1 / -1' }}>
             <EmptyState icon="team">
               <div style={{ color: 'var(--text)', fontWeight: 600, fontSize: 14 }}>{ko ? '아직 직원이 없습니다' : 'No employees yet'}</div>
@@ -64,7 +68,7 @@ export function Org() {
             </EmptyState>
           </div>
         )}
-        {state.employees.map((e) => (
+        {staff.map((e) => (
           <div className="card" key={e.id} style={{ opacity: e.active ? 1 : 0.55 }}>
             <div className="card-head">
               <span className="row">
@@ -122,6 +126,9 @@ export function Org() {
                 >
                   {e.active ? (ko ? '비활성화' : 'Deactivate') : ko ? '활성화' : 'Activate'}
                 </button>
+                <button className="btn small danger" onClick={() => setRemoving(e)}>
+                  {ko ? '삭제' : 'Remove'}
+                </button>
               </div>
             </div>
           </div>
@@ -169,6 +176,31 @@ export function Org() {
       {hiring && <HireModal onClose={() => setHiring(false)} />}
       {editing && <AccessModal employee={editing} onClose={() => setEditing(null)} />}
       {modeling && <ModelModal employee={modeling} onClose={() => setModeling(null)} />}
+      {removing && (
+        <Modal
+          title={ko ? `${removing.name}을(를) 삭제할까요?` : `Remove ${removing.name}?`}
+          onClose={() => setRemoving(null)}
+          actions={
+            <button
+              className="btn danger"
+              disabled={busy}
+              onClick={() =>
+                run(() => api(`employees/${removing.id}/remove`, { body: {} }), ko ? '직원을 삭제했습니다.' : 'Employee removed.').then(
+                  (ok) => (reload(), ok && setRemoving(null)),
+                )
+              }
+            >
+              {ko ? '삭제' : 'Remove'}
+            </button>
+          }
+        >
+          <div className="sub" style={{ lineHeight: 1.7 }}>
+            {ko
+              ? '조직에서 빠지고 다시 활성화할 수 없습니다. 지난 업무·실행 기록에는 이름이 그대로 남습니다. 진행 중인 업무를 맡고 있으면 먼저 재배정하거나 취소해야 합니다.'
+              : 'They leave the team and cannot be reactivated. Past tickets and runs keep their name. Reassign or cancel their open tickets first.'}
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

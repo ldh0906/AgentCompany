@@ -104,11 +104,13 @@ export function Board({ onNewTicket }: { onNewTicket?: () => void }) {
           <input className="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={ko ? '업무 검색…' : 'Search tickets…'} />
           <select value={who} onChange={(e) => setWho(e.target.value)}>
             <option value="">{ko ? '모든 직원' : 'Everyone'}</option>
-            {state.employees.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name}
-              </option>
-            ))}
+            {state.employees
+              .filter((e) => !e.removedAt)
+              .map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
           </select>
           {state.projects.length > 1 && (
             <select value={project} onChange={(e) => setProject(e.target.value)}>
