@@ -1,24 +1,37 @@
-// 앱처럼 쓰기: 주소창 없는 전용 창(Edge/Chrome 앱 모드)과 바탕화면·시작 메뉴 바로가기.
+// 앱처럼 쓰기: 주소창 없는 전용 창(Chrome 계열 앱 모드)과 바탕화면·시작 메뉴 바로가기.
 // 설치하는 것은 없다. 바로가기는 창 없이 서버를 켜는 작은 VBScript를 가리킨다.
+// Edge는 쓰지 않는다(대표 결정, 2026-09-29): Chrome → Brave → Chromium → Vivaldi, 없으면 기본 브라우저 탭.
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-/** 앱 모드를 지원하는 브라우저(Chromium 계열) 실행 파일. */
-export function findAppBrowser(env: NodeJS.ProcessEnv = process.env): string | null {
+/** 앱 창 후보(우선순위 순). */
+export function appBrowserCandidates(env: NodeJS.ProcessEnv = process.env, platform = process.platform): string[] {
   const c: string[] = [];
-  if (process.platform === 'win32') {
-    for (const base of [env['ProgramFiles(x86)'], env.ProgramFiles, env.LOCALAPPDATA].filter(Boolean) as string[]) {
-      c.push(path.join(base, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
-      c.push(path.join(base, 'Google', 'Chrome', 'Application', 'chrome.exe'));
-    }
-  } else if (process.platform === 'darwin') {
-    c.push('/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge');
-    c.push('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+  if (platform === 'win32') {
+    const bases = [env.ProgramFiles, env['ProgramFiles(x86)'], env.LOCALAPPDATA].filter(Boolean) as string[];
+    for (const rel of [
+      ['Google', 'Chrome', 'Application', 'chrome.exe'],
+      ['BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'],
+      ['Chromium', 'Application', 'chrome.exe'],
+      ['Vivaldi', 'Application', 'vivaldi.exe'],
+    ])
+      for (const base of bases) c.push(path.join(base, ...rel));
+  } else if (platform === 'darwin') {
+    c.push(
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    );
   } else {
-    c.push('/usr/bin/microsoft-edge', '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser');
+    c.push('/usr/bin/google-chrome', '/usr/bin/brave-browser', '/usr/bin/chromium', '/usr/bin/chromium-browser');
   }
-  return c.find((f) => existsSync(f)) ?? null;
+  return c;
+}
+
+/** 앱 모드를 지원하는 브라우저 실행 파일(없으면 null → 기본 브라우저 탭). */
+export function findAppBrowser(env: NodeJS.ProcessEnv = process.env): string | null {
+  return appBrowserCandidates(env).find((f) => existsSync(f)) ?? null;
 }
 
 export function appWindowArgs(url: string, dataDir: string): string[] {
@@ -56,7 +69,14 @@ function powershell(script: string): Promise<{ ok: boolean; out: string }> {
   return new Promise((resolve) =>
     execFile(
       'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ${script}`,
+      ],
       { windowsHide: true, encoding: 'utf8' },
       (error, stdout, stderr) => resolve({ ok: !error, out: `${stdout}${stderr}`.trim() }),
     ),

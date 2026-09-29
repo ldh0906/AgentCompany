@@ -63,7 +63,7 @@ npm run demo
 
 ```bash
 agent-company doctor     # 설치·로그인 상태 점검
-agent-company start      # 전용 앱 창으로 대시보드 열기 (Edge/Chrome 앱 모드)
+agent-company start      # 전용 앱 창으로 대시보드 열기 (Chrome·Brave 앱 모드, 없으면 기본 브라우저)
 agent-company shortcut   # Windows: 바탕화면·시작 메뉴 아이콘 (콘솔 창 없이 실행)
 ```
 

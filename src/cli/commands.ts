@@ -205,10 +205,15 @@ async function start(argv: string[], demo: boolean): Promise<void> {
       ),
     );
   console.log(
-    tr(
-      '  종료: Ctrl+C (진행 중인 직원 실행은 계속되며 다음 시작 때 이어받습니다)\n',
-      '  Exit: Ctrl+C (active employee runs continue and reconnect on next startup)\n',
-    ),
+    values.background
+      ? tr(
+          '  종료: 대시보드의 시스템 화면 (진행 중인 직원 실행은 계속되며 다음 시작 때 이어받습니다)\n',
+          '  Exit: System page in the dashboard (active employee runs continue and reconnect on next startup)\n',
+        )
+      : tr(
+          '  종료: Ctrl+C (진행 중인 직원 실행은 계속되며 다음 시작 때 이어받습니다)\n',
+          '  Exit: Ctrl+C (active employee runs continue and reconnect on next startup)\n',
+        ),
   );
   open(server.url);
 

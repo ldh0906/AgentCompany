@@ -50,7 +50,7 @@ The demo company has four fake employees: a diligent one, a **lazy** one who cla
 
 ```bash
 agent-company doctor     # which CLIs are installed and logged in
-agent-company start      # opens the dashboard in its own app window (Edge/Chrome app mode)
+agent-company start      # opens the dashboard in its own app window (Chrome/Brave app mode, else your default browser)
 agent-company shortcut   # Windows: desktop + Start menu icon that starts it without a console
 ```
 
