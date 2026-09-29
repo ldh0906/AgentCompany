@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, type Employee } from '../api.ts';
 import { useCompany } from '../App.tsx';
 import { ACCESS, ROLE, useT } from '../i18n.ts';
+import { MAX_ACTIVE_EMPLOYEES } from '../../../src/core/types.ts';
 import { Avatar, CliChip, EmptyState, Icon, Modal, useAction, Skeleton } from '../components/ui.tsx';
 import { ChipToggles, ModelPicker, Segmented, useCliStatus } from '../components/kit.tsx';
 import { fmtTokens } from '../components/usage.tsx';
@@ -30,12 +31,12 @@ export function Org() {
         <div>
           <h1>{t('nav_org')}</h1>
           <div className="sub">
-            {t('activeLimit')} ({activeCount}/4) ·{' '}
+            {t('activeLimit')} ({activeCount}/{MAX_ACTIVE_EMPLOYEES}) ·{' '}
             {ko ? '역할은 프롬프트 장식이 아니라 권한과 배정 규칙입니다.' : 'Roles are enforced permissions, not prompt decoration.'}
             {removedCount > 0 && (ko ? ` · 삭제한 직원 ${removedCount}명(기록에만 남음)` : ` · ${removedCount} removed (kept in history)`)}
           </div>
         </div>
-        <button className="btn primary" disabled={activeCount >= 4} onClick={() => setHiring(true)}>
+        <button className="btn primary" disabled={activeCount >= MAX_ACTIVE_EMPLOYEES} onClick={() => setHiring(true)}>
           <Icon name="plus" /> {t('hire')}
         </button>
       </div>

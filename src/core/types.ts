@@ -10,7 +10,7 @@ export type AccessLevel =
   | 'write-allowlist' // 3: 허용 목록 명령 자동, 나머지는 승인
   | 'full-auto'; // 4: 모든 요청 자동 허용 (위험, 대표 승인 필요)
 
-export const MAX_ACTIVE_EMPLOYEES = 4;
+export const MAX_ACTIVE_EMPLOYEES = 8;
 
 /** 담당 업무: 이 직원이 어떤 일을 맡는지(배정 대상 결정). */
 export type RoleTemplate = 'chief-of-staff' | 'planner' | 'architect' | 'implementer' | 'ux' | 'qa' | 'recorder';

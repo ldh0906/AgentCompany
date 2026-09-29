@@ -55,7 +55,7 @@ agent-company shortcut   # Windows: desktop + Start menu icon that starts it wit
 ```
 
 1. **Register a project**: browse to a git repo; the base branch, verify commands (from `package.json`, `Cargo.toml`, `go.mod`, pytest…) and protected paths are filled in for you.
-2. **Hire up to 4 employees**: pick a preset (implementer, QA, lead, docs), the CLI, a model from the CLI's own list, and a **rank**.
+2. **Hire up to 8 employees**: pick a preset (implementer, QA, lead, docs), the CLI, a model from the CLI's own list, and a **rank**.
 3. **Create a ticket** from a template (feature, bug fix, docs, review…), pick the difficulty and click the folders it may change.
 4. Approve or reject in the **CEO inbox**. That's the only place work reaches your repo.
 

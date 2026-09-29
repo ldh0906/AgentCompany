@@ -1,7 +1,7 @@
 // 직급 기반 배정: 어려운 업무는 높은 직급, 일은 감당할 수 있는 가장 낮은 직급이, 검수는 같거나 높은 직급이.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pickStaff } from '../../src/core/staffing.ts';
+import { pickPanel, pickStaff } from '../../src/core/staffing.ts';
 import type { Employee, Rank, RoleTemplate, CliKind } from '../../src/core/types.ts';
 
 let n = 0;
@@ -114,4 +114,25 @@ test('담당 업무가 맞는 직원이 직급보다 먼저: 검토 업무는 �
   const r = pickStaff({ type: 'review', difficulty: 'normal' }, [senior, leadQa, leadPlan], noLoad);
   assert.ok(r.ok);
   assert.ok(['leadQa', 'leadPlan'].includes(r.assigneeId));
+});
+
+test('교차 검토 패널(최대 4명): 서로 다른 AI를 먼저, 그다음 높은 직급', () => {
+  const people = [
+    emp('junior', ['qa'], 'claude', 'c-junior'),
+    emp('senior', ['qa'], 'claude', 'c-senior'),
+    emp('lead', ['qa'], 'claude', 'c-lead'),
+    emp('junior', ['qa'], 'codex', 'x-junior'),
+    emp('senior', ['qa'], 'codex', 'x-senior'),
+    emp('junior', ['qa'], 'agy', 'a-junior'),
+    emp('senior', ['planner'], 'claude', 'c-senior2'),
+    emp('junior', ['qa'], 'codex', 'x-junior2'),
+  ];
+  const panel = pickPanel(people, 4).map((e) => e.id);
+  assert.equal(panel.length, 4);
+  assert.deepEqual(panel.slice(0, 3), ['c-lead', 'x-senior', 'a-junior'], 'AI마다 가장 높은 직급 한 명씩');
+  assert.equal(panel[3], 'c-senior', '남은 자리는 높은 직급(같으면 먼저 채용된 순)');
+  assert.deepEqual(
+    pickPanel(people.slice(0, 2), 4).map((e) => e.id),
+    ['c-senior', 'c-junior'],
+  );
 });

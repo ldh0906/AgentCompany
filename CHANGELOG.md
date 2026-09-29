@@ -4,7 +4,7 @@
 
 ### Company
 - Tickets move only through a pure, property-tested state machine. Employee reports are claims, not transitions.
-- Up to 4 active employees, each a Claude Code, Codex, Antigravity or demo CLI with its own model and access level.
+- Up to 8 active employees, each a Claude Code, Codex, Antigravity or demo CLI with its own model, reasoning effort, access level and rank; no per-CLI concurrency cap.
 - Chief of staff turns a one-line CEO request into ticket drafts from a read-only checkout; the CEO confirms.
 - Blind cross-review tickets with a claim ledger: independent analysis, anonymized cross-verdicts, mandatory rebuttal, deterministic synthesis, unresolved disputes escalated to the CEO.
 - Decision log with statuses (current, superseded, withdrawn, …); only current decisions bind employees.

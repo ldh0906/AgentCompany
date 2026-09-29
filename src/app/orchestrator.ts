@@ -23,7 +23,7 @@ import { writeDecision } from '../approvals/file-queue.ts';
 import type { Actor } from '../core/ticket-machine.ts';
 import type { Claim, Employee, Evidence, FailureClass, Project, Ticket, TicketStatus } from '../core/types.ts';
 import { DEFAULT_BUDGET, DIFFICULTIES, DIFFICULTY_RANK, RANK_ORDER, TERMINAL_STATUSES, difficultyOf, rankOf } from '../core/types.ts';
-import { pickStaff } from '../core/staffing.ts';
+import { pickPanel, pickStaff } from '../core/staffing.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
 import { locateExecutable } from '../runner/locate.ts';
 import { abandonAndTerminate, isSameProcessAlive, readExitRecord, reapGroup, startProcess, waitForExit } from '../runner/process.ts';
@@ -97,7 +97,8 @@ export class Orchestrator {
       dataDir: opts.dataDir,
       language: opts.language ?? 'ko',
       profileRoot: opts.profileRoot ?? null,
-      concurrency: { claude: 1, codex: 1, agy: 1, fake: 4, ...opts.concurrency },
+      // CLI별 동시 실행 수: 실제 CLI는 제한 없음(대표 결정, 2026-09-30). 사용량 한도에 닿으면 usage_limit 보류로 멈춘다.
+      concurrency: { claude: Infinity, codex: Infinity, agy: Infinity, fake: 4, ...opts.concurrency },
       onChange: opts.onChange,
     };
   }
@@ -1337,7 +1338,7 @@ ${failure.detail.slice(0, 400)}`,
     const key = `delib:${t.id}:participants`;
     const saved = this.company.store.getSetting(key);
     if (saved) return (JSON.parse(saved) as string[]).map((id) => this.company.requireEmployee(id));
-    const list = this.company.activeEmployees().slice(0, 4);
+    const list = pickPanel(this.company.activeEmployees(), 4);
     this.company.store.setSetting(key, JSON.stringify(list.map((e) => e.id)));
     return list;
   }

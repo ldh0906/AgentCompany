@@ -63,3 +63,17 @@ export function pickStaff(
   )[0]!;
   return { ok: true, assigneeId: assignee.id, reviewerId: reviewer.id, ownerId, reviewBelowRank };
 }
+
+/**
+ * 블라인드 교차 검토 패널(최대 size명). 관점이 겹치지 않도록 AI(CLI)마다 가장 높은 직급 한 명씩 먼저 뽑고,
+ * 남은 자리는 높은 직급 순(같으면 입력 순서 = 채용 순)으로 채운다.
+ */
+export function pickPanel(active: Employee[], size = 4): Employee[] {
+  const byRank = active
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => RANK_ORDER[rankOf(b.e)] - RANK_ORDER[rankOf(a.e)] || a.i - b.i)
+    .map((x) => x.e);
+  const seen = new Set<string>();
+  const first = byRank.filter((e) => !seen.has(e.cli) && seen.add(e.cli));
+  return [...first, ...byRank.filter((e) => !first.includes(e))].slice(0, size);
+}

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api, type Approval, type DomainEvent, type State } from '../api.ts';
 import { Link, useCompany, useRoute } from '../App.tsx';
 import { useT } from '../i18n.ts';
+import { MAX_ACTIVE_EMPLOYEES } from '../../../src/core/types.ts';
 import { Avatar, empName, EmptyState, HoldChip, Icon, Modal, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
 import { useCliStatus } from '../components/kit.tsx';
 import { UsagePanel } from '../components/usage.tsx';
@@ -410,7 +411,10 @@ function TeamPanel() {
     <div className="card">
       <h2>
         <span className="row">
-          <Icon name="team" /> {ko ? '팀' : 'Team'} <span className="sub">{active.length}/4</span>
+          <Icon name="team" /> {ko ? '팀' : 'Team'}{' '}
+          <span className="sub">
+            {active.length}/{MAX_ACTIVE_EMPLOYEES}
+          </span>
         </span>
         <button className="btn small" onClick={() => go('/org')}>
           {ko ? '조직 관리' : 'Manage'}

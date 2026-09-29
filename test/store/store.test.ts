@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { MAX_ACTIVE_EMPLOYEES } from '../../src/core/types.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -69,17 +70,18 @@ test('트랜잭션 실패 시 상태와 이벤트 모두 롤백', (t) => {
   assert.equal(company.requireTicket(ticket.id).status, 'received');
 });
 
-test('활성 직원 최대 4명, 비활성화 후 추가 가능', (t) => {
+test('활성 직원 최대 8명, 비활성화 후 추가 가능', (t) => {
+  assert.equal(MAX_ACTIVE_EMPLOYEES, 8);
   const store = tempDb(t).open();
   const company = new Company(store);
-  const hired = [1, 2, 3, 4].map((n) =>
-    company.hireEmployee({ name: `직원${n}`, roles: ['implementer'], cli: 'codex', model: 'gpt-6-astra' }),
+  const hired = Array.from({ length: MAX_ACTIVE_EMPLOYEES }, (_, n) =>
+    company.hireEmployee({ name: `직원${n + 1}`, roles: ['implementer'], cli: 'codex', model: 'gpt-6-astra' }),
   );
-  assert.throws(() => company.hireEmployee({ name: '다섯째', roles: ['qa'], cli: 'claude', model: null }), /최대 4명/);
+  assert.throws(() => company.hireEmployee({ name: '초과', roles: ['qa'], cli: 'claude', model: null }), /최대 8명/);
   company.setEmployeeActive(hired[0]!.id, false);
-  const fifth = company.hireEmployee({ name: '다섯째', roles: ['qa'], cli: 'claude', model: null });
-  assert.equal(fifth.active, true);
-  assert.throws(() => company.setEmployeeActive(hired[0]!.id, true), /최대 4명/);
+  const next = company.hireEmployee({ name: '초과', roles: ['qa'], cli: 'claude', model: null });
+  assert.equal(next.active, true);
+  assert.throws(() => company.setEmployeeActive(hired[0]!.id, true), /최대 8명/);
 });
 
 test('직원은 직접 고용하거나 티켓을 만들 수 없음, 전체 자동 등급은 바로 부여 불가', (t) => {
