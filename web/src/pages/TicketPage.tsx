@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type Approval, type Claim, type DomainEvent, type Evidence, type RunSummary, type Ticket } from '../api.ts';
 import { Link, useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
+import { fmtTokens } from '../components/usage.tsx';
 import { CliChip, DiffView, empName, HoldChip, Icon, Modal, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
 import { ApprovalItem, describeEvent } from './Dashboard.tsx';
 
@@ -62,6 +63,8 @@ export function TicketPage({ id }: { id: string }) {
             {t('assignee')} <b>{empName(state.employees, tk.assigneeId)}</b> · {t('reviewer')}{' '}
             <b>{empName(state.employees, tk.reviewerId)}</b> · {ko ? '난이도' : 'Difficulty'} {difficultyLabel(tk.difficulty)} ·{' '}
             {t('round')} {tk.round}/{tk.budget.maxRounds} · {ko ? '실행' : 'runs'} {tk.runCount}/{tk.budget.maxRuns}
+            {(state.usage?.byTicket[tk.id]?.total ?? 0) > 0 &&
+              ` · ${fmtTokens(state.usage!.byTicket[tk.id]!.total, lang)} ${ko ? '토큰' : 'tokens'}`}
           </div>
         </div>
         <div className="row">
@@ -281,6 +284,7 @@ export function TicketPage({ id }: { id: string }) {
                       {r.id}
                       <div className="sub">
                         R{r.round} · {when(r.startedAt)}
+                        {r.usage ? ` · ${fmtTokens(r.usage.total, lang)} ${ko ? '토큰' : 'tokens'}` : ''}
                       </div>
                     </td>
                     <td>{r.kind === 'work' ? (ko ? '작업' : 'work') : ko ? '검수' : 'review'}</td>

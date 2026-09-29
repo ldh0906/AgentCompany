@@ -4,6 +4,7 @@ import { Link, useCompany, useRoute } from '../App.tsx';
 import { useT } from '../i18n.ts';
 import { Avatar, empName, EmptyState, HoldChip, Icon, Modal, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
 import { useCliStatus } from '../components/kit.tsx';
+import { UsagePanel } from '../components/usage.tsx';
 import { RequestBox } from './Requests.tsx';
 
 const ACTIVE = ['assigned', 'in_progress', 'verifying', 'in_review', 'changes_requested', 'integrating'];
@@ -315,6 +316,7 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
 
         <div className="grid" style={{ alignContent: 'start' }}>
           <TeamPanel />
+          <UsagePanel />
           <div className="card">
             <h2>
               <span className="row">

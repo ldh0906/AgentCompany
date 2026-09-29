@@ -4,6 +4,7 @@ import { useCompany } from '../App.tsx';
 import { ACCESS, ROLE, useT } from '../i18n.ts';
 import { Avatar, CliChip, EmptyState, Icon, Modal, useAction, Skeleton } from '../components/ui.tsx';
 import { ChipToggles, Segmented, useCliStatus, useModels } from '../components/kit.tsx';
+import { fmtTokens } from '../components/usage.tsx';
 
 const ROLES = Object.keys(ROLE.ko);
 
@@ -85,6 +86,8 @@ export function Org() {
               </div>
               <div className="sub" style={{ marginTop: 8 }}>
                 {ko ? '맡은 업무' : 'Workload'}: {workload(e.id)}
+                {(state.usage?.byEmployee[e.id]?.total ?? 0) > 0 &&
+                  ` · ${ko ? '토큰' : 'tokens'} ${fmtTokens(state.usage!.byEmployee[e.id]!.total, lang)}`}
               </div>
               <div className="row" style={{ marginTop: 12 }}>
                 <button className="btn small" onClick={() => setEditing(e)}>

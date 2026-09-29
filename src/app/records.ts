@@ -4,27 +4,22 @@ import { tr } from '../core/i18n.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Store } from '../store/db.ts';
 import type { AgentReport, TicketDraft } from '../agents/report.ts';
-import type { Approval, ApprovalKind, ApprovalState, Claim, Decision, DecisionStatus, Evidence, Run, Ticket } from '../core/types.ts';
+import type {
+  Approval,
+  ApprovalKind,
+  ApprovalState,
+  Claim,
+  Decision,
+  DecisionStatus,
+  Evidence,
+  Run,
+  Ticket,
+  UsageSummary,
+  UsageTotals,
+} from '../core/types.ts';
 import type { DeliberationPhase } from '../agents/deliberation.ts';
 import { TERMINAL_STATUSES } from '../core/types.ts';
 import { scopesOverlap } from '../workspace/workspace.ts';
-
-export interface UsageTotals {
-  input: number;
-  cacheRead: number;
-  output: number;
-  total: number;
-  costUsd: number;
-  runs: number;
-}
-export interface UsageSummary {
-  all: UsageTotals;
-  today: UsageTotals;
-  byEmployee: Record<string, UsageTotals>;
-  byCli: Record<string, UsageTotals>;
-  byTicket: Record<string, UsageTotals>;
-  daily: Record<string, UsageTotals>; // YYYY-MM-DD(현지)
-}
 
 export interface RunRecord extends Run {
   round: number;

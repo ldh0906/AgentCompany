@@ -50,6 +50,23 @@ export interface TokenUsage {
   costUsd: number | null; // Claude만 추정 비용을 보고한다
 }
 
+export interface UsageTotals {
+  input: number;
+  cacheRead: number;
+  output: number;
+  total: number;
+  costUsd: number;
+  runs: number;
+}
+export interface UsageSummary {
+  all: UsageTotals;
+  today: UsageTotals;
+  byEmployee: Record<string, UsageTotals>;
+  byCli: Record<string, UsageTotals>;
+  byTicket: Record<string, UsageTotals>;
+  daily: Record<string, UsageTotals>; // YYYY-MM-DD(현지)
+}
+
 export type IntegrationMode = 'manual' | 'auto_after_approval';
 
 export interface VerifyCommand {

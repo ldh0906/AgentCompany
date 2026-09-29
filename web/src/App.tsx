@@ -84,7 +84,7 @@ function Shell() {
 
   let page: React.ReactNode;
   if (path.startsWith('/tickets/')) page = <TicketPage id={decodeURIComponent(path.slice('/tickets/'.length))} />;
-  else if (path.startsWith('/board')) page = <Board />;
+  else if (path.startsWith('/board')) page = <Board onNewTicket={() => setNewTicket(true)} />;
   else if (path.startsWith('/org')) page = <Org />;
   else if (path.startsWith('/projects')) page = <Projects />;
   else if (path.startsWith('/decisions')) page = <Decisions />;

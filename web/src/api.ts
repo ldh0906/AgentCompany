@@ -1,6 +1,8 @@
 import type { Approval, Claim, Decision, DomainEvent, Employee, Evidence, Project, Ticket } from '../../src/core/types.ts';
 
 export type { Approval, Claim, Decision, DomainEvent, Employee, Evidence, Project, Ticket };
+import type { UsageSummary } from '../../src/core/types.ts';
+export type { UsageSummary };
 
 export interface RunSummary {
   id: string;
@@ -18,6 +20,7 @@ export interface RunSummary {
   headSha: string | null;
   changedPaths: string[];
   exitCode: number | null;
+  usage?: { input: number; cacheRead: number; output: number; total: number; costUsd: number | null } | null;
 }
 
 export interface AdapterInfo {
@@ -66,6 +69,7 @@ export interface State {
   events: DomainEvent[];
   requests: CeoRequest[];
   chiefOfStaff: string | null;
+  usage?: UsageSummary;
 }
 
 const TOKEN_KEY = 'agent-company-token';
