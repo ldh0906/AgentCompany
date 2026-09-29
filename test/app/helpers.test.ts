@@ -15,7 +15,10 @@ test('모델 목록: codex debug models JSON (목록 공개 모델만)', () => {
       { slug: 'hidden-x', display_name: 'Hidden', visibility: 'hide' },
     ],
   });
-  assert.deepEqual(parseCodexModels(out), [{ id: 'gpt-6-astra', label: 'GPT-6-Astra', note: 'Frontier' }]);
+  assert.deepEqual(parseCodexModels(out), [
+    { id: 'gpt-6-astra', label: 'GPT-6-Astra', note: 'Frontier' },
+    { id: 'hidden-x', label: 'Hidden (hidden)' },
+  ]);
 });
 
 test('모델 목록: agy models (ID<TAB>이름, 안내 문구 무시)', () => {
@@ -83,4 +86,18 @@ test('저장소 분석: git 저장소가 아니면 알려 준다', async (t) => 
   const r = await inspectRepo(d);
   assert.equal(r.isGit, false);
   assert.deepEqual(r.verify, []);
+});
+
+test('모델 목록: Codex 숨김 모델은 맨 뒤, 나머지는 priority 순', () => {
+  const out = JSON.stringify({
+    models: [
+      { slug: 'b', visibility: 'list', priority: 5 },
+      { slug: 'h', visibility: 'hide', priority: 1 },
+      { slug: 'a', visibility: 'list', priority: 2 },
+    ],
+  });
+  assert.deepEqual(
+    parseCodexModels(out).map((m) => m.id),
+    ['a', 'b', 'h'],
+  );
 });

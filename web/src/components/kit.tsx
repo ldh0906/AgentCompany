@@ -93,6 +93,8 @@ export interface ModelOption {
   efforts?: string[];
   defaultEffort?: string;
   effortRequired?: boolean;
+  /** 설치된 CLI로는 쓸 수 없는 이유(예: 더 새 Claude Code 필요). 있으면 잠근다. */
+  unavailable?: string;
 }
 type ModelList = { models: ModelOption[]; defaultModel?: string; error?: string };
 const modelCache = new Map<string, Promise<ModelList>>();
@@ -141,7 +143,8 @@ export function ModelPicker({
     // 목록이 이 CLI의 것일 때만(바꾼 직후에는 이전 CLI 목록이 잠깐 남아 있다).
     if (!autoSelect || loading || forCli !== cli || !models.length || picked.current === cli) return;
     picked.current = cli;
-    if (model === '') onChange(models[0]!.id, models[0]!.defaultEffort ?? '');
+    const first = models.find((m) => !m.unavailable);
+    if (model === '' && first) onChange(first.id, first.defaultEffort ?? '');
   }, [autoSelect, loading, models, cli, forCli, model]); // eslint-disable-line react-hooks/exhaustive-deps
   const known = models.find((m) => m.id === model);
   const isCustom = custom || (model !== '' && !known && !loading);
@@ -165,8 +168,9 @@ export function ModelPicker({
           </option>
           {loading && <option disabled>{ko ? '모델 목록 불러오는 중…' : 'Loading models…'}</option>}
           {models.map((m) => (
-            <option key={m.id} value={m.id}>
+            <option key={m.id} value={m.id} disabled={Boolean(m.unavailable)}>
               {m.label === m.id ? m.id : `${m.label} — ${m.id}`}
+              {m.unavailable ? ` · ${ko ? '업데이트 필요' : 'update needed'}: ${m.unavailable}` : ''}
             </option>
           ))}
           <option value="__custom">{ko ? '직접 입력…' : 'Type an exact model id…'}</option>
@@ -232,8 +236,8 @@ export function ModelPicker({
       {cli === 'claude' && (
         <span className="hint">
           {ko
-            ? 'Claude Code 2.1.202에서 별칭이 가리키는 정확한 모델명을 실측한 목록입니다.'
-            : 'Exact names measured from Claude Code 2.1.202 aliases.'}
+            ? `이 PC의 Claude Code로 모델마다 실제 호출해 확인한 목록입니다.${models.some((m) => m.unavailable) ? ' 잠긴 모델은 Claude Code를 업데이트(claude update)하면 쓸 수 있습니다.' : ''}`
+            : `Verified by calling each model with this PC's Claude Code.${models.some((m) => m.unavailable) ? ' Locked models unlock after updating Claude Code (claude update).' : ''}`}
         </span>
       )}
     </div>

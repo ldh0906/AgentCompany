@@ -194,6 +194,7 @@ export type FailureClass =
   | 'timeout'
   | 'auth_required'
   | 'usage_limit'
+  | 'model_unsupported' // 설치된 CLI가 이 모델을 지원하지 않음(업데이트 필요)
   | 'crash'
   | 'schema_invalid'
   | 'nonce_mismatch'

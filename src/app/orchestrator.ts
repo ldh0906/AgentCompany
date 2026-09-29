@@ -730,7 +730,17 @@ export class Orchestrator {
               ? { reason: 'needs_permission' as const, note: tr('직원 CLI 로그인이 필요합니다.', 'Employee CLI login required.') }
               : failure.failure === 'spawn_failed'
                 ? { reason: 'needs_decision' as const, note: failure.detail }
-                : undefined;
+                : failure.failure === 'model_unsupported'
+                  ? {
+                      reason: 'needs_decision' as const,
+                      note: tr(
+                        `설치된 CLI가 이 직원의 모델을 지원하지 않습니다. CLI를 업데이트하거나(예: claude update) 조직 화면에서 모델을 바꾸세요.
+${failure.detail.slice(0, 400)}`,
+                        `The installed CLI does not support this employee's model. Update the CLI (e.g. claude update) or change the model on the Team page.
+${failure.detail.slice(0, 400)}`,
+                      ),
+                    }
+                  : undefined;
         this.apply(ticket.id, {
           type: 'run_aborted',
           reason: `${failure.failure}: ${failure.detail.slice(0, 300)}`,
@@ -759,7 +769,7 @@ export class Orchestrator {
     if (failure) {
       const n = (this.reviewFailures.get(ticket.id) ?? 0) + 1;
       this.reviewFailures.set(ticket.id, n);
-      if (n >= 2 || failure.failure === 'usage_limit' || failure.failure === 'auth_required') {
+      if (n >= 2 || failure.failure === 'usage_limit' || failure.failure === 'auth_required' || failure.failure === 'model_unsupported') {
         this.apply(ticket.id, {
           type: 'hold',
           reason: failure.failure === 'usage_limit' ? 'usage_limit' : 'needs_decision',

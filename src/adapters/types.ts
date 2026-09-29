@@ -98,6 +98,16 @@ export function obj(v: unknown): Record<string, unknown> | null {
   return v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
 }
 
+// 실측(Claude Code 2.1.202): "does not support this model; version 2.1.280 or newer is required",
+// "There's an issue with the selected model (…). It may not exist or you may not have access to it."
+const MODEL_PATTERNS = [
+  /issue with the selected model/i,
+  /may not exist or you may not have access/i,
+  /does not support this model/i,
+  /or newer is required/i,
+  /unknown model/i,
+  /model[^\n]{0,40}(not found|not supported|unsupported|does not exist)/i,
+];
 const USAGE_PATTERNS = [/usage limit/i, /rate limit/i, /quota/i, /limit reached/i, /429/, /too many requests/i, /사용량/];
 const AUTH_PATTERNS = [
   /not logged in/i,
@@ -119,6 +129,7 @@ export function classifyCommon(input: {
   if (input.timedOut) return 'timeout';
   const text = `${input.stderr}\n${input.finalText ?? ''}`;
   if (AUTH_PATTERNS.some((p) => p.test(text))) return 'auth_required';
+  if (MODEL_PATTERNS.some((p) => p.test(text))) return 'model_unsupported';
   if (USAGE_PATTERNS.some((p) => p.test(text))) return 'usage_limit';
   if (input.exitCode !== 0) return 'crash';
   return 'unknown';
