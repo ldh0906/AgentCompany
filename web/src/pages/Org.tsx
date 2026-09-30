@@ -4,7 +4,7 @@ import { useCompany, useRoute } from '../App.tsx';
 import { ACCESS, josa, ROLE, useT } from '../i18n.ts';
 import { MAX_ACTIVE_EMPLOYEES } from '../../../src/core/types.ts';
 import { Avatar, CliChip, EmptyState, Icon, Modal, useAction, Skeleton } from '../components/ui.tsx';
-import { ChipToggles, ModelPicker, Segmented, useCliStatus } from '../components/kit.tsx';
+import { ChipToggles, CliConnect, ModelPicker, Segmented, useCliStatus } from '../components/kit.tsx';
 import { fmtTokens } from '../components/usage.tsx';
 
 const ROLES = Object.keys(ROLE.ko);
@@ -35,7 +35,7 @@ export function Org() {
           <h1>{t('nav_org')}</h1>
           <div className="sub">
             {t('activeLimit')} ({activeCount}/{MAX_ACTIVE_EMPLOYEES}) ·{' '}
-            {ko ? '역할은 프롬프트 장식이 아니라 권한과 배정 규칙입니다.' : 'Roles are enforced permissions, not prompt decoration.'}
+            {ko ? '역할에 따라 할 수 있는 일과 맡는 업무가 정해집니다.' : 'Roles decide what each employee may do and gets assigned.'}
             {removedCount > 0 && (ko ? ` · 삭제한 직원 ${removedCount}명(기록에만 남음)` : ` · ${removedCount} removed (kept in history)`)}
           </div>
         </div>
@@ -63,7 +63,7 @@ export function Org() {
               <div style={{ color: 'var(--text)', fontWeight: 600, fontSize: 14 }}>{ko ? '아직 직원이 없습니다' : 'No employees yet'}</div>
               <div style={{ marginTop: 4 }}>
                 {ko
-                  ? '구현 담당과 검수 담당을 서로 다른 CLI로 두 명 이상 뽑으세요. 예: 구현 Claude Code, 검수 Codex.'
+                  ? '"기본 팀 한 번에 만들기"를 누르면 팀장·구현·검수 담당을 연결된 AI로 섞어 한 번에 뽑습니다.'
                   : 'Hire at least two, on different CLIs for implementing and reviewing — e.g. Claude Code builds, Codex reviews.'}
               </div>
               <div className="row" style={{ marginTop: 14, justifyContent: 'center' }}>
@@ -455,16 +455,25 @@ function HireModal({ onClose }: { onClose: () => void }) {
 
 /** 기본 팀 한 번에: 팀장(비서실장) + 구현 2 + 검수 2, 준비된 CLI를 섞어서. 실측: 채용 창을 5번 여는 게 가장 번거로웠다. */
 function QuickTeamModal({ onClose }: { onClose: () => void }) {
-  const { reload } = useCompany();
+  const { state, reload } = useCompany();
   const { lang } = useT();
   const ko = lang === 'ko';
   const { busy, run } = useAction();
   const clis = useCliStatus();
   const [fullAuto, setFullAuto] = useState(true);
-  const ready = (clis ?? []).filter((c) => c.found && c.login !== 'missing').map((c) => c.kind);
+  // 로그인 확인된 AI를 먼저(첫 실행 때 확인하는 AI는 뒤로).
+  const ready = (clis ?? [])
+    .filter((c) => c.found && c.login !== 'missing')
+    .sort((x, y) => Number(y.login === 'ok') - Number(x.login === 'ok'))
+    .map((c) => c.kind);
   const a = ready.includes('claude') ? 'claude' : ready[0];
+  const notReady = (clis ?? []).some((c) => c.found && c.login !== 'ok');
   const b = ready.find((k) => k !== a) ?? a;
   const label = (k: string | undefined) => CLI_SHORT[k ?? ''] ?? k ?? '';
+  // 허용 목록 등급이 없는 AI(Antigravity: 읽기 전용·전체 자동뿐)는 전체 자동으로만 일할 수 있다.
+  // 실측(첫 사용): 연결된 AI가 Antigravity뿐이면 첫 채용부터 "등급을 지원하지 않습니다"로 실패했다.
+  const onlyFullAuto = (cli: string) =>
+    !(state?.adapters.find((x) => x.kind === cli)?.capabilities.accessLevels ?? []).includes('write-allowlist');
   const plan =
     a === undefined
       ? []
@@ -495,7 +504,7 @@ function QuickTeamModal({ onClose }: { onClose: () => void }) {
               effort: pick[p.cli]?.defaultEffort ?? null,
               roles: p.roles,
               rank: p.rank,
-              accessLevel: 'write-allowlist',
+              accessLevel: onlyFullAuto(p.cli) ? 'read-only' : 'write-allowlist',
               allowedCommands: [
                 ['git', 'status'],
                 ['git', 'diff'],
@@ -503,7 +512,8 @@ function QuickTeamModal({ onClose }: { onClose: () => void }) {
               ],
             },
           });
-          if ('lead' in p && fullAuto) await api(`employees/${e.id}/access`, { body: { accessLevel: 'full-auto', confirm: 'full-auto' } });
+          if (('lead' in p && fullAuto) || onlyFullAuto(p.cli))
+            await api(`employees/${e.id}/access`, { body: { accessLevel: 'full-auto', confirm: 'full-auto' } });
         }
       },
       ko ? `직원 ${plan.length}명을 채용했습니다.` : `Hired ${plan.length} employees.`,
@@ -520,10 +530,16 @@ function QuickTeamModal({ onClose }: { onClose: () => void }) {
     >
       <div className="form">
         {clis === null ? (
-          <div className="sub">{ko ? 'CLI 확인 중…' : 'Checking CLIs…'}</div>
+          <div className="sub">{ko ? 'AI 확인 중…' : 'Checking AIs…'}</div>
         ) : !plan.length ? (
           <div className="banner bad">
-            {ko ? '준비된 CLI가 없습니다. 시스템 화면에서 설치·로그인을 확인하세요.' : 'No CLI is ready. Check the System page.'}
+            {clis.some((c) => c.found)
+              ? ko
+                ? '연결된 AI가 없습니다. 아래에서 로그인하세요.'
+                : 'No AI is connected yet. Log in below.'
+              : ko
+                ? '설치된 AI(Claude Code·Codex·Antigravity)가 없습니다. 하나 이상 설치한 뒤 다시 여세요.'
+                : 'No AI CLI (Claude Code, Codex, Antigravity) is installed.'}
           </div>
         ) : (
           <div className="list">
@@ -533,6 +549,14 @@ function QuickTeamModal({ onClose }: { onClose: () => void }) {
                 <span className="sub">
                   {p.roles.map((r) => ROLE[lang][r] ?? r).join(' · ')} · {RANK_LABEL(ko, p.rank)}
                 </span>
+                {onlyFullAuto(p.cli) && (
+                  <span
+                    className="chip bad"
+                    title={ko ? '이 AI는 읽기 전용과 전체 자동만 지원합니다.' : 'This AI supports only read-only and full-auto.'}
+                  >
+                    {ko ? '전체 자동' : 'Full auto'}
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -546,10 +570,20 @@ function QuickTeamModal({ onClose }: { onClose: () => void }) {
           </span>
         </label>
         <div className="hint">
-          {ko
-            ? '서로 다른 AI가 구현과 검수를 나눠 맡습니다. 모델·이름은 채용 뒤 바꿀 수 있습니다.'
-            : 'Different AIs build and review. Models and names can be changed later.'}
+          {b !== a
+            ? ko
+              ? '서로 다른 AI가 구현과 검수를 나눠 맡습니다. 모델·이름은 채용 뒤 바꿀 수 있습니다.'
+              : 'Different AIs build and review. Models and names can be changed later.'
+            : ko
+              ? '지금은 한 종류 AI만 연결되어 같은 AI끼리 검수합니다. 다른 AI에 로그인한 뒤 만들면 서로 다른 AI가 검수해 실수를 더 잘 잡습니다.'
+              : 'Only one kind of AI is connected, so it reviews its own kind. Log in to another AI first for cross-checking.'}
         </div>
+        {clis && notReady && (
+          <details className="advanced" open={b === a}>
+            <summary>{ko ? 'AI 연결 상태' : 'AI connections'}</summary>
+            <CliConnect />
+          </details>
+        )}
       </div>
     </Modal>
   );
@@ -734,7 +768,7 @@ function AccessModal({ employee, onClose }: { employee: Employee; onClose: () =>
         {level === 'full-auto' && (
           <div className="banner bad">
             {ko
-              ? '전체 자동은 직원이 묻지 않고 명령을 실행합니다(드라이브 삭제·포맷 같은 치명적 명령만 막음). CLI에 따라 브라우저 조작·웹 검색 같은 도구까지 허용됩니다. 전체 자동 직원 중 직급이 가장 높은 사람이 다른 직원들의 권한 요청도 대표 대신 처리하므로, 보통 팀장 한 명을 전체 자동으로 두면 일일이 허용을 누를 필요가 없습니다. 계속하려면 full-auto 를 입력하세요.'
+              ? '전체 자동은 직원이 묻지 않고 명령을 실행합니다(드라이브 삭제·포맷 같은 치명적 명령만 막음). AI에 따라 브라우저 조작·웹 검색 같은 도구까지 허용됩니다. 전체 자동 직원 중 직급이 가장 높은 사람이 다른 직원들의 권한 요청도 대표 대신 처리하므로, 보통 팀장 한 명을 전체 자동으로 두면 일일이 허용을 누를 필요가 없습니다. 계속하려면 full-auto 를 입력하세요.'
               : "Full auto runs commands without asking (only catastrophic ones like drive wipes are blocked). Depending on the CLI this includes tools like browser control and web search. The highest-ranked full-auto employee also answers the other employees' permission requests for you, so one full-auto lead usually means no more clicking Allow. Type full-auto to confirm."}
             <input style={{ marginTop: 8 }} value={confirmText} onChange={(e) => setConfirmText(e.target.value)} />
           </div>

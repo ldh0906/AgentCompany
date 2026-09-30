@@ -146,3 +146,14 @@ test('일이 몰리지 않게: 같은 역할이면 직급보다 일이 적은 �
   assert.ok(r.ok);
   assert.equal(r.assigneeId, 'lead2', '선임이 이미 두 개를 하고 있으면 놀고 있는 팀장이 맡는다');
 });
+
+test('기본 팀(한 종류 AI): 검수는 비서실장 팀장보다 전담 검수 직원이 맡는다(실측: 검수 직원이 한 번도 일하지 않음)', () => {
+  const lead = emp('lead', ['chief-of-staff', 'planner', 'qa'], 'agy', 'lead');
+  const impl = emp('senior', ['implementer'], 'agy', 'impl');
+  const qa = emp('senior', ['qa'], 'agy', 'qa');
+  const r = pickStaff({ type: 'impl', difficulty: 'easy' }, [lead, impl, qa], noLoad);
+  assert.ok(r.ok);
+  assert.equal(r.assigneeId, 'impl');
+  assert.equal(r.reviewerId, 'qa');
+  assert.equal(r.ownerId, 'lead');
+});

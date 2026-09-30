@@ -248,6 +248,16 @@ export interface DraftPromptInput {
   language: string;
   /** 일할 수 있는 직원(직급·역할): 누가 몇 명 동시에 일할 수 있는지 보고 나누게 */
   team?: string[];
+  /** 프로젝트 파일 목록(git ls-files). 폴더를 둘러볼 명령이 막힌 CLI(Antigravity 읽기 전용)도 무엇이 있는지 알게. */
+  files?: string[];
+}
+
+/** 파일 목록 블록: 너무 길면 앞부분만(프롬프트 길이 한계가 있는 CLI가 있다). */
+export function filesBlock(files: string[] | undefined, max = 300): string {
+  if (!files) return '';
+  const shown = files.slice(0, max).join('\n');
+  const more = files.length > max ? `\n… and ${files.length - max} more` : '';
+  return dataBlock(`Project files (${files.length})`, files.length ? shown + more : '(empty: the project has no files yet)');
 }
 
 /** 비서실장: 대표 요청을 티켓 초안으로 나눈다. 티켓을 직접 만들 권한은 없고, 대표가 초안을 확정한다. */
@@ -277,6 +287,8 @@ Rules:
 - Plan for parallel work with the team below: only leads can take "hard", and a dependsOn chain runs one ticket after another. Measured: three chained hard tickets went to the single implementer lead and took 1.5 hours while two seniors sat idle. Prefer "normal" tickets with disjoint write scopes (for example data/logic, UI, and each feature separately) and use dependsOn only where files really overlap or one part truly needs the other's code. Keep "hard" for work that really needs it.
 
 ${dataBlock('Team (name, rank, roles) — who can work in parallel', (i.team ?? []).join('\n') || '(unknown)')}
+
+${filesBlock(i.files)}
 
 ${dataBlock('CEO request', i.request)}
 

@@ -35,3 +35,32 @@ test('크롬으로 열어 세 장을 찍고 콘솔 오류와 첫 화면 글자�
     server.close();
   }
 });
+
+test('확인 창(confirm)은 "확인"으로 닫고 문구를 알려 준다(창 때문에 멈추지 않음)', { skip: !findChrome(), timeout: 60_000 }, async () => {
+  const page = `<!doctype html><body><h1 id="h">메모 1개</h1><button onclick="if (confirm('정말 지울까요?')) document.getElementById('h').textContent = '메모 0개'">삭제</button></body>`;
+  const server = createServer((_q, r) => r.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page));
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+  const port = (server.address() as { port: number }).port;
+  try {
+    const out = await mkdtemp(path.join(os.tmpdir(), 'ac-shots-'));
+    const cap = await captureScreens(
+      `http://127.0.0.1:${port}/`,
+      out,
+      undefined,
+      [
+        {
+          requirementId: 'R1',
+          steps: [
+            { do: 'click', text: '삭제' },
+            { do: 'shot', label: '지운 뒤' },
+          ],
+        },
+      ],
+      { mobile: false },
+    );
+    assert.match(cap.text, /confirm: 정말 지울까요\?/);
+    assert.ok(cap.shots.some((s) => /지운 뒤/.test(s.label)));
+  } finally {
+    server.close();
+  }
+});

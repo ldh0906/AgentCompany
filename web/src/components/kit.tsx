@@ -73,16 +73,86 @@ export interface CliCheck {
   loginHelp: string;
 }
 let doctorCache: Promise<{ clis: CliCheck[] }> | null = null;
+const cliListeners = new Set<(c: CliCheck[]) => void>();
+function loadDoctor(refresh = false): Promise<{ clis: CliCheck[] }> {
+  const p = api<{ clis: CliCheck[] }>(`doctor${refresh ? '?refresh=1' : ''}`).catch((e) => {
+    doctorCache = null;
+    throw e;
+  });
+  doctorCache = p;
+  p.then((d) => cliListeners.forEach((f) => f(d.clis))).catch(() => {});
+  return p;
+}
 export function useCliStatus(): CliCheck[] | null {
   const [clis, setClis] = useState<CliCheck[] | null>(null);
   useEffect(() => {
-    doctorCache ??= api<{ clis: CliCheck[] }>('doctor').catch((e) => {
-      doctorCache = null;
-      throw e;
-    });
-    doctorCache.then((d) => setClis(d.clis)).catch(() => setClis([]));
+    cliListeners.add(setClis);
+    (doctorCache ?? loadDoctor()).then((d) => setClis(d.clis)).catch(() => setClis([]));
+    return () => void cliListeners.delete(setClis);
   }, []);
   return clis;
+}
+
+/**
+ * AI 연결: CLI마다 상태와 "로그인 창 열기". 첫 사용 안내·기본 팀·시스템 화면이 같이 쓴다.
+ * 실측(첫 사용): 새 회사에선 Claude·Codex가 로그인 필요였는데, 안내는 명령을 복사해 PowerShell에 붙이라는 것뿐이었다.
+ */
+export function CliConnect() {
+  const clis = useCliStatus();
+  const { lang } = useT();
+  const ko = lang === 'ko';
+  const [waiting, setWaiting] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!waiting) return;
+    let n = 0;
+    // 로그인이 끝나면 저절로 "준비됨"으로 바뀌게: 5초마다 다시 점검(최대 5분).
+    const t = setInterval(() => {
+      n++;
+      void loadDoctor(true).then((d) => {
+        if (d.clis.find((c) => c.kind === waiting)?.login === 'ok' || n >= 60) setWaiting(null);
+      });
+    }, 5000);
+    return () => clearInterval(t);
+  }, [waiting]);
+  if (!clis) return <div className="sub">{ko ? 'AI 확인 중…' : 'Checking AIs…'}</div>;
+  const open = (kind: string, poll: boolean) => {
+    setError('');
+    api('cli-login', { body: { cli: kind } })
+      .then(() => poll && setWaiting(kind))
+      .catch((e) => setError(String((e as Error).message)));
+  };
+  return (
+    <div className="list">
+      {clis.map((c) => (
+        <div className="item spread" key={c.kind}>
+          <span className="row">
+            <b>{c.displayName}</b>
+            {!c.found ? (
+              <span className="chip">{ko ? '설치 안 됨' : 'Not installed'}</span>
+            ) : c.login === 'ok' ? (
+              <span className="chip ok">{ko ? '연결됨' : 'Connected'}</span>
+            ) : c.login === 'missing' ? (
+              <span className="chip warn">{ko ? '로그인 필요' : 'Login needed'}</span>
+            ) : (
+              <span className="chip">{ko ? '첫 업무 때 확인' : 'Checked on first run'}</span>
+            )}
+          </span>
+          {c.found && c.login !== 'ok' && (
+            <button className="btn small" disabled={waiting === c.kind} onClick={() => open(c.kind, c.login === 'missing')}>
+              {waiting === c.kind ? (ko ? '로그인 기다리는 중…' : 'Waiting for login…') : ko ? '로그인 창 열기' : 'Open login window'}
+            </button>
+          )}
+        </div>
+      ))}
+      {error && <div className="banner bad">{error}</div>}
+      <div className="hint">
+        {ko
+          ? '로그인 창이 열리면 안내대로 브라우저에서 로그인한 뒤 창을 닫으세요. 이 회사 전용 로그인이라 평소 쓰는 로그인과 섞이지 않고, 앱은 로그인 정보를 읽지 않습니다.'
+          : 'A login window opens; sign in in the browser, then close it. This login is separate from your usual one, and the app never reads it.'}
+      </div>
+    </div>
+  );
 }
 
 // ---- 모델 목록 ----
@@ -281,7 +351,7 @@ export function FolderPicker({ initial, onPick, onClose }: { initial: string; on
 
   return (
     <Modal
-      title={ko ? '저장소 폴더 고르기' : 'Choose a repository folder'}
+      title={ko ? '폴더 고르기' : 'Choose a repository folder'}
       onClose={onClose}
       actions={
         <button className="btn primary" disabled={!cur} onClick={() => cur && (onPick(cur.path), onClose())}>
@@ -349,7 +419,7 @@ export function FolderPicker({ initial, onPick, onClose }: { initial: string; on
           </div>
           <div className="hint">
             {ko
-              ? '지금 보고 있는 폴더 아래에 새 폴더를 만들고 빈 git 저장소로 시작합니다.'
+              ? '지금 보고 있는 폴더 아래에 새 빈 폴더를 만들어 시작합니다(변경 기록은 앱이 알아서 남깁니다).'
               : 'Creates a new folder under the current one as an empty git repository.'}
           </div>
         </div>

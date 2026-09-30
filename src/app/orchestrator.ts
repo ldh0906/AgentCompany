@@ -81,6 +81,8 @@ import { captureScreens, findChrome, type DownloadedFile, type ScreenClip } from
 
 const ORCH: Actor = { kind: 'orchestrator' };
 const CEO: Actor = { kind: 'ceo' };
+/** 사용량 한도 보류를 스스로 다시 시도하는 간격 */
+export const USAGE_RETRY_MS = 30 * 60_000;
 
 export interface OrchestratorOptions {
   dataDir: string;
@@ -725,6 +727,12 @@ export class Orchestrator {
       for (const t of [...this.company.tickets()].sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2))) {
         if (t.hold?.reason === 'waiting_dependency' && t.dependsOn.every((d) => this.company.requireTicket(d).status === 'done')) {
           this.apply(t.id, { type: 'release_hold' }); // 선행 업무가 끝나면 오케스트레이터가 스스로 해제
+          continue;
+        }
+        // 사용량 한도 보류는 30분마다 스스로 다시 시도한다(아직 한도면 곧바로 다시 보류, 실행 예산은 쓰지 않음).
+        // 전에는 대표가 한도가 풀렸는지 가늠해 직접 재개해야 했다.
+        if (t.hold?.reason === 'usage_limit' && Date.now() - Date.parse(t.hold.since) >= USAGE_RETRY_MS) {
+          this.apply(t.id, { type: 'release_hold' });
           continue;
         }
         if (TERMINAL_STATUSES.includes(t.status) || t.hold || this.busy.has(t.id)) continue;
@@ -2060,12 +2068,18 @@ export class Orchestrator {
             ? {
                 reason: 'usage_limit' as const,
                 note: tr(
-                  '구독 사용량 한도에 도달했습니다. 한도가 풀린 뒤 대표가 재개하세요.',
-                  'Subscription usage limit reached. The CEO can resume after the limit resets.',
+                  '구독 사용량 한도에 도달했습니다. 30분마다 스스로 다시 시도합니다(한도가 풀린 걸 알면 보류 해제로 바로 재개).',
+                  'Subscription usage limit reached. Retrying by itself every 30 minutes (release the hold to resume now).',
                 ),
               }
             : failure.failure === 'auth_required'
-              ? { reason: 'needs_permission' as const, note: tr('직원 CLI 로그인이 필요합니다.', 'Employee CLI login required.') }
+              ? {
+                  reason: 'needs_permission' as const,
+                  note: tr(
+                    '이 직원의 AI 로그인이 풀렸습니다. 시스템 화면에서 "로그인 창 열기"로 다시 로그인한 뒤 보류를 해제하세요.',
+                    'This employee’s AI login expired. Use "Open login window" on the System page, then release the hold.',
+                  ),
+                }
               : failure.failure === 'spawn_failed'
                 ? { reason: 'needs_decision' as const, note: failure.detail }
                 : failure.failure === 'model_unsupported'
@@ -3094,6 +3108,8 @@ ${failure.detail.slice(0, 400)}`,
       decisions: this.records.decisions(project.id, 'current'),
       language: this.opts.language,
       team: this.company.activeEmployees().map((e) => `- ${e.name}: ${rankOf(e)}, ${e.roles.join('/')}`),
+      // 실측(첫 사용): Antigravity 읽기 전용은 폴더 목록을 볼 수단이 없어, 빈 새 폴더에서 헤매다 빈 답을 냈다.
+      files: (await git(['ls-files'], cwd, { allowFail: true })).stdout.split('\n').filter(Boolean),
     });
     await this.launch({
       ticket: { id: req.id, round: 1, budget: DEFAULT_BUDGET },
@@ -3147,7 +3163,13 @@ ${failure.detail.slice(0, 400)}`,
                 `일시적인 오류라 1분 뒤 자동으로 다시 시도합니다: ${String(finalText).slice(0, 200)}`,
                 `Transient error; retrying automatically in a minute: ${String(finalText).slice(0, 200)}`,
               )
-            : run.reportError,
+            : /auto-denied|cannot prompt for/i.test(stderr)
+              ? // 실측(첫 사용): 영어 오류만 보여서 대표가 무엇을 해야 할지 몰랐다.
+                tr(
+                  `비서실장이 읽기만 하는 실행에서 명령을 쓰려다 막혀 답을 내지 못했습니다. "다시 시도"를 누르거나, 다른 AI 직원에게 비서실장 역할을 맡기세요.\n\n${run.reportError}`,
+                  `The chief of staff tried a blocked command in a read-only run and gave no answer. Retry, or give the chief-of-staff role to an employee on another AI.\n\n${run.reportError}`,
+                )
+              : run.reportError,
       });
       // 일시적 오류(실측: Claude 로그인 토큰 갱신 경합)는 한 번 자동으로 다시 요청한다.
       if (transient && !req.retriedFrom) setTimeout(() => void this.retryRequest(req.id).catch(() => {}), 60_000).unref?.();

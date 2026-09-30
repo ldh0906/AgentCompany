@@ -36,7 +36,15 @@ export function RequestBox() {
             {ko ? '비서실장' : 'Chief of staff'}: {empName(state.employees, state.chiefOfStaff)}
           </span>
         ) : (
-          <span className="sub">{ko ? '비서실장 역할 직원이 없습니다' : 'No chief of staff'}</span>
+          <span className="sub">
+            {state.employees.some((e) => e.active)
+              ? ko
+                ? '비서실장(팀장) 역할 직원이 없습니다 — 조직에서 한 명에게 맡기세요'
+                : 'No chief of staff — assign one in Team'
+              : ko
+                ? '먼저 팀을 만드세요'
+                : 'Create a team first'}
+          </span>
         )}
       </h2>
       <div className="body form">
@@ -44,7 +52,9 @@ export function RequestBox() {
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder={
-            ko ? '예: 모험가 피로도 규칙을 설계 문서와 코드에 반영해줘' : 'e.g. Add a fatigue rule to the design doc and the simulation'
+            ko
+              ? '예: 할 일 목록 페이지를 만들어줘. 추가·완료 표시·삭제가 되게'
+              : 'e.g. Make a to-do list page with add, check off and delete'
           }
           disabled={!state.chiefOfStaff}
         />
@@ -60,7 +70,7 @@ export function RequestBox() {
           )}
           <span className="sub" style={{ flex: 1 }}>
             {ko
-              ? '비서실장이 읽기 전용으로 저장소를 보고 업무 초안을 만듭니다. 확정은 대표가 합니다.'
+              ? '비서실장이 프로젝트 폴더를 읽어 보고(고치지 않음) 할 일을 나눈 초안을 만듭니다. 확정은 대표가 합니다.'
               : 'The chief of staff reads the repo (read-only) and drafts tickets. You confirm.'}
           </span>
           <button

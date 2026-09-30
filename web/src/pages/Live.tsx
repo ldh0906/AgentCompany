@@ -254,7 +254,7 @@ function RunLog({ runId }: { runId: string }) {
                     ? '작업 중인 직원에게 지시 — 다음 단계에서 바로 반영됩니다'
                     : 'Steer — applied at the next step'
                   : ko
-                    ? '지시 — 이 CLI는 실행 중 지시를 받지 못해 다음 회차에 전달됩니다'
+                    ? '지시 — 이 AI는 일하는 도중엔 지시를 받지 못해 다음 차례에 전달됩니다'
                     : 'Instruction — delivered next round (this CLI cannot take mid-run input)'
               }
             />

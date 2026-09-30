@@ -169,7 +169,7 @@ export function Projects() {
         >
           <div className="sub" style={{ lineHeight: 1.7 }}>
             {ko
-              ? '목록에서 빠지고 새 업무를 받지 않습니다. 원본 저장소와 지난 업무 기록은 건드리지 않습니다. 진행 중인 업무가 있으면 먼저 끝내거나 취소해야 합니다.'
+              ? '목록에서 빠지고 새 업무를 받지 않습니다. 원래 폴더와 지난 업무 기록은 건드리지 않습니다. 진행 중인 업무가 있으면 먼저 끝내거나 취소해야 합니다.'
               : 'It leaves the list and takes no new tickets. Your repo and past records are untouched. Finish or cancel open tickets first.'}
           </div>
         </Modal>
@@ -235,6 +235,9 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
       api<Inspection>(`inspect?path=${encodeURIComponent(originPath.trim())}`)
         .then((r) => {
           setInfo(r);
+          // git이 아닌 폴더(새로 만든 폴더 포함)는 개발자가 직접 합칠 브랜치도 없다: 추천대로 바로 반영.
+          // 실측(첫 사용): "여기에 새로 만들기"로 만든 폴더인데 "따로 보관만"이 기본으로 골라져 있었다.
+          if (!r.isGit && !project) setMode('auto_after_approval');
           if (!r.isGit) return;
           if (!nameTouched) setName(r.name);
           setBaseBranch(r.baseBranch);
@@ -292,7 +295,7 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
       <div className="form">
         {!project && (
           <label>
-            {ko ? '저장소 폴더' : 'Repository folder'}
+            {ko ? '프로젝트 폴더' : 'Repository folder'}
             <div className="row">
               <input
                 value={originPath}
@@ -305,7 +308,7 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
                 <Icon name="folder" /> {ko ? '찾아보기' : 'Browse'}
               </button>
             </div>
-            {inspecting && <span className="hint">{ko ? '저장소를 살펴보는 중…' : 'Inspecting…'}</span>}
+            {inspecting && <span className="hint">{ko ? '폴더를 살펴보는 중…' : 'Inspecting…'}</span>}
             {info && !inspecting && (
               <span className={`hint ${info.isGit ? 'ok-text' : 'bad-text'}`}>
                 {!info.exists

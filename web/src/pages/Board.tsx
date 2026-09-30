@@ -40,7 +40,7 @@ const COLUMNS: { key: string; statuses: string[]; dot: string; ko: string; en: s
     ko: '대표님 차례: 승인하면 반영',
     en: 'Your turn: approve to integrate',
   },
-  { key: 'done', statuses: ['done'], dot: '#3dd9a0', ko: '원본 저장소에 반영됨', en: 'Integrated into your repository' },
+  { key: 'done', statuses: ['done'], dot: '#3dd9a0', ko: '내 폴더에 반영됨', en: 'Integrated into your repository' },
   { key: 'failed', statuses: ['failed', 'cancelled'], dot: '#ff6b81', ko: '실패하거나 취소됨', en: 'Failed or cancelled' },
 ];
 const LIVE = ['in_progress', 'verifying', 'in_review', 'integrating'];

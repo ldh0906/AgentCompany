@@ -134,9 +134,11 @@ export async function playCommand(argv: string[]): Promise<string> {
 
   const cdp = await Cdp.connect(await pageSocket(session.port));
   try {
+    // alert/confirm 창은 "확인"으로 닫고 알려 준다(열린 채면 페이지가 멈춘다).
+    const dialogs = cdp.acceptDialogs();
+    await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
     if (cmd === 'start') {
-      await cdp.send('Page.enable');
       await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
       await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: ERROR_HOOK });
       await cdp.send('Page.navigate', { url: session.url });
@@ -182,7 +184,12 @@ export async function playCommand(argv: string[]): Promise<string> {
     await writeFile(sessionFile, JSON.stringify(session));
     const shot = await snap(cdp, dir, session.steps);
     const errors = await errorsSince(cdp);
-    return [`shot: ${shot}`, errors.length ? `page errors: ${errors.join(' | ')}` : '', `actions used: ${session.steps}/${MAX_STEPS}`]
+    return [
+      `shot: ${shot}`,
+      errors.length ? `page errors: ${errors.join(' | ')}` : '',
+      dialogs.length ? `dialogs (clicked OK): ${dialogs.join(' | ')}` : '',
+      `actions used: ${session.steps}/${MAX_STEPS}`,
+    ]
       .filter(Boolean)
       .join('\n');
   } finally {

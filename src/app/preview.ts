@@ -200,10 +200,23 @@ function killTree(pid: number): void {
   }
 }
 
-function staticServer(root: string): Promise<Server> {
+export function staticServer(root: string): Promise<Server> {
   const base = path.resolve(root);
   const server = createServer(async (req, res) => {
-    const rel = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
+    // 보안 점검(2026-10-01): 본 서버처럼 Host를 확인해 DNS 리바인딩으로 다른 사이트가 결과물을 읽지 못하게 하고,
+    // 깨진 주소(%E0%A4%A)의 디코드 오류가 처리되지 않은 예외로 앱 전체를 끄지 않게 한다.
+    const port = (server.address() as { port: number } | null)?.port;
+    if (req.headers.host !== `127.0.0.1:${port}` && req.headers.host !== `localhost:${port}`) {
+      res.writeHead(403).end();
+      return;
+    }
+    let rel: string;
+    try {
+      rel = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
+    } catch {
+      res.writeHead(400).end();
+      return;
+    }
     let file = path.resolve(base, `.${rel}`);
     if (file !== base && !file.startsWith(base + path.sep)) {
       res.writeHead(403).end();

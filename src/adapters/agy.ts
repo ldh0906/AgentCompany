@@ -55,12 +55,21 @@ export const agyAdapter: CliAdapter = {
       );
     }
     const args = ['--output-format', 'stream-json'];
-    if (req.accessLevel === 'read-only') args.push('--sandbox');
+    const readOnly = req.accessLevel === 'read-only';
+    if (readOnly) args.push('--sandbox');
     else args.push('--dangerously-skip-permissions');
     // agy는 effort가 모델 ID 끝에 붙는다(gemini-3.8-flash-high 등).
     if (req.model) args.push('--model', req.effort ? `${req.model}-${req.effort}` : req.model);
     if (req.resumeSessionId) args.push('--conversation', req.resumeSessionId);
-    args.push(`--print=${req.prompt}`);
+    // 실측(첫 사용, 2026-10-01): 읽기 전용 초안에서 폴더를 보려고 run_command(Get-ChildItem)를 불렀다가
+    // 헤드리스 자동 거부로 빈 응답을 내고 끝났다. 폴더 목록 도구도 보이지 않아(실측) 파일 읽기만 쓰라고 먼저 알린다.
+    // 파일 목록은 초안 프롬프트가 넣어 준다.
+    const note = readOnly
+      ? '\n\nTool note for this run: shell commands (run_command) are blocked and will end the run with no answer. ' +
+        'Read files with view_file (absolute paths under your current directory); use any project file list given above. ' +
+        'If the project has no files yet, plan from the request alone.'
+      : '';
+    args.push(`--print=${req.prompt}${note}`);
     return { file: 'agy', args, env: { ...process.env, ...req.profileEnv }, stdinText: null, files: [] };
   },
 
@@ -106,6 +115,7 @@ export const agyAdapter: CliAdapter = {
 
   classifyFailure: classifyCommon,
   loginStatusArgs: null,
+  loginArgs: [],
   loginInstructions() {
     return tr(
       '터미널에서 agy 를 한 번 실행해 로그인하세요(헤드리스 실행은 캐시된 로그인만 사용합니다).',

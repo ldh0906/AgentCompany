@@ -269,12 +269,18 @@ export function applyTicketCommand(ticket: Ticket, cmd: TicketCommand, actor: Ac
 
     case 'run_aborted': {
       // 실행이 정상 보고 없이 끝남(시간 초과·사용량 한도·보고서 불량 등). 실행 예산은 이미 소모됐다.
+      // 단, 사용량 한도는 일을 하지 못한 실행이라 예산을 돌려준다: 한도 보류는 스스로 다시 시도하므로,
+      // 돌려주지 않으면 몇 번의 재시도로 예산이 바닥나 업무가 멈춘다.
       if (!isOrchestrator(actor))
         return reject(tr('실행 중단 처리는 오케스트레이터만 할 수 있습니다.', 'Only the orchestrator can abort runs.'));
       const bad = expect('in_progress');
       if (bad) return reject(bad);
       return next(
-        { status: 'assigned', hold: cmd.hold ? hold(cmd.hold.reason, 'assigned', now, cmd.hold.note) : null },
+        {
+          status: 'assigned',
+          hold: cmd.hold ? hold(cmd.hold.reason, 'assigned', now, cmd.hold.note) : null,
+          ...(cmd.hold?.reason === 'usage_limit' ? { runCount: Math.max(0, ticket.runCount - 1) } : {}),
+        },
         'ticket.run_aborted',
         { reason: cmd.reason, ...(cmd.hold ? { hold: cmd.hold.reason } : {}) },
       );

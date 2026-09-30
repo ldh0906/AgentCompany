@@ -90,6 +90,8 @@ export interface CliAdapter {
   classifyFailure(input: { exitCode: number | null; timedOut: boolean; stderr: string; finalText: string | null }): FailureClass;
   /** 공식 로그인 상태 확인 명령(없으면 null). 인증 파일을 직접 읽지 않는다. */
   loginStatusArgs: string[] | null;
+  /** 로그인 창에서 실행할 인자(null이면 로그인이 필요 없음). */
+  loginArgs: string[] | null;
   /** 대표가 직접 실행할 로그인 안내. */
   loginInstructions(profileDir: string | null): string;
 }

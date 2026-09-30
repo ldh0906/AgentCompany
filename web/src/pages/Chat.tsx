@@ -641,7 +641,7 @@ function NewRoomModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
         </label>
         {state.projects.length > 1 && (
           <label>
-            {ko ? '프로젝트(직원이 읽을 저장소)' : 'Project (what they read)'}
+            {ko ? '프로젝트(직원이 읽을 폴더)' : 'Project (what they read)'}
             <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
               {state.projects.map((p) => (
                 <option key={p.id} value={p.id}>

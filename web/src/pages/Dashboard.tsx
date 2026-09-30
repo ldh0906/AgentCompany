@@ -4,7 +4,7 @@ import { Link, useCompany, useRoute } from '../App.tsx';
 import { ACCESS, josa, useT } from '../i18n.ts';
 import { MAX_ACTIVE_EMPLOYEES } from '../../../src/core/types.ts';
 import { Avatar, empName, EmptyState, HoldChip, Icon, Modal, needsCeo, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
-import { useCliStatus } from '../components/kit.tsx';
+import { CliConnect, useCliStatus } from '../components/kit.tsx';
 import { UsagePanel } from '../components/usage.tsx';
 import { RequestBox } from './Requests.tsx';
 import { PlaytestPanel, PreviewButton, ScreenCheckPanel } from '../components/preview.tsx';
@@ -242,7 +242,7 @@ export function ApprovalItem({ a }: { a: Approval }) {
                 ? lang === 'ko'
                   ? '검토 결과 확인 (반영할 코드 없음)'
                   : 'Acknowledge review (no code to merge)'
-                : `${lang === 'ko' ? '반영 방식' : 'Mode'}: ${d.mode === 'auto_after_approval' ? (lang === 'ko' ? '승인 후 자동 병합' : 'auto merge') : lang === 'ko' ? '브랜치만 생성' : 'branch only'}`}{' '}
+                : `${lang === 'ko' ? '반영 방식' : 'Mode'}: ${d.mode === 'auto_after_approval' ? (lang === 'ko' ? '승인하면 내 폴더에 반영' : 'auto merge') : lang === 'ko' ? '따로 보관만' : 'branch only'}`}{' '}
             · {when(a.createdAt)}
           </div>
         </div>
@@ -307,7 +307,10 @@ export function ApprovalItem({ a }: { a: Approval }) {
             <PreviewButton projectId={tk.projectId} ticketId={tk.id} />
           </div>
           <ScreenCheckPanel ticketId={tk.id} />
-          <PlaytestPanel ticketId={tk.id} />
+          {/* 직접 플레이는 게임만(실측: 메모 앱 승인 카드에 "고급 QA (직접 플레이)"가 떴다) */}
+          {(state?.projects.find((p) => p.id === tk.projectId)?.profile?.game || state?.playtests?.[tk.id]) && (
+            <PlaytestPanel ticketId={tk.id} />
+          )}
           {ceoChecks.map((r) => (
             <label key={r.id} className="check-row">
               <input
@@ -750,13 +753,23 @@ function SetupGuide({ onNewTicket }: { onNewTicket: () => void }) {
   const { state } = useCompany();
   const { lang } = useT();
   const { go } = useRoute();
+  const clis = useCliStatus();
   if (!state) return null;
   const ko = lang === 'ko';
   const hasProject = state.projects.length > 0;
   const hasTeam = state.employees.filter((e) => e.active).length >= 2;
   const hasTicket = state.tickets.length > 0 || state.requests.length > 0;
+  // 실측(첫 사용): 로그인 안 된 AI가 있어도 안내에 없어서, 기본 팀이 한 종류 AI로만 짜였다.
+  const hasAi = hasTeam || (clis ?? []).some((c) => c.login === 'ok');
   if (hasProject && hasTeam && hasTicket) return null;
   const steps = [
+    {
+      done: hasAi,
+      t: ko ? 'AI 연결' : 'Connect AIs',
+      d: ko ? '직원이 될 AI에 로그인하세요. 두 종류 이상이면 서로 검수합니다.' : 'Log in to the AIs your employees will use.',
+      cta: '',
+      onClick: () => {},
+    },
     {
       done: hasProject,
       t: ko ? '프로젝트 등록' : 'Register a project',
@@ -767,7 +780,7 @@ function SetupGuide({ onNewTicket }: { onNewTicket: () => void }) {
     {
       done: hasTeam,
       t: ko ? '직원 2명 이상 채용' : 'Hire 2+ employees',
-      d: ko ? '구현과 검수는 서로 다른 CLI로 두는 것이 좋습니다.' : 'Use different CLIs for implementing and reviewing.',
+      d: ko ? '"기본 팀 한 번에 만들기"를 누르면 됩니다.' : 'Use "Create a standard team".',
       cta: ko ? '팀으로' : 'Team',
       onClick: () => go('/org'),
     },
@@ -786,7 +799,7 @@ function SetupGuide({ onNewTicket }: { onNewTicket: () => void }) {
       <div className="body">
         <h2>{ko ? '회사를 차려 볼까요' : 'Set up your company'}</h2>
         <div className="sub">
-          {ko ? `${doneCount}/3 완료 · 세 단계면 첫 업무를 맡길 수 있습니다.` : `${doneCount}/3 done · three steps to your first ticket.`}
+          {ko ? `${doneCount}/4 완료 · 네 단계면 첫 일을 맡길 수 있습니다.` : `${doneCount}/4 done · four steps to your first ticket.`}
         </div>
         <div className="steps">
           {steps.map((x, i) => (
@@ -794,14 +807,19 @@ function SetupGuide({ onNewTicket }: { onNewTicket: () => void }) {
               <span className="num">{x.done ? <Icon name="check" size={14} /> : i + 1}</span>
               <span className="t">{x.t}</span>
               <span className="d">{x.d}</span>
-              {!x.done && (
-                <button className={`btn small ${i === next ? 'primary' : ''}`} disabled={i === 2 && !hasProject} onClick={x.onClick}>
+              {!x.done && x.cta && (
+                <button className={`btn small ${i === next ? 'primary' : ''}`} disabled={i === 3 && !hasProject} onClick={x.onClick}>
                   {x.cta} <Icon name="arrow" size={14} />
                 </button>
               )}
             </div>
           ))}
         </div>
+        {!hasTeam && (
+          <div style={{ marginTop: 14 }}>
+            <CliConnect />
+          </div>
+        )}
       </div>
     </div>
   );

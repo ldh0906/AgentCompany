@@ -83,7 +83,8 @@ function powershell(script: string): Promise<{ ok: boolean; out: string }> {
   );
 }
 
-const psq = (s: string) => `'${s.replace(/'/g, "''")}'`;
+// PowerShell은 둥근 따옴표(‘ ’ ‚ ‛)도 작은따옴표로 읽으므로 함께 두 번 쓴다.
+const psq = (s: string) => `'${s.replace(/['‘’‚‛]/g, '$&$&')}'`;
 
 /** 바탕화면과 시작 메뉴에 'Agent Company' 바로가기를 만든다(Windows). 만든 경로를 돌려준다. */
 export async function createShortcuts(opts: { dataDir: string; mainPath: string; iconPath: string | null }): Promise<string[]> {

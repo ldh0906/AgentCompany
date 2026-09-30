@@ -203,7 +203,7 @@ test('선행 업무 미완료면 대기 보류, 오케스트레이터가 해제 
   if (released.ok) assert.equal(released.ticket.status, 'assigned');
 });
 
-test('실행 중단 시 배정 상태로 돌아가고 예산은 소모된 채 유지', () => {
+test('실행 중단 시 배정 상태로 돌아가고 예산은 소모된 채 유지(사용량 한도는 일을 못 했으니 돌려줌)', () => {
   const t = run(ticket(), TO_REVIEW.slice(0, 4));
   const r = applyTicketCommand(
     t,
@@ -214,8 +214,10 @@ test('실행 중단 시 배정 상태로 돌아가고 예산은 소모된 채 �
   assert.ok(r.ok);
   if (!r.ok) return;
   assert.equal(r.ticket.status, 'assigned');
-  assert.equal(r.ticket.runCount, 1);
+  assert.equal(r.ticket.runCount, 0, '사용량 한도로 끝난 실행은 예산에서 빼지 않는다(스스로 다시 시도하므로)');
   assert.equal(r.ticket.hold?.reason, 'usage_limit');
+  const timeout = applyTicketCommand(t, { type: 'run_aborted', reason: '시간 초과' }, ORCH, NOW);
+  assert.ok(timeout.ok && timeout.ticket.runCount === 1, '다른 중단은 예산을 쓴 채로');
   assert.equal(applyTicketCommand(t, { type: 'run_aborted', reason: 'x' }, IMPL, NOW).ok, false);
 });
 

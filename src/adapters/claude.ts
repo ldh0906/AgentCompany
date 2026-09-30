@@ -121,6 +121,7 @@ export const claudeAdapter: CliAdapter = {
 
   classifyFailure: classifyCommon,
   loginStatusArgs: ['auth', 'status', '--json'],
+  loginArgs: ['auth', 'login'],
   loginInstructions(profileDir) {
     return profileDir
       ? tr(

@@ -47,5 +47,6 @@ export const fakeAdapter: CliAdapter = {
   parse: claudeAdapter.parse,
   classifyFailure: classifyCommon,
   loginStatusArgs: null,
+  loginArgs: null,
   loginInstructions: () => tr('로그인이 필요 없습니다.', 'No login required.'),
 };

@@ -324,6 +324,14 @@ async function main(): Promise<void> {
     emit({ type: 'result', result: 'OK', is_error: false });
     return;
   }
+  // limited: 이 작업 폴더의 첫 작업 실행은 구독 사용량 한도로 실패한다(한 번만).
+  const limitMark = path.join(process.cwd(), '..', `.fake-limited-${h.ticketId}`);
+  if (behavior === 'limited' && h.kind === 'work' && !existsSync(limitMark)) {
+    writeFileSync(limitMark, '1');
+    process.stderr.write('Claude AI usage limit reached. Your limit will reset at 5pm.\n');
+    process.exitCode = 1;
+    return;
+  }
   if (behavior === 'slow') await sleep(Number(process.env.FAKE_DELAY_MS ?? 4000));
   else await sleep(Number(process.env.FAKE_DELAY_MS ?? 300));
   const kind = h.kind as string;

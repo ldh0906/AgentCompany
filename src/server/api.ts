@@ -10,7 +10,7 @@ import type { Orchestrator } from '../app/orchestrator.ts';
 import { diffText, projectPaths } from '../workspace/workspace.ts';
 import { DIFFICULTIES, RANKS } from '../core/types.ts';
 import type { AccessLevel, CliKind, EvidenceType, RoleTemplate, TicketType, VerifyCommand } from '../core/types.ts';
-import { doctor, type DoctorReport, installInfo } from '../app/doctor.ts';
+import { doctor, type DoctorReport, installInfo, openLoginWindow } from '../app/doctor.ts';
 import { listModels } from '../app/models.ts';
 import { createRepo, inspectRepo, listDirs, trackedDirs } from '../app/repo-inspect.ts';
 
@@ -155,6 +155,13 @@ export class Api {
         return this.doctor(query.get('refresh') === '1');
       case 'GET install':
         return installInfo(this.dataDir);
+      case 'POST cli-login':
+        // 대표가 누를 때만 로그인 창을 연다. 끝나면 화면이 다시 점검하도록 캐시를 비운다.
+        this.doctorCache = null;
+        await openLoginWindow(this.dataDir, String(b.cli ?? '')).catch((e: Error) => {
+          throw new ApiError(400, e.message);
+        });
+        return { ok: true };
       case 'POST shutdown':
         if (!this.onShutdown) throw new ApiError(400, tr('이 실행에서는 종료할 수 없습니다.', 'Shutdown is not available here.'));
         setTimeout(() => this.onShutdown?.(), 300);

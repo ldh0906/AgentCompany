@@ -109,7 +109,7 @@ export function System() {
 
       <div className="grid cols-2">
         <div className="card">
-          <h2>{ko ? '직원 CLI 점검' : 'Employee CLIs'}</h2>
+          <h2>{ko ? '직원 AI 점검' : 'Employee CLIs'}</h2>
           <div className="list">
             {!doc ? (
               <div className="emptystate">{t('loading')}</div>
@@ -131,7 +131,31 @@ export function System() {
                   <div className="meta mono">
                     {c.version} {c.path}
                   </div>
-                  {c.found && c.login !== 'ok' && <div className="note mono">{c.loginHelp}</div>}
+                  {c.found && c.login !== 'ok' && (
+                    <>
+                      <button
+                        className="btn small"
+                        style={{ marginTop: 8 }}
+                        onClick={() =>
+                          api('cli-login', { body: { cli: c.kind } })
+                            .then(() =>
+                              toast(
+                                ko
+                                  ? '로그인 창을 열었습니다. 로그인한 뒤 "다시 점검"을 누르세요.'
+                                  : 'Login window opened. Re-check when done.',
+                              ),
+                            )
+                            .catch((e) => toast(String((e as Error).message), true))
+                        }
+                      >
+                        {ko ? '로그인 창 열기' : 'Open login window'}
+                      </button>
+                      <details className="advanced">
+                        <summary>{ko ? '직접 입력하려면' : 'Do it manually'}</summary>
+                        <div className="note mono">{c.loginHelp}</div>
+                      </details>
+                    </>
+                  )}
                 </div>
               ))
             )}

@@ -181,7 +181,7 @@ export function NewTicket({ onClose }: { onClose: () => void }) {
       ko ? '업무를 만들었습니다.' : 'Ticket created.',
     );
   const scopeOptions = [
-    { value: '**', label: ko ? '저장소 전체' : 'Whole repository' },
+    { value: '**', label: ko ? '폴더 전체' : 'Whole repository' },
     ...(dirs ?? []).map((d) => ({ value: `${d}/**`, label: `${d}/` })),
   ];
   const openTickets = (state?.tickets ?? []).filter(

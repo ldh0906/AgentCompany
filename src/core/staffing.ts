@@ -60,8 +60,11 @@ export function pickStaff(
     (a, b) =>
       Number(b.cli !== assignee.cli) - Number(a.cli !== assignee.cli) ||
       Number(b.roles.includes('qa')) - Number(a.roles.includes('qa')) ||
-      Number(b.id === ownerId) - Number(a.id === ownerId) ||
-      load(a) - load(b),
+      load(a) - load(b) ||
+      // 전담 검수자를 비서실장보다 먼저(비서실장은 초안·대화에 비워 둔다).
+      // 실측(첫 사용, 2026-10-01): 기본 팀에서 팀장이 책임자라 검수를 모두 맡고 "검수" 직원은 한 번도 일하지 않았다.
+      Number(a.roles.includes('chief-of-staff')) - Number(b.roles.includes('chief-of-staff')) ||
+      Number(b.id === ownerId) - Number(a.id === ownerId),
   )[0]!;
   return { ok: true, assigneeId: assignee.id, reviewerId: reviewer.id, ownerId, reviewBelowRank };
 }

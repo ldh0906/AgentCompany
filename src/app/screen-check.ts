@@ -156,6 +156,20 @@ export class Cdp {
   on(fn: (method: string, params: Record<string, unknown>) => void): void {
     this.listeners.push(fn);
   }
+  /**
+   * alert/confirm/prompt 창을 사람처럼 "확인"으로 닫고 문구를 모은다. Page.enable 뒤에 효과가 있다.
+   * 실측(첫 사용, 2026-10-01): 삭제 전 confirm()을 쓰는 메모 앱에서 창이 페이지를 멈춰 세웠고,
+   * 담당 직원이 그걸 확인하려던 시험 스크립트가 끝나지 않아 업무가 멈췄다.
+   */
+  acceptDialogs(): string[] {
+    const seen: string[] = [];
+    this.on((method, p) => {
+      if (method !== 'Page.javascriptDialogOpening') return;
+      if (seen.length < 20) seen.push(`${String(p.type)}: ${String(p.message ?? '').slice(0, 200)}`);
+      void this.send('Page.handleJavaScriptDialog', { accept: true, promptText: String(p.defaultPrompt ?? '') }).catch(() => {});
+    });
+    return seen;
+  }
   close(): void {
     this.ws.close();
   }
@@ -288,9 +302,12 @@ export async function captureScreens(
         );
       if (method === 'Log.entryAdded') {
         const e = p.entry as { level: string; text: string; url?: string };
-        if (e.level === 'error') errors.push(`${e.text}${e.url ? ` (${e.url})` : ''}`.slice(0, 300));
+        // 탭 아이콘(favicon) 404는 거의 모든 간단한 페이지에서 나는 잡음이다(실측: 첫 사용 메모 앱 점검의 유일한 "오류").
+        if (e.level === 'error' && !/\/favicon\.ico$/.test(e.url ?? ''))
+          errors.push(`${e.text}${e.url ? ` (${e.url})` : ''}`.slice(0, 300));
       }
     });
+    const dialogs = cdp.acceptDialogs();
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
     await cdp.send('Log.enable');
@@ -453,7 +470,11 @@ export async function captureScreens(
       if (wide > 376) errors.push(`휴대폰 폭(375px)에서 가로로 넘침: 페이지 폭 ${wide}px`);
       await shoot('휴대폰 폭(375px)', 375, 812);
     }
-    return { shots, errors, text, downloads, clips: clips.filter((c) => c.frames.length > 0) };
+    // 조작 중 뜬 확인 창은 QA가 알 수 있게 화면 글자 뒤에 붙인다(사진에는 창이 찍히지 않는다).
+    const withDialogs = dialogs.length
+      ? `${text}\n\n[Dialogs shown during the steps; the checker clicked OK]\n${dialogs.join('\n')}`
+      : text;
+    return { shots, errors, text: withDialogs, downloads, clips: clips.filter((c) => c.frames.length > 0) };
   } finally {
     cdp?.close();
     // 크롬은 자식 프로세스를 여럿 띄우므로 트리째 끈다.

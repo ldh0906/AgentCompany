@@ -1,7 +1,7 @@
 // 환경 진단과 설치 정보. 인증 파일은 절대 열지 않는다(공식 상태 명령의 결과만 본다).
 import { tr } from '../core/i18n.ts';
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -54,6 +54,37 @@ export function cliEnv(dataDir: string, kind: CliKind, useAppProfiles = true): {
   const v = ADAPTERS[kind].capabilities.profileEnvVar;
   const profileDir = useAppProfiles && v ? appProfileDir(profileRoot(dataDir), kind) : null;
   return { env: { ...process.env, ...(profileDir && v ? { [v]: profileDir } : {}) }, profileDir };
+}
+
+/**
+ * 대표가 누를 때만: 앱 전용 프로필로 CLI 로그인 명령을 띄운 PowerShell 창을 연다.
+ * 실측(첫 사용): 새 회사에선 Claude·Codex가 "로그인 필요"인데, 안내가 명령을 복사해 PowerShell에 붙이라는 것뿐이었다.
+ * 로그인 자체(브라우저 인증)는 CLI가 하고, 앱은 결과 파일을 읽지 않는다.
+ */
+export async function openLoginWindow(dataDir: string, kind: string): Promise<void> {
+  const a = Object.values(ADAPTERS).find((x) => x.kind === kind);
+  if (!a || a.kind === 'fake' || !a.loginArgs) throw new Error(tr('로그인할 수 없는 CLI입니다.', 'This CLI has no login.'));
+  if (process.platform !== 'win32') throw new Error(a.loginInstructions(null));
+  const { env } = cliEnv(dataDir, a.kind);
+  const located = await locateExecutable(a.executable, env);
+  if (!located?.launch) throw new Error(tr(`${a.displayName}가 설치되어 있지 않습니다.`, `${a.displayName} is not installed.`));
+  // PowerShell은 둥근 따옴표(‘ ’ ‚ ‛)도 작은따옴표로 읽으므로 함께 두 번 쓴다.
+  const q = (s: string) => `'${s.replace(/['‘’‚‛]/g, '$&$&')}'`;
+  const script = [
+    `$Host.UI.RawUI.WindowTitle = 'Agent Company - ${a.displayName} login'`,
+    `Write-Host 'Agent Company: ${a.displayName} login. Follow the steps below; close this window when done.'`,
+    `& ${[located.launch.file, ...located.launch.argsPrefix, ...a.loginArgs].map(q).join(' ')}`,
+  ].join('; ');
+  // start: 새 콘솔 창을 확실히 연다(detached만으로는 창 없는 프로세스가 될 수 있다). 인코딩된 명령이라 따옴표 문제가 없다.
+  const b64 = Buffer.from(script, 'utf16le').toString('base64');
+  const child = spawn('cmd.exe', ['/d', '/c', `start "AgentCompany" powershell.exe -NoProfile -NoExit -EncodedCommand ${b64}`], {
+    env,
+    detached: true,
+    windowsHide: true,
+    windowsVerbatimArguments: true,
+    stdio: 'ignore',
+  });
+  child.unref();
 }
 
 export async function doctor(dataDir: string, useAppProfiles = true): Promise<DoctorReport> {

@@ -134,7 +134,7 @@ export function UsagePanel() {
         <span className="row">
           <Icon name="spark" /> {ko ? '토큰 사용량' : 'Token usage'}
         </span>
-        <span className="sub">{ko ? 'CLI가 보고한 값' : 'as reported by the CLIs'}</span>
+        <span className="sub">{ko ? 'AI가 보고한 값' : 'as reported by the CLIs'}</span>
       </h2>
       <div className="body" style={{ paddingBottom: 0 }}>
         <DailyLimit />

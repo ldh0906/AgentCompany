@@ -106,6 +106,7 @@ export const codexAdapter: CliAdapter = {
 
   classifyFailure: classifyCommon,
   loginStatusArgs: ['login', 'status'],
+  loginArgs: ['login'],
   loginInstructions(profileDir) {
     return profileDir
       ? tr(
