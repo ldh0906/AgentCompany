@@ -23,7 +23,17 @@ import { followUpsFromSummary, parseChatReply, parseDrafts, parseReport, type Ti
 import { Chat, ticketChannelId, type ChatMessage } from './chat.ts';
 import { writeDecision } from '../approvals/file-queue.ts';
 import type { Actor } from '../core/ticket-machine.ts';
-import type { Claim, Employee, Evidence, FailureClass, Project, Ticket, TicketStatus, VerifyCommand } from '../core/types.ts';
+import type {
+  Claim,
+  Employee,
+  Evidence,
+  FailureClass,
+  Project,
+  ProjectProfile,
+  Ticket,
+  TicketStatus,
+  VerifyCommand,
+} from '../core/types.ts';
 import { DEFAULT_BUDGET, DIFFICULTIES, DIFFICULTY_RANK, RANK_ORDER, TERMINAL_STATUSES, difficultyOf, rankOf } from '../core/types.ts';
 import { pickPanel, pickStaff } from '../core/staffing.ts';
 import { commandOf, judgeToolRequest } from '../core/guard.ts';
@@ -1276,6 +1286,7 @@ export class Orchestrator {
       const msg = this.chat.post(channelId, run.employeeId, parsed.reply, 'chat', { runId: run.id });
       const ticketId = this.chat.channel(channelId)?.ticketId;
       if (ticketId) this.screens.maybeQaReject(ticketId, run, parsed.reply);
+      if (parsed.profile) this.proposeProfile(channelId, parsed.profile, run.employeeId);
       const byName = (n: string) => this.company.employees().find((e) => e.name === n.trim() && !e.removedAt)?.id;
       const called = new Set(
         [...parsed.mentions.map(byName), ...msg.mentions].filter((x): x is string => Boolean(x) && x !== 'ceo' && x !== run.employeeId),
@@ -1316,6 +1327,46 @@ export class Orchestrator {
     }
     this.changed('chat', channelId);
     this.changed('run', run.id);
+  }
+
+  /**
+   * 대화에서 프로젝트 성격이 바뀌면(예: "휴대폰에서도 돼야 해") 직원이 프로필 변경을 제안하고, 대표가 한 번에 반영한다.
+   * 대표 요청(2026-10-01 우선순위 5): 프로필을 설정 화면에서만 고칠 수 있어 대화로 바뀐 내용이 직원들에게 전해지지 않았다.
+   */
+  private proposeProfile(channelId: string, profile: ProjectProfile, by: string): void {
+    const c = this.chat.channel(channelId);
+    const ticket = c?.ticketId ? this.company.store.get<Ticket>('tickets', c.ticketId) : null;
+    const projectId = c?.projectId ?? ticket?.projectId ?? this.company.projects().find((p) => !p.removedAt)?.id;
+    const project = projectId ? this.company.store.get<Project>('projects', projectId) : null;
+    if (!project) return;
+    const cur = project.profile;
+    if (cur && cur.summary === profile.summary && cur.mobile === profile.mobile && cur.game === profile.game) return;
+    this.company.store.setSetting(`profile_proposal:${project.id}`, JSON.stringify({ profile, by, at: new Date().toISOString() }));
+    this.chat.post(
+      channelId,
+      'system',
+      tr(
+        `${this.nameOf(by)}이(가) ${project.name} 프로필 변경을 제안했습니다: ${profile.summary} — 프로젝트 화면에서 반영할 수 있습니다.`,
+        `${this.nameOf(by)} proposed a new profile for ${project.name}: ${profile.summary} (apply it on the Projects page).`,
+      ),
+      'event',
+    );
+    this.changed('project', project.id);
+  }
+
+  profileProposal(projectId: string): { profile: ProjectProfile; by: string; at: string } | null {
+    const raw = this.company.store.getSetting(`profile_proposal:${projectId}`);
+    return raw ? (JSON.parse(raw) as { profile: ProjectProfile; by: string; at: string }) : null;
+  }
+
+  /** 대표가 제안을 반영하거나 버린다. */
+  resolveProfileProposal(projectId: string, accept: boolean): Project {
+    const p = this.profileProposal(projectId);
+    if (!p) throw new DomainError(tr('프로필 변경 제안이 없습니다.', 'No profile proposal.'));
+    this.company.store.setSetting(`profile_proposal:${projectId}`, '');
+    const project = accept ? this.company.updateProject(projectId, { profile: p.profile }) : this.company.requireProject(projectId);
+    this.changed('project', projectId);
+    return project;
   }
 
   private readonly splitCleanup = new Set<string>();

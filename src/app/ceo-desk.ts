@@ -4,6 +4,7 @@ import { tr } from '../core/i18n.ts';
 
 import type { Ticket } from '../core/types.ts';
 import { TERMINAL_STATUSES } from '../core/types.ts';
+import { requestTokens, tokensText } from './cost.ts';
 import { showToast, toastBlocked, type CeoNotice, type CeoTodo } from './notify.ts';
 import type { OrchHost } from './orch-host.ts';
 import { newId, type CeoRequest } from './records.ts';
@@ -47,6 +48,14 @@ export class CeoDesk {
           kind: 'failed',
           title: tr(`초안 실패: ${r.text.slice(0, 60)}`, `Drafting failed: ${r.text.slice(0, 60)}`),
           link: '/',
+        });
+    for (const p of this.h.company.projects())
+      if (!p.removedAt && this.h.company.store.getSetting(`profile_proposal:${p.id}`))
+        out.push({
+          key: `profile:${p.id}:${this.h.company.store.getSetting(`profile_proposal:${p.id}`)!.length}`,
+          kind: 'decision',
+          title: tr(`${p.name} 프로필 변경 제안 확인`, `Review the profile proposal for ${p.name}`),
+          link: '/projects',
         });
     if (this.h.paused() && (this.h.company.store.getSetting('paused_reason') ?? '').startsWith('daily:'))
       out.push({
@@ -111,9 +120,15 @@ export class CeoDesk {
     if (this.h.company.store.getSetting(`request_done:${req.id}`)) return;
     this.h.company.store.setSetting(`request_done:${req.id}`, new Date().toISOString());
     const done = tickets.filter((x) => x.status === 'done').length;
+    // 얼마나 들었는지도 함께(요청별 비용 보고): 합계와 업무별.
+    const used = requestTokens(this.h.records, req);
+    const ko = tr('ko', 'en') === 'ko';
+    const each = Object.entries(used.byTicket)
+      .map(([id, n]) => `${id} ${tokensText(n, ko)}`)
+      .join(' · ');
     this.notice(
       tr(`요청이 끝났습니다 (${done}/${tickets.length} 완료)`, `Request finished (${done}/${tickets.length} done)`),
-      req.text.slice(0, 120),
+      `${req.text.slice(0, 120)}\n${tr(`토큰 약 ${tokensText(used.total, ko)} 사용`, `About ${tokensText(used.total, ko)} tokens used`)} (${each})`,
       '/',
     );
     this.h.onRequestDone(req, tickets);

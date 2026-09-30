@@ -37,3 +37,22 @@ export function estimates(records: Records, tickets: Ticket[]): Record<Difficult
   }
   return out;
 }
+
+/**
+ * 요청 하나에 든 토큰: 비서실장 초안 + 업무마다(작업·검수) + 업무방 대화(화면 QA 의견 등).
+ * 대표 요청(2026-10-01 우선순위 5): 요청이 끝나면 얼마나 들었는지 알려 주기.
+ */
+export function requestTokens(
+  records: Records,
+  req: { id: string; ticketIds: string[] },
+): { total: number; byTicket: Record<string, number> } {
+  const byTicket: Record<string, number> = {};
+  for (const id of req.ticketIds) byTicket[id] = ticketTokens(records, id) + ticketTokens(records, `t:${id}`);
+  return { total: ticketTokens(records, req.id) + Object.values(byTicket).reduce((a, b) => a + b, 0), byTicket };
+}
+
+/** 알림 글에 쓰는 토큰 수(한국어는 만·억 단위). */
+export function tokensText(n: number, ko: boolean): string {
+  if (ko) return n >= 1e8 ? `${(n / 1e8).toFixed(1)}억` : n >= 1e4 ? `${Math.round(n / 1e4)}만` : String(n);
+  return n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
+}

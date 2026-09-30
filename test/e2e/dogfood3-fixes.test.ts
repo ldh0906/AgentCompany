@@ -8,6 +8,7 @@ import path from 'node:path';
 import { screenStepsOf } from '../../src/agents/report.ts';
 import { captureScreens, findChrome, inspectDownload } from '../../src/app/screen-check.ts';
 import { driveUntil, newImplTicket, setup } from './helpers.ts';
+import { requestTokens } from '../../src/app/cost.ts';
 
 test('초안을 확정하면 답하지 않은 질문은 제안대로 규칙이 된다(제안 없는 질문은 그대로)', { timeout: 30_000 }, async (t) => {
   const env = await setup(t);
@@ -267,4 +268,8 @@ test('대표 알림: 할 일 목록(승인·결정)과 요청이 모두 끝났�
     env.orch.desk.notices().some((n) => /요청이 끝났습니다/.test(n.title)),
     '요청의 업무가 모두 끝나면 알린다',
   );
+  // 요청별 비용 보고: 알림에 합계와 업무별 토큰
+  const used = requestTokens(env.orch.records, { id: 'Q-9', ticketIds: [tk.id] });
+  assert.ok(used.total > 0 && used.byTicket[tk.id] === used.total, '초안 실행이 없으면 업무 토큰이 곧 합계');
+  assert.match(env.orch.desk.notices().at(-1)!.body, new RegExp(`토큰 약 .+ 사용 \\(${tk.id} `));
 });

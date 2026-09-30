@@ -12,6 +12,7 @@ import { DIFFICULTIES, RANKS } from '../core/types.ts';
 import type { AccessLevel, CliKind, EvidenceType, RoleTemplate, TicketType, VerifyCommand } from '../core/types.ts';
 import { doctor, type DoctorReport, installInfo, openLoginWindow } from '../app/doctor.ts';
 import { listModels } from '../app/models.ts';
+import { requestTokens } from '../app/cost.ts';
 import { createRepo, inspectRepo, listDirs, trackedDirs } from '../app/repo-inspect.ts';
 
 export class ApiError extends Error {
@@ -389,6 +390,8 @@ export class Api {
           })),
         );
       }
+      case 'POST projects/:id/profile-proposal':
+        return this.orch.resolveProfileProposal(this.company.requireProject(id!).id, b.accept === true);
       case 'POST requests/:id/playtest':
         return this.orch.playtests.startPlaytest({ requestId: id! }, 'ceo');
       case 'POST tickets/:id/playtest':
@@ -434,6 +437,20 @@ export class Api {
       adapters: Object.values(ADAPTERS).map((a) => ({ kind: a.kind, displayName: a.displayName, capabilities: a.capabilities })),
       events: this.company.store.events(undefined, 60),
       requests: r.requests(),
+      // 요청별 사용 토큰(초안 + 업무 + 업무방 대화): 요청 카드에 합계와 업무별로
+      // 대화에서 직원이 낸 프로젝트 프로필 변경 제안(프로젝트 ID별)
+      profileProposals: Object.fromEntries(
+        this.company
+          .projects()
+          .map((p) => [p.id, this.orch.profileProposal(p.id)] as const)
+          .filter(([, v]) => v),
+      ),
+      requestTokens: Object.fromEntries(
+        r
+          .requests(30)
+          .filter((q) => q.ticketIds.length)
+          .map((q) => [q.id, requestTokens(r, q)]),
+      ),
       chiefOfStaff: this.orch.chiefOfStaff()?.id ?? null,
       permissionDelegate: this.orch.permissionDelegate()?.id ?? null,
       usage: r.usageSummary(),

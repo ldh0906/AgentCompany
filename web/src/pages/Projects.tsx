@@ -82,6 +82,47 @@ export function Projects() {
                   </span>
                 )}
               </div>
+              {/* 대화에서 직원이 낸 프로필 변경 제안: 한 번에 반영하거나 버린다 */}
+              {state.profileProposals?.[p.id] && (
+                <div className="banner info" style={{ marginTop: 10 }}>
+                  <div>
+                    <b>{ko ? '프로필 변경 제안' : 'Profile proposal'}</b> ·{' '}
+                    {state.employees.find((e) => e.id === state.profileProposals![p.id]!.by)?.name ?? ''}
+                  </div>
+                  <div>{state.profileProposals[p.id]!.profile.summary}</div>
+                  <div className="sub">
+                    {state.profileProposals[p.id]!.profile.mobile
+                      ? ko
+                        ? '휴대폰에서도 돼야 함'
+                        : 'Must work on phones'
+                      : ko
+                        ? 'PC 전용(휴대폰 신경 안 씀)'
+                        : 'Desktop only'}
+                    {state.profileProposals[p.id]!.profile.game ? (ko ? ' · 게임' : ' · Game') : ''}
+                  </div>
+                  <div className="row" style={{ marginTop: 8 }}>
+                    <button
+                      className="btn small primary"
+                      disabled={busy}
+                      onClick={() =>
+                        run(
+                          () => api(`projects/${p.id}/profile-proposal`, { body: { accept: true } }),
+                          ko ? '프로필을 바꿨습니다. 이제 모든 직원이 이 내용을 봅니다.' : 'Profile updated.',
+                        ).then(reload)
+                      }
+                    >
+                      {ko ? '반영' : 'Apply'}
+                    </button>
+                    <button
+                      className="btn small"
+                      disabled={busy}
+                      onClick={() => run(() => api(`projects/${p.id}/profile-proposal`, { body: { accept: false } })).then(reload)}
+                    >
+                      {ko ? '무시' : 'Dismiss'}
+                    </button>
+                  </div>
+                </div>
+              )}
               <div style={{ marginTop: 10 }}>
                 <b>{ko ? '자동 검사' : 'Verify commands'}</b>
                 {p.verifyCommands.length === 0 ? (

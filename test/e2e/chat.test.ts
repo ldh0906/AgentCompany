@@ -196,3 +196,34 @@ test('업무 하나 멈춤: 대표 보류가 되고, 보류 해제로 재개한�
   const done = await driveUntil(env, tk.id, (x) => x.status === 'awaiting_approval' || x.hold !== null);
   assert.equal(done.status, 'awaiting_approval');
 });
+
+test(
+  '대화로 프로필 바꾸기: 직원이 프로필 변경을 제안하면 대표 할 일에 뜨고, 반영하면 프로젝트 프로필이 바뀐다',
+  { timeout: 120_000 },
+  async (t) => {
+    const env = await setup(t);
+    const [impl] = env.company.employees();
+    const dm = env.orch.chat.ensureDm(impl!.id);
+    await env.orch.ceoMessage(dm.id, '이거 휴대폰에서도 돼야 해');
+    await until(env, () => env.orch.profileProposal(env.projectId) !== null);
+    assert.deepEqual(env.orch.profileProposal(env.projectId)!.profile, { summary: '웹 앱(휴대폰 대응)', mobile: true, game: false });
+    assert.ok(
+      env.orch.desk.ceoTodos().some((x) => x.link === '/projects'),
+      '대표 할 일에 뜬다',
+    );
+    assert.ok(env.orch.chat.messages(dm.id).some((m) => /프로필 변경을 제안/.test(m.text)));
+    const p = env.orch.resolveProfileProposal(env.projectId, true);
+    assert.equal(p.profile?.mobile, true);
+    assert.equal(env.orch.profileProposal(env.projectId), null, '반영하면 제안은 사라진다');
+    assert.ok(!env.orch.desk.ceoTodos().some((x) => x.link === '/projects'));
+    // 같은 프로필을 다시 제안하면 무시한다
+    await env.orch.ceoMessage(dm.id, '다시 말하지만 휴대폰에서도 돼야 해');
+    await until(env, () => env.orch.chat.messages(dm.id).filter((m) => m.author === impl!.id).length >= 2);
+    assert.equal(env.orch.profileProposal(env.projectId), null);
+  },
+);
+
+test('대화 답장 읽기: 프로필 제안이 없거나 틀리면 null', () => {
+  assert.equal(parseChatReply('```json\n{"nonce":"n","kind":"chat","reply":"네","profile":{"summary":""}}\n```', 'n')!.profile, null);
+  assert.equal(parseChatReply('```json\n{"nonce":"n","kind":"chat","reply":"네"}\n```', 'n')!.profile, null);
+});

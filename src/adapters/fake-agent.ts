@@ -190,6 +190,8 @@ function chat(h: TaskHeader, prompt: string): string {
       reply: L(`확인했습니다: ${said.slice(0, 80)}`, `Got it: ${said.slice(0, 80)}`),
       mentions: call ? [call] : [],
       openRoom: null,
+      // 대표가 "휴대폰에서도"라고 하면 프로젝트 프로필 변경을 제안한다(대화로 프로필 바꾸기 테스트용)
+      profile: /휴대폰에서도/.test(said) ? { summary: '웹 앱(휴대폰 대응)', mobile: true, game: false } : null,
     },
     L('답장합니다.', 'Replying.'),
   );

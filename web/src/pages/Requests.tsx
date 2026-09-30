@@ -147,6 +147,17 @@ export function RequestBox() {
                   </Link>
                 ))}
               </div>
+              {/* 요청별 비용: 지금까지 든 토큰(초안·작업·검수·화면 QA), 업무별로도 */}
+              {(state.requestTokens?.[r.id]?.total ?? 0) > 0 && (
+                <div className="sub">
+                  {ko ? '사용 토큰' : 'Tokens used'} {fmtTokens(state.requestTokens![r.id]!.total, lang)}
+                  {' ('}
+                  {Object.entries(state.requestTokens![r.id]!.byTicket)
+                    .map(([id, n]) => `${id} ${fmtTokens(n, lang)}`)
+                    .join(' · ')}
+                  {')'}
+                </div>
+              )}
               {/* 요청의 업무가 모두 끝났고 게임이면: 고급 QA(직접 플레이) 결과·버튼 */}
               {(state.projects.find((p) => p.id === r.projectId)?.profile?.game || state.playtests?.[`Q:${r.id}`]) &&
                 r.ticketIds.length > 0 &&

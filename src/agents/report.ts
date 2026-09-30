@@ -449,6 +449,8 @@ export interface ChatReply {
   /** 부르는 동료 이름 */
   mentions: string[];
   openRoom: { name: string; members: string[]; topic: string; message: string } | null;
+  /** 대화에서 프로젝트 성격이 바뀌었을 때 직원이 제안하는 새 프로필(대표가 반영) */
+  profile?: { summary: string; mobile: boolean; game: boolean } | null;
 }
 
 /**
@@ -480,6 +482,7 @@ export function parseChatReply(finalText: string | null, nonce: string): ChatRep
               message: isStr(room.message) ? room.message.slice(0, 4000) : '',
             }
           : null,
+      profile: profileOf(raw.profile),
     };
   }
   // JSON 없이 답만 한 경우: 코드 블록을 떼고 본문만.
