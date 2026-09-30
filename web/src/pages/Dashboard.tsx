@@ -145,7 +145,11 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
     case 'employee.removed':
       return ko ? `직원 삭제: ${who(e.entityId)}` : `Employee removed: ${who(e.entityId)}`;
     case 'decision.status':
-      return ko ? `결정 상태 변경 → ${String(p.to)}` : `Decision status → ${String(p.to)}`;
+      return ko
+        ? p.to === 'withdrawn'
+          ? '규칙 하나를 거뒀습니다'
+          : `규칙 상태 변경 → ${({ current: '현재 유효', past: '과거', superseded: '대체됨', needs_verification: '검증 필요', draft: '초안' } as Record<string, string>)[String(p.to)] ?? String(p.to)}`
+        : `Decision status → ${String(p.to)}`;
     case 'request.dismissed':
       return ko ? '대표 요청 초안을 버렸습니다' : 'Request drafts dismissed';
     case 'request.failed':

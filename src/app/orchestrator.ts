@@ -2813,14 +2813,26 @@ ${failure.detail.slice(0, 400)}`,
       throw new DomainError(tr('대표 결정을 기다리는 업무가 아닙니다.', 'This ticket is not waiting for a decision.'));
     const raw = this.company.store.getSetting(`ticket_questions:${t.id}`);
     const questions: string[] = raw ? (JSON.parse(raw) as string[]) : [];
-    const asked = questions.length ? questions.map((q) => `- ${q}`).join('\n') : t.hold.note.slice(0, 1000);
-    const text = answer?.trim()
-      ? tr(`${t.id} 질문에 대한 대표 답:\n${asked}\n→ ${answer.trim()}`, `CEO answer to ${t.id}:\n${asked}\n→ ${answer.trim()}`)
-      : tr(
-          `${t.id}: 아래 질문은 담당 직원이 합리적인 값으로 정하고, 정한 값과 근거를 문서에 남긴다.\n${asked}`,
-          `${t.id}: the assignee decides these with sensible values and documents the values and reasoning.\n${asked}`,
+    // 프로젝트 규칙(모든 직원·모든 업무에 전달)은 "질문 → 대표 답"만 남긴다. 위임이나 질문 없이 멈춘 경우의 답은
+    // 이 업무에만 전하는 업무방 메모로 남긴다(다음 작업 지시에 들어간다).
+    // 실측(2026-09-30): 보류 메모(작업 보고 전문)가 통째로 "규칙"이 되어 이후 모든 업무 지시에 섞였다.
+    const listed = questions.map((q) => `- ${q}`).join('\n');
+    if (answer?.trim() && questions.length)
+      this.records.recordDecision(t.projectId, questions.map((q) => `${q} → ${answer.trim()}`).join('\n'), [t.id]);
+    else {
+      const room = this.chat.ensureTicketChannel(t.id);
+      if (room)
+        this.chat.post(
+          room.id,
+          'ceo',
+          answer?.trim() ||
+            tr(
+              `질문한 것은 담당 직원이 합리적인 값으로 정하고, 정한 값과 근거를 문서에 남기세요.${listed ? `\n${listed}` : ''}`,
+              `Decide these yourself with sensible values and document the values and reasoning.${listed ? `\n${listed}` : ''}`,
+            ),
+          'chat',
         );
-    this.records.recordDecision(t.projectId, text, [t.id]);
+    }
     this.company.store.setSetting(`ticket_questions:${t.id}`, '');
     return this.releaseHold(t.id);
   }

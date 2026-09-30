@@ -1,7 +1,7 @@
 // 가짜 직원 CLI. 실제 구독 없이 제품 흐름을 시연·테스트한다.
 // 성격(FAKE_BEHAVIOR): diligent(성실) | lazy(첫 회차에 일 안 하고 완료 주장) | rogue(범위 밖 수정) | slow(느림) | tamper(git ref 조작)
 //   stubborn(2회차부터 고치지 않고 반박) | picky(검수: 1회차만 반려) | harsh(검수: 항상 반려)
-//   asker(현재 결정이 하나도 없으면 대표 결정을 요청)
+//   asker(현재 결정도 대표 메모도 없으면 대표 결정을 요청)
 // stdin으로 프롬프트를 받고, Claude의 stream-json과 비슷한 JSONL을 출력한다.
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -37,7 +37,8 @@ function finalWith(json: object, text: string): string {
 
 async function work(h: TaskHeader, prompt: string): Promise<string> {
   const decisionsBlock = prompt.split('### Current decisions')[1]?.split('DATA>>>')[0] ?? '';
-  if (behavior === 'asker' && /\(none\)/.test(decisionsBlock))
+  // 규칙이 없고 대표 메모(피드백 칸)도 없으면 묻는다
+  if (behavior === 'asker' && /\(none\)/.test(decisionsBlock) && !prompt.includes('Feedback and notes'))
     return finalWith(
       {
         nonce: h.nonce,

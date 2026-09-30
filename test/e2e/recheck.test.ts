@@ -10,11 +10,15 @@ test('직원이 대표 결정을 요청하면: 대표가 "직원 판단에 맡�
   const held = await driveUntil(env, tk.id, (x) => x.hold !== null);
   assert.equal(held.hold?.reason, 'needs_decision');
   assert.equal(held.status, 'assigned');
+  const before = env.orch.records.decisions(env.projectId, 'current').length;
   env.orch.answerTicket(tk.id, null);
-  const d = env.orch.records.decisions(env.projectId, 'current');
+  // 위임은 이 업무에만 전하는 업무방 메모로 남고, 모든 업무에 전달되는 규칙이 되지 않는다(실측: 보류 메모가 규칙이 됨)
+  assert.equal(env.orch.records.decisions(env.projectId, 'current').length, before);
   assert.ok(
-    d.some((x) => x.text.includes('시작 레벨은?') && x.text.includes('담당 직원이')),
-    '질문과 위임이 결정으로 남는다',
+    env.orch.chat
+      .messages(`t:${tk.id}`, 100)
+      .some((m) => m.author === 'ceo' && m.text.includes('시작 레벨은?') && m.text.includes('담당 직원이')),
+    '질문과 위임이 업무방 메모로 남는다',
   );
   const done = await driveUntil(env, tk.id, (x) => x.status === 'awaiting_approval' || x.hold !== null);
   assert.equal(done.status, 'awaiting_approval', `보류: ${done.hold?.note}`);
@@ -25,7 +29,7 @@ test('대표가 직접 답하면 그 답이 결정으로 기록된다', { timeou
   const tk = newImplTicket(env);
   await driveUntil(env, tk.id, (x) => x.hold !== null);
   env.orch.answerTicket(tk.id, '레벨 1');
-  assert.ok(env.orch.records.decisions(env.projectId, 'current').some((x) => x.text.includes('→ 레벨 1')));
+  assert.ok(env.orch.records.decisions(env.projectId, 'current').some((x) => x.text.includes('시작 레벨은? → 레벨 1')));
   assert.throws(() => env.orch.answerTicket(tk.id, 'x'), /결정|decision/, '보류가 아니면 거부');
 });
 

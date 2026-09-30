@@ -526,6 +526,7 @@ function ProjectRules({ projectId }: { projectId: string }) {
               className="btn small"
               disabled={busy}
               title={ko ? '더 이상 따르지 않게 합니다(기록은 남음)' : 'Stop applying it (kept in history)'}
+              style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
               onClick={() =>
                 run(
                   () => api(`decisions/${d.id}/status`, { body: { status: 'withdrawn' } }),
