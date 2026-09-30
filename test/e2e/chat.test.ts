@@ -153,9 +153,46 @@ test('그룹 방에서 이 업무(T-번호)를 두고 합의한 대화는 담당
   const tk = newImplTicket(env);
   const room = env.orch.chat.createGroup({ name: '설계 싱크', members: [impl!.id, qa!.id], createdBy: 'ceo' });
   env.orch.chat.post(room.id, qa!.id, `${tk.id}는 버전 앞에 v를 붙이기로 합의`, 'chat');
-  await driveUntil(env, tk.id, (x) => x.status !== 'backlog' && x.status !== 'assigned' && x.status !== 'received' && x.status !== 'analyzing');
+  await driveUntil(
+    env,
+    tk.id,
+    (x) => x.status !== 'backlog' && x.status !== 'assigned' && x.status !== 'received' && x.status !== 'analyzing',
+  );
   await env.orch.idle();
   const run = env.orch.records.runsForTicket(tk.id).find((r) => r.kind === 'work')!;
   const { readFileSync } = await import('node:fs');
   assert.match(readFileSync(`${run.runDir}/prompt.md`, 'utf8'), /설계 싱크.*v를 붙이기로 합의/);
+});
+
+test('회사 전체 일시정지: 새 작업을 시작하지 않고, 풀면 다시 진행한다', { timeout: 120_000 }, async (t) => {
+  const env = await setup(t);
+  env.orch.setPaused(true);
+  assert.equal(env.orch.paused, true);
+  const tk = newImplTicket(env);
+  for (let i = 0; i < 8; i++) await env.orch.tick();
+  await env.orch.idle();
+  assert.equal(env.orch.records.runsForTicket(tk.id).filter((r) => r.kind === 'work').length, 0, '멈춘 동안 작업 실행 없음');
+  assert.ok(
+    env.orch.chat.messages('general').some((m) => /일시정지/.test(m.text)),
+    '전체방에 알림',
+  );
+  env.orch.setPaused(false);
+  const done = await driveUntil(env, tk.id, (x) => x.status === 'awaiting_approval' || x.hold !== null);
+  assert.equal(done.status, 'awaiting_approval');
+});
+
+test('업무 하나 멈춤: 대표 보류가 되고, 보류 해제로 재개한다', { timeout: 120_000 }, async (t) => {
+  const env = await setup(t);
+  env.orch.setPaused(true);
+  const tk = newImplTicket(env);
+  for (let i = 0; i < 4; i++) await env.orch.tick();
+  const p = env.orch.pauseTicket(tk.id);
+  assert.equal(p.hold?.reason, 'on_hold');
+  env.orch.setPaused(false);
+  for (let i = 0; i < 4; i++) await env.orch.tick();
+  await env.orch.idle();
+  assert.equal(env.orch.records.runsForTicket(tk.id).length, 0, '멈춘 업무는 시작하지 않음');
+  env.orch.releaseHold(tk.id);
+  const done = await driveUntil(env, tk.id, (x) => x.status === 'awaiting_approval' || x.hold !== null);
+  assert.equal(done.status, 'awaiting_approval');
 });

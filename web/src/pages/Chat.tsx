@@ -172,7 +172,10 @@ function Room({ channel }: { channel: Channel }) {
   const working = channel.ticketId
     ? state.runs.filter((r) => r.ticketId === channel.ticketId && r.status === 'running' && r.kind !== 'chat')
     : [];
-  const isPerm = (m: ChatMessage) => m.kind === 'event' && m.author !== 'system';
+  // 예전 기록은 권한 처리도 event로 저장돼 있어 글머리로도 가린다.
+  const isPerm = (m: ChatMessage) =>
+    m.kind === 'permission' ||
+    (m.kind === 'event' && m.author !== 'system' && /^(권한 허용|⛔ 권한 차단|Allowed:|⛔ Blocked)/.test(m.text));
   const shown = (messages ?? []).filter((m) => showPerms || !isPerm(m));
   const permCount = (messages ?? []).filter(isPerm).length;
   const ticket = channel.ticketId ? state.tickets.find((t) => t.id === channel.ticketId) : null;
@@ -341,7 +344,7 @@ function Message({
   const { lang } = useT();
   const ko = lang === 'ko';
   const employees = state?.employees ?? [];
-  if (m.kind === 'event')
+  if (m.kind === 'event' || m.kind === 'permission')
     return (
       <div className="msg-event">
         <span>{m.author !== 'system' ? `${nameOf(employees, m.author, ko)} · ` : ''}</span>

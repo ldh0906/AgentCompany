@@ -293,6 +293,10 @@ export class Api {
       }
       case 'POST tickets/:id/assign':
         return this.orch.assign(id!, str(b, 'assigneeId'), str(b, 'reviewerId'));
+      case 'POST tickets/:id/pause':
+        return this.orch.pauseTicket(id!);
+      case 'POST pause':
+        return this.orch.setPaused(b.paused !== false);
       case 'POST tickets/:id/answer':
         return this.orch.answerTicket(id!, str(b, 'answer', { optional: true, max: 4000 }) || null);
       case 'POST tickets/:id/reverify':
@@ -385,6 +389,7 @@ export class Api {
       permissionDelegate: this.orch.permissionDelegate()?.id ?? null,
       usage: r.usageSummary(),
       previews: this.orch.previewList(),
+      paused: this.orch.paused,
       channels: this.orch.chat.channels(),
       // 직원이 대표를 부른 최근 메시지(알림·배지용)
       mentions: this.orch.chat

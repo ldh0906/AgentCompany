@@ -377,6 +377,9 @@ export class Orchestrator {
           continue;
         }
         if (TERMINAL_STATUSES.includes(t.status) || t.hold || this.busy.has(t.id)) continue;
+        // 회사 전체 일시정지: 새 실행(작업·재작업·검수)을 시작하지 않는다. 검증·반영·승인 요청은 계속한다.
+        if (this.paused && !['received', 'analyzing', 'backlog', 'verifying', 'integrating', 'awaiting_approval'].includes(t.status))
+          continue;
         try {
           await this.advance(t);
         } catch (error) {
@@ -618,13 +621,20 @@ export class Orchestrator {
       .flatMap((c) => {
         const ms = this.chat.messages(c.id, 200);
         const about = c.ticketId === t.id || ms.some((m) => m.refs.includes(t.id));
-        return about ? ms.filter((m) => m.kind === 'chat').map((m) => `- [${c.name}] ${this.nameOf(m.author)}: ${m.text.slice(0, 1200)}`) : [];
+        return about
+          ? ms.filter((m) => m.kind === 'chat').map((m) => `- [${c.name}] ${this.nameOf(m.author)}: ${m.text.slice(0, 1200)}`)
+          : [];
       })
       .slice(-20);
     const parts = [
       review,
       notes.length ? tr(`대표가 업무방에 남긴 말:\n${notes.join('\n')}`, `CEO notes in the ticket room:\n${notes.join('\n')}`) : null,
-      related.length ? tr(`이 업무에 관한 그룹 방 대화(합의한 계획):\n${related.join('\n')}`, `Group-room discussion about this ticket (agreed plan):\n${related.join('\n')}`) : null,
+      related.length
+        ? tr(
+            `이 업무에 관한 그룹 방 대화(합의한 계획):\n${related.join('\n')}`,
+            `Group-room discussion about this ticket (agreed plan):\n${related.join('\n')}`,
+          )
+        : null,
     ].filter((x): x is string => Boolean(x));
     return parts.length ? parts.join('\n\n') : null;
   }
@@ -916,6 +926,8 @@ export class Orchestrator {
       );
       return;
     }
+    // 회사가 멈춰 있으면 직원끼리의 연쇄 대화는 시작하지 않는다(대표가 직접 부른 것만 답한다).
+    if (this.paused && depth > 0) return;
     if (depth > Orchestrator.CHAT_MAX_DEPTH) {
       this.chat.post(
         channelId,
@@ -2359,6 +2371,32 @@ ${failure.detail.slice(0, 400)}`,
     this.records.recordDecision(t.projectId, text, [t.id]);
     this.company.store.setSetting(`ticket_questions:${t.id}`, '');
     return this.releaseHold(t.id);
+  }
+
+  /** 회사 전체 일시정지 여부(설정에 저장: 재시작해도 유지). */
+  get paused(): boolean {
+    return Boolean(this.company.store.getSetting('company_paused'));
+  }
+
+  /** 대표가 회사 전체를 멈추거나 다시 돌린다. 진행 중인 실행은 끝까지 마무리한다. */
+  setPaused(paused: boolean): { paused: boolean; running: number } {
+    this.company.store.setSetting('company_paused', paused ? new Date().toISOString() : '');
+    this.company.store.appendEvent('ceo', paused ? 'company.paused' : 'company.resumed', 'company', {});
+    this.changed('company', 'company');
+    return { paused, running: this.records.runsByStatus('running').filter((r) => this.liveRuns.has(r.id)).length };
+  }
+
+  /** 업무 하나를 멈춘다(대표 보류). 실행 중이면 끝난 뒤에 멈추도록 거부한다. 재개는 "보류 해제". */
+  pauseTicket(ticketId: string): Ticket {
+    const t = this.company.requireTicket(ticketId);
+    if (this.busy.has(t.id) || this.records.runsForTicket(t.id).some((r) => r.status === 'running' && this.liveRuns.has(r.id)))
+      throw new DomainError(
+        tr(
+          '지금 직원이 실행 중입니다. 끝난 뒤 멈추거나, 회사 전체 일시정지로 새 실행을 막으세요.',
+          'An employee is running this now. Pause after it finishes, or pause the whole company.',
+        ),
+      );
+    return this.apply(t.id, { type: 'hold', reason: 'on_hold', note: tr('대표가 멈췄습니다.', 'Paused by the CEO.') }, CEO);
   }
 
   releaseHold(ticketId: string): Ticket {

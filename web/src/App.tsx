@@ -80,7 +80,7 @@ function Shell() {
   const { t } = useT();
   const { lang, setLang } = useContext(LangContext);
   const { path } = useRoute();
-  const { state, live } = useCompany();
+  const { state, live, reload } = useCompany();
   const [newTicket, setNewTicket] = useState(false);
   const pending = state?.approvals.length ?? 0;
   const held = state?.tickets.filter(needsCeo).length ?? 0;
@@ -196,6 +196,27 @@ function Shell() {
           </Link>
         </nav>
         <div className="spacer" />
+        <button
+          className={`btn ${state?.paused ? 'ok' : ''}`}
+          style={{ marginBottom: 8 }}
+          title={
+            lang === 'ko'
+              ? state?.paused
+                ? '다시 일을 시작합니다.'
+                : '진행 중인 실행만 마무리하고 새 작업·검수·직원끼리의 대화를 시작하지 않습니다.'
+              : state?.paused
+                ? 'Resume work.'
+                : 'Finish running work; start nothing new.'
+          }
+          onClick={() =>
+            void api('pause', { body: { paused: !state?.paused } })
+              .then(reload)
+              .catch(() => {})
+          }
+        >
+          <Icon name={state?.paused ? 'bolt' : 'pause'} />{' '}
+          {state?.paused ? (lang === 'ko' ? '일시정지 풀기' : 'Resume') : lang === 'ko' ? '전체 일시정지' : 'Pause all'}
+        </button>
         <button className="btn primary" onClick={() => setNewTicket(true)} disabled={!state?.projects.length}>
           <Icon name="plus" /> {t('newTicket')}
         </button>
@@ -218,7 +239,16 @@ function Shell() {
           </select>
         </div>
       </aside>
-      <main className="main">{page}</main>
+      <main className="main">
+        {state?.paused && (
+          <div className="banner warn" style={{ marginBottom: 14 }}>
+            {lang === 'ko'
+              ? '⏸ 회사 전체가 일시정지 중입니다. 진행 중인 실행만 마무리하고 새 작업·검수는 시작하지 않습니다. 대화에서 직접 부른 직원은 답합니다.'
+              : '⏸ The company is paused. Running work finishes; nothing new starts. Employees you mention still reply.'}
+          </div>
+        )}
+        {page}
+      </main>
       {newTicket && <NewTicket onClose={() => setNewTicket(false)} />}
     </div>
   );

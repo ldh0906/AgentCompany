@@ -30,6 +30,7 @@ export type MessageKind =
   | 'review' // 검수 의견
   | 'feedback' // 반려·수정 요청
   | 'event' // 진행 상황(작게 표시)
+  | 'permission' // 위임자의 권한 허용·차단 기록(많아서 기본으로 숨김)
   | 'steer' // 작업 중인 직원에게 보낸 지시
   | 'followup'; // 후속 업무 제안(대표가 업무로 만들 수 있음)
 
@@ -329,7 +330,7 @@ export class Chat {
           p.allow
             ? tr(`권한 허용: ${s(p.command) || s(p.summary)}`, `Allowed: ${s(p.command) || s(p.summary)}`)
             : tr(`⛔ 권한 차단: ${s(p.reason)}`, `⛔ Blocked: ${s(p.reason)}`),
-          'event',
+          'permission',
         );
         return;
       case 'request.submitted':
@@ -343,6 +344,19 @@ export class Chat {
             `Drafted ${String(p.count ?? '')} tickets. Confirm on the dashboard.`,
           ),
         );
+        return;
+      case 'company.paused':
+        toGeneral(
+          'ceo',
+          tr(
+            '회사 전체를 일시정지했습니다. 진행 중인 실행만 마무리하고 새 작업은 시작하지 않습니다.',
+            'Company paused: running work finishes, nothing new starts.',
+          ),
+          'chat',
+        );
+        return;
+      case 'company.resumed':
+        toGeneral('ceo', tr('일시정지를 풀었습니다. 다시 일을 시작합니다.', 'Company resumed.'), 'chat');
         return;
       case 'decision.recorded':
         toGeneral('ceo', tr(`결정: ${s(p.text)}`, `Decision: ${s(p.text)}`), 'chat');

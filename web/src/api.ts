@@ -77,6 +77,8 @@ export interface State {
   permissionDelegate?: string | null;
   usage?: UsageSummary;
   previews?: PreviewInfo[];
+  /** 회사 전체 일시정지 */
+  paused?: boolean;
   channels?: Channel[];
   /** 직원이 대표를 부른 최근 메시지 */
   mentions?: ChatMessage[];
@@ -100,7 +102,7 @@ export interface ChatMessage {
   channelId: string;
   author: string;
   text: string;
-  kind: 'chat' | 'report' | 'review' | 'feedback' | 'event' | 'steer' | 'followup';
+  kind: 'chat' | 'report' | 'review' | 'feedback' | 'event' | 'permission' | 'steer' | 'followup';
   mentions: string[];
   refs: string[];
   createdAt: string;

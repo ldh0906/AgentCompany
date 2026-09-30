@@ -74,6 +74,16 @@ export function TicketPage({ id }: { id: string }) {
           <Link to={`/chat/${encodeURIComponent(`t:${tk.id}`)}`} className="btn">
             {ko ? '업무방 대화' : 'Ticket chat'}
           </Link>
+          {!tk.hold && !['done', 'failed', 'cancelled', 'integrating'].includes(tk.status) && (
+            <button
+              className="btn"
+              disabled={busy}
+              title={ko ? '이 업무를 멈춥니다. "보류 해제"로 다시 시작합니다.' : 'Pause this ticket; release the hold to resume.'}
+              onClick={() => run(() => api(`tickets/${tk.id}/pause`, { body: {} }), ko ? '업무를 멈췄습니다.' : 'Paused.').then(reload)}
+            >
+              {ko ? '멈춤' : 'Pause'}
+            </button>
+          )}
           {latestHead && !['done', 'failed', 'cancelled'].includes(tk.status) && (
             <PreviewButton projectId={tk.projectId} ticketId={tk.id} />
           )}
