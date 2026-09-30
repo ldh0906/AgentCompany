@@ -253,6 +253,7 @@ export class Api {
           protectedPaths: strList(b, 'protectedPaths'),
           verifyCommands: verifyCommands(b) ?? [],
           docRules: str(b, 'docRules', { optional: true }),
+          autoApprove: b.autoApprove === true,
         });
       case 'POST projects/:id/preview':
         return this.orch.preview(id!, str(b, 'ticketId', { optional: true }) || null);
@@ -269,6 +270,7 @@ export class Api {
         if (b.verifyCommands !== undefined) patch.verifyCommands = verifyCommands(b);
         if (b.docRules !== undefined) patch.docRules = str(b, 'docRules', { optional: true });
         if (b.baseBranch !== undefined) patch.baseBranch = str(b, 'baseBranch');
+        if (b.autoApprove !== undefined) patch.autoApprove = b.autoApprove === true;
         return this.company.updateProject(id!, patch);
       }
 
@@ -473,7 +475,10 @@ export class Api {
       .then((s) => s.mtime.toISOString())
       .catch(() => null);
     const { report, finalText, refsBefore, ...rest } = run;
-    return { run: rest, items: items.slice(-400), total: items.length, lastOutputAt };
+    // 마지막 줄이 생성 중 신호면 지금 무엇을 하는지(생각·파일 작성·답 쓰기) 알려 준다.
+    const lastEv = events.at(-1) as { type?: string; what?: string } | undefined;
+    const busy = lastEv?.type === 'heartbeat' ? (lastEv.what ?? null) : null;
+    return { run: rest, items: items.slice(-400), total: items.length, lastOutputAt, busy };
   }
 
   async doctor(refresh: boolean): Promise<DoctorReport> {

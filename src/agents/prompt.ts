@@ -76,7 +76,7 @@ ${
 - Do not override the CEO's decisions or invent product rules the ticket does not ask for. When the ticket itself asks you to define values or content (for example balance numbers or item lists), propose sensible values, implement them, and write down the reasoning; you are not blocked by the absence of a decision. Use status "needs_decision" only when you truly cannot proceed without the CEO, and put those items in "questions".
 - Requirements that need "human_attest" (the CEO playing or looking at the result) are checked by the CEO at approval. Do not stop for them: finish the work and submit with status "done", noting in "notes" how the CEO can check it.
   For each of them also add a scenario to "screenSteps", shaped [{"requirementId":"R2","steps":[...]}]: steps a machine follows in a headless browser (1280x800) to show it on screen. Each scenario starts from a fresh page load with empty storage, and must include at least one "shot". Steps:
-  {"do":"key","key":"ArrowRight|Space|Enter|KeyZ|Digit1|...","holdMs":800,"times":3} (KeyboardEvent.code), {"do":"click","text":"Start"} or {"do":"click","selector":"#play"} or {"do":"click","x":0.5,"y":0.5} (fraction of the viewport), {"do":"type","text":"..."}, {"do":"wait","ms":1000}, {"do":"reload"}, {"do":"setStorage","key":"...","value":"..."} (localStorage), {"do":"shot","label":"what the CEO should see"}.
+  {"do":"key","key":"ArrowRight|Space|Enter|KeyZ|Digit1|...","holdMs":800,"times":3} (KeyboardEvent.code), {"do":"click","text":"Start"} or {"do":"click","selector":"#play"} or {"do":"click","x":0.5,"y":0.5} (fraction of the viewport), {"do":"type","text":"..."}, {"do":"wait","ms":1000}, {"do":"reload"}, {"do":"setStorage","key":"...","value":"..."} (localStorage), {"do":"shot","label":"what the CEO should see"}. Clicking a download/export button captures the file: the system reports its name, encoding (UTF-8 BOM for Excel) and first lines.
   Use the real controls of your implementation so the CEO sees the requirement working, not just the first screen. When reaching a state by playing is unreliable (randomness), seed it: e.g. setStorage a saved high score, reload, shot.
 - Problems you notice outside your write scope (another ticket's area) are not blockers: finish your part, submit "done", and add them to "followUps" (title + reason) so the CEO can turn them into tickets with one click.
 - To ask a colleague something (for example the owner of another area), add it to "ask" with their exact name; it is posted in this ticket's chat room and they will answer there (not within this run). Colleagues: ${(i.colleagues ?? []).join(', ') || '(none)'}.
@@ -316,6 +316,8 @@ export interface ScreenCheckPromptInput {
   pageText: string;
   /** 담당 직원이 남긴 점검 순서(기계가 따라 한 것) */
   scenarios?: { requirementId: string; steps: unknown[] }[];
+  /** 조작 중 내려받은 파일: 이름·크기·인코딩 판정·앞 몇 줄 */
+  downloads?: string[];
   nonce: string;
   language: string;
 }
@@ -354,6 +356,8 @@ ${dataBlock('Screenshots (file in current directory — what happened before it)
 ${dataBlock('Steps the machine followed (written by the implementer; each starts from a fresh page)', (i.scenarios ?? []).map((sc) => `${sc.requirementId}: ${JSON.stringify(sc.steps)}`).join('\n') || '(none: generic inputs only)')}
 
 ${dataBlock('Browser console errors and failed steps', i.errors.join('\n') || '(none)')}
+
+${dataBlock('Files downloaded during the steps (system-checked encoding; use this for CSV/Excel questions)', (i.downloads ?? []).join('\n\n') || '(none)')}
 
 ${dataBlock('Visible page text on first load', i.pageText)}
 

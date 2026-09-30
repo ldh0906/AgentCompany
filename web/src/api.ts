@@ -107,6 +107,7 @@ export interface ScreenCheck {
   opinion: string | null;
   qaState: string | null;
   scripted?: boolean;
+  downloads?: { name: string; size: number; verdict: string; text?: { preview: string } }[];
 }
 
 export interface Channel {

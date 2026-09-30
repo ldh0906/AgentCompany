@@ -115,6 +115,15 @@ export function ScreenCheckPanel({ ticketId }: { ticketId: string }) {
               </button>
             ))}
           </div>
+          {(c.downloads ?? []).map((f) => (
+            <details key={f.name} className="advanced">
+              <summary>
+                {ko ? '내려받은 파일' : 'Downloaded'}: <b>{f.name}</b> ({Math.max(1, Math.round(f.size / 1024))}KB)
+                {f.verdict ? ` — ${f.verdict}` : ''}
+              </summary>
+              {f.text && <pre className="code">{f.text.preview}</pre>}
+            </details>
+          ))}
           {c.errors.length > 0 ? (
             <details className="advanced">
               <summary>{ko ? `브라우저 콘솔 오류 ${c.errors.length}개` : `${c.errors.length} console errors`}</summary>

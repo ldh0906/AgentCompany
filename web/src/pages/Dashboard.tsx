@@ -106,6 +106,8 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
           ? `⛔ ${josa(who(e.actor), '이/가')} 차단: ${p.reason ?? ''}`
           : `⛔ ${who(e.actor)} blocked: ${p.reason ?? ''}`;
     case 'approval.approved':
+      if (e.actor === 'auto')
+        return ko ? `검수 통과 → 자동 반영(대표 설정): ${p.ticketId ?? ''}` : `Auto-merged after review: ${p.ticketId ?? ''}`;
       // 권한 요청을 대신 처리하는 직원의 허용은 "대표 승인"이 아니다(실측: 대표가 한 적 없는 승인이 줄줄이 보였다).
       if (e.actor !== 'ceo')
         return ko ? `${josa(who(e.actor), '이/가')} 대신 허용: ${p.ticketId ?? ''}` : `${who(e.actor)} allowed for ${p.ticketId ?? ''}`;
@@ -196,6 +198,12 @@ export function ApprovalItem({ a }: { a: Approval }) {
     a.kind === 'integrate' && d.mode !== 'review' ? (tk?.requirements.filter((r) => r.evidenceType === 'human_attest') ?? []) : [];
   const [checked, setChecked] = useState<string[]>([]);
   const unchecked = ceoChecks.length > checked.length;
+  const ko = lang === 'ko';
+  const proj = tk ? state?.projects.find((p) => p.id === tk.projectId) : undefined;
+  // 이 승인을 기다리는 뒤 업무(실측: T-19가 T-18 승인 대기로 멈춘 줄 대표가 몰랐다)
+  const waiting = tk
+    ? (state?.tickets ?? []).filter((x) => x.dependsOn.includes(tk.id) && !['done', 'cancelled', 'failed'].includes(x.status))
+    : [];
   const decide = (decision: 'approved' | 'rejected', mode?: string) =>
     run(
       () =>
@@ -250,6 +258,20 @@ export function ApprovalItem({ a }: { a: Approval }) {
         <pre className="code" style={{ marginTop: 8, maxHeight: 240 }}>
           {toolInputText(d.input)}
         </pre>
+      )}
+      {waiting.length > 0 && (
+        <div className="banner info" style={{ margin: '8px 0 0' }}>
+          {ko
+            ? `⏳ ${waiting.map((x) => x.id).join(', ')} 업무가 이 승인을 기다리고 있습니다.`
+            : `⏳ ${waiting.map((x) => x.id).join(', ')} wait for this approval.`}
+          {!proj?.autoApprove && ceoChecks.length === 0 && (
+            <span className="sub">
+              {ko
+                ? " 프로젝트 설정에서 '검수를 통과하면 내 승인 없이 반영'을 켜면, 직접 볼 항목이 없는 업무는 기다리지 않습니다."
+                : ' Turn on auto-merge after review in project settings to skip this wait.'}
+            </span>
+          )}
+        </div>
       )}
       {a.kind === 'integrate' && typeof d.summary === 'string' && d.summary && (
         <div className="note">
@@ -692,8 +714,15 @@ function ProjectsPanel() {
               </div>
               <div className="meta mono">{p.originPath}</div>
               <div className="meta">
-                {p.baseBranch} · {ko ? `검증 명령 ${p.verifyCommands.length}개` : `${p.verifyCommands.length} verify commands`} ·{' '}
-                {p.integrationMode === 'auto_after_approval' ? (ko ? '승인 후 자동 병합' : 'auto merge') : ko ? '브랜치만' : 'branch only'}
+                {ko ? `자동 검사 ${p.verifyCommands.length}개` : `${p.verifyCommands.length} verify commands`} ·{' '}
+                {p.integrationMode === 'auto_after_approval'
+                  ? ko
+                    ? '승인하면 바로 반영'
+                    : 'merge on approval'
+                  : ko
+                    ? '따로 보관만'
+                    : 'branch only'}
+                {p.autoApprove ? (ko ? ' · 검수 통과 시 자동' : ' · auto after review') : ''}
               </div>
             </div>
           );
@@ -718,7 +747,7 @@ function SetupGuide({ onNewTicket }: { onNewTicket: () => void }) {
     {
       done: hasProject,
       t: ko ? '프로젝트 등록' : 'Register a project',
-      d: ko ? '작업할 저장소와 검증 명령을 알려 주세요.' : 'Point to a repository and its verify commands.',
+      d: ko ? '작업할 폴더를 고르세요. 빈 폴더를 새로 만들어도 됩니다.' : 'Point to a repository and its verify commands.',
       cta: ko ? '프로젝트로' : 'Projects',
       onClick: () => go('/projects'),
     },

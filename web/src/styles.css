@@ -835,6 +835,16 @@ pre.code {
   font-weight: 600;
   color: var(--text-2);
 }
+/* 체크박스 한 줄(폼 안에서도 글자 옆에): 실측으로 체크박스가 글자 위에 따로 떨어져 보였다 */
+.form label.check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.form label.check-row input {
+  width: auto;
+  margin-top: 2px;
+}
 .form .hint {
   font-weight: 400;
   color: var(--muted);

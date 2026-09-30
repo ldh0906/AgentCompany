@@ -18,7 +18,11 @@ export function RequestBox() {
   const [projectId, setProjectId] = useState('');
   if (!state || state.projects.length === 0) return null;
   const ko = lang === 'ko';
-  const pid = projectId || state.projects[0]!.id;
+  // 기본값은 가장 최근에 요청한 프로젝트(실측: 늘 첫 프로젝트가 골라져 있어 매번 바꿔야 했다).
+  const recent = [...state.requests]
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .find((r) => state.projects.some((p) => p.id === r.projectId));
+  const pid = projectId || recent?.projectId || state.projects[0]!.id;
   const open = state.requests.filter((r) => r.status === 'drafting' || r.status === 'drafted' || r.status === 'failed');
   const projectName = (id: string) => state.projects.find((p) => p.id === id)?.name ?? id;
 

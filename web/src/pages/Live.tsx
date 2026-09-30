@@ -12,6 +12,8 @@ interface Activity {
   items: ActivityItem[];
   total: number;
   lastOutputAt: string | null;
+  /** 출력은 없지만 AI가 생성 중인 것(writing·thinking·saying) */
+  busy?: string | null;
 }
 
 const KIND: Record<string, [string, string]> = {
@@ -53,7 +55,7 @@ export function Live({ runId }: { runId: string | null }) {
   const { go } = useRoute();
   const ko = lang === 'ko';
   const [, tick] = useState(0);
-  const [last, setLast] = useState<Record<string, { at: string | null; line: string }>>({});
+  const [last, setLast] = useState<Record<string, { at: string | null; line: string; busy?: string | null }>>({});
   useEffect(() => {
     const t = setInterval(() => tick((x) => x + 1), 1000);
     return () => clearInterval(t);
@@ -66,10 +68,10 @@ export function Live({ runId }: { runId: string | null }) {
   useEffect(() => {
     let live = true;
     const poll = async () => {
-      const next: Record<string, { at: string | null; line: string }> = {};
+      const next: Record<string, { at: string | null; line: string; busy?: string | null }> = {};
       for (const r of running) {
         const a = await api<Activity>(`runs/${r.id}/activity`).catch(() => null);
-        if (a) next[r.id] = { at: a.lastOutputAt, line: [...a.items].reverse().find((i) => i.text)?.text ?? '' };
+        if (a) next[r.id] = { at: a.lastOutputAt, busy: a.busy, line: [...a.items].reverse().find((i) => i.text)?.text ?? '' };
       }
       if (live) setLast(next);
     };
@@ -105,7 +107,15 @@ export function Live({ runId }: { runId: string | null }) {
         </div>
         {r.status === 'running' && (
           <div className={`live-line ${stalled ? 'stalled' : ''}`}>
-            {stalled ? (ko ? `⚠ ${Math.round((Date.now() - Date.parse(info!.at!)) / 60000)}분째 출력 없음 · ` : '⚠ quiet · ') : ''}
+            {stalled
+              ? ko
+                ? `⚠ ${Math.round((Date.now() - Date.parse(info!.at!)) / 60000)}분째 아무 신호 없음 (큰 파일을 한 번에 쓰면 그럴 수 있어요) · `
+                : '⚠ quiet · '
+              : info?.busy
+                ? ko
+                  ? `${({ writing: '✍ 파일 작성 중', thinking: '💭 생각 중', saying: '💬 보고 쓰는 중' } as Record<string, string>)[info.busy] ?? '…'} · `
+                  : `${info.busy}… · `
+                : ''}
             {info?.line ?? (ko ? '시작하는 중…' : 'Starting…')}
           </div>
         )}
@@ -120,7 +130,7 @@ export function Live({ runId }: { runId: string | null }) {
           <h1>{ko ? '작업 현황' : 'Live work'}</h1>
           <div className="sub">
             {ko
-              ? '직원이 지금 무엇을 하는지 실시간으로 봅니다. 5분 넘게 출력이 없으면 멈춤으로 표시합니다.'
+              ? '직원이 지금 무엇을 하는지 실시간으로 봅니다. 생각·파일 작성 중이면 그렇게 보여 주고, 5분 넘게 아무 신호가 없으면 표시합니다.'
               : 'What each employee is doing right now. Runs quiet for 5+ minutes are flagged.'}
           </div>
         </div>

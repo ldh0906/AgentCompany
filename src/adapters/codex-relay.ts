@@ -65,6 +65,7 @@ async function main(): Promise<void> {
   let usageTotal: { inputTokens?: number; cachedInputTokens?: number; outputTokens?: number } | null = null;
   // 파일 변경 승인 요청에는 itemId뿐이다. 바뀔 파일·diff는 먼저 온 item/started(fileChange)에 있다.
   const fileItems = new Map<string, { path: string; kind: string; diff: string }[]>();
+  let lastBeat = 0;
   let finished!: (ok: boolean) => void;
   const done = new Promise<boolean>((r) => (finished = r));
   child.once('close', () => finished(false));
@@ -92,6 +93,19 @@ async function main(): Promise<void> {
     if (m.method && m.id !== undefined) {
       void handleServerRequest(m);
       return;
+    }
+    // 생성 중 신호(생각·파일 작성·답 쓰기)를 20초에 한 번 남긴다. 실측(2026-09-30): 큰 파일을 한 번에 쓰는 9분 동안
+    // 출력이 없어 "멈춤"으로 보였다. 신호가 오면 작업 현황이 "파일 작성 중"처럼 보여 준다.
+    const what = /fileChange|patch|diff/i.test(String(m.method))
+      ? 'writing'
+      : /reasoning|plan/i.test(String(m.method))
+        ? 'thinking'
+        : /agentMessage/i.test(String(m.method))
+          ? 'saying'
+          : null;
+    if (what && Date.now() - lastBeat > 20_000) {
+      lastBeat = Date.now();
+      out({ type: 'heartbeat', what });
     }
     if (m.method === 'item/started' && m.params?.item?.type === 'fileChange') {
       const changes = Array.isArray(m.params.item.changes) ? m.params.item.changes : [];

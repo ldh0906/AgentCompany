@@ -7,7 +7,7 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { ScreenScenario } from '../agents/report.ts';
@@ -25,6 +25,48 @@ export interface ScreenCapture {
   errors: string[];
   /** 첫 화면의 글자(앞 1500자): 사진을 못 읽는 직원도 참고하게 */
   text: string;
+  /** 조작 중 내려받은 파일(예: CSV 내보내기)과 글자 인코딩 점검 */
+  downloads: DownloadedFile[];
+}
+
+export interface DownloadedFile {
+  name: string;
+  size: number;
+  /** 글자 파일이면: UTF-8 BOM, 올바른 UTF-8인지, 한글이 있는지, 앞 몇 줄 */
+  text?: { bom: boolean; utf8: boolean; hangul: boolean; preview: string };
+  /** 사람이 읽는 판정(예: 엑셀에서 한글이 깨질 수 있음) */
+  verdict: string;
+}
+
+const TEXT_EXT = /\.(csv|tsv|txt|json|md|xml|html?)$/i;
+
+/**
+ * 내려받은 파일을 점검한다. 실측(2026-09-30): "CSV가 엑셀에서 한글 깨짐 없이 열리는지"는 사진으로 볼 수 없어 대표 몫으로 남았다.
+ * 한국어 윈도 엑셀은 BOM 없는 UTF-8 CSV를 CP949로 읽어 한글이 깨진다: BOM 유무로 판정한다.
+ */
+export function inspectDownload(name: string, buf: Buffer): DownloadedFile {
+  if (!TEXT_EXT.test(name) || buf.length > 2_000_000) return { name, size: buf.length, verdict: '' };
+  const bom = buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf;
+  let utf8 = true;
+  let body = '';
+  try {
+    body = new TextDecoder('utf-8', { fatal: true }).decode(bom ? buf.subarray(3) : buf);
+  } catch {
+    utf8 = false;
+  }
+  const hangul = /[\uac00-\ud7a3]/.test(body);
+  // 앞뒤를 함께 보여 준다: 합계 행처럼 중요한 줄이 파일 끝에 오는 경우가 많다(실측: 합계 행이 앞 5줄 미리보기에서 잘렸다).
+  const lines = body.replace(/\r?\n$/, '').split(/\r?\n/);
+  const preview = (lines.length > 8 ? [...lines.slice(0, 4), '…', ...lines.slice(-4)] : lines).join('\n').slice(0, 800);
+  const csv = /\.(csv|tsv)$/i.test(name);
+  const verdict = !utf8
+    ? 'UTF-8이 아닙니다(다른 인코딩이거나 깨진 파일)'
+    : csv && hangul && !bom
+      ? '⚠ BOM 없는 UTF-8: 엑셀에서 한글이 깨질 수 있습니다'
+      : csv && hangul
+        ? 'UTF-8 BOM 있음: 엑셀에서 한글이 정상으로 열립니다'
+        : 'UTF-8 글자 파일';
+  return { name, size: buf.length, text: { bom, utf8, hangul, preview }, verdict };
 }
 
 export function findChrome(): string | null {
@@ -234,6 +276,11 @@ export async function captureScreens(
       for (let i = 0; i < 100 && !loaded; i++) await sleep(200);
       await sleep(2000); // 첫 그림이 그려질 시간
     };
+    // 조작 중 내려받는 파일(CSV 내보내기 등)을 모아 점검한다.
+    const dlDir = path.join(outDir, 'downloads');
+    await rm(dlDir, { recursive: true, force: true }).catch(() => undefined);
+    await mkdir(dlDir, { recursive: true });
+    await cdp.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: dlDir }).catch(() => undefined);
     await load('navigate');
 
     const shots: ScreenShot[] = [];
@@ -304,6 +351,12 @@ export async function captureScreens(
         else if (st.do === 'shot') await shoot(`${sc.requirementId}: ${st.label || '화면'}`);
       }
     }
+    await sleep(800); // 마지막 내려받기가 끝날 시간
+    const downloads: DownloadedFile[] = [];
+    for (const f of await readdir(dlDir).catch(() => [] as string[])) {
+      if (f.endsWith('.crdownload')) continue;
+      downloads.push(inspectDownload(f, await readFile(path.join(dlDir, f))));
+    }
     // 휴대폰 폭(375px)으로도 한 장: 마지막 상태(저장된 데이터 포함)를 다시 불러 찍고, 가로로 넘치는지 잰다.
     // 실측: "모바일 폭에서도 깨지지 않게"는 QA가 1280px 사진만으로 "확인 불가"라고 했다.
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true });
@@ -314,7 +367,7 @@ export async function captureScreens(
       .catch(() => 0);
     if (wide > 376) errors.push(`휴대폰 폭(375px)에서 가로로 넘침: 페이지 폭 ${wide}px`);
     await shoot('휴대폰 폭(375px)', 375, 812);
-    return { shots, errors, text };
+    return { shots, errors, text, downloads };
   } finally {
     cdp?.close();
     // 크롬은 자식 프로세스를 여럿 띄우므로 트리째 끈다.

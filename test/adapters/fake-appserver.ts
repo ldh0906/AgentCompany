@@ -22,6 +22,8 @@ for await (const line of createInterface({ input: process.stdin })) {
       method: 'item/commandExecution/requestApproval',
       params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'i2', command: 'rm -rf build', cwd: '.' },
     });
+    // 생성 중 신호(패치 작성): 중계기가 heartbeat로 남긴다
+    send({ method: 'item/fileChange/patchUpdated', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'f1' } });
     // 실측(0.153.4): 파일 변경 승인 요청에는 itemId뿐이다. 바뀔 파일은 먼저 온 item/started에 있다.
     send({
       method: 'item/started',

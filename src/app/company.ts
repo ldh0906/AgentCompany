@@ -49,6 +49,7 @@ export interface NewProject {
   protectedPaths?: string[];
   verifyCommands?: VerifyCommand[];
   docRules?: string;
+  autoApprove?: boolean;
 }
 
 export interface NewTicket {
@@ -293,6 +294,7 @@ export class Company {
       protectedPaths: input.protectedPaths ?? [],
       verifyCommands: input.verifyCommands ?? [],
       docRules: input.docRules ?? '',
+      autoApprove: input.autoApprove ?? false,
       createdAt: this.clock(),
     };
     return this.store.transact(() => {

@@ -6,7 +6,7 @@ import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { screenStepsOf } from '../../src/agents/report.ts';
-import { captureScreens, findChrome } from '../../src/app/screen-check.ts';
+import { captureScreens, findChrome, inspectDownload } from '../../src/app/screen-check.ts';
 import { driveUntil, newImplTicket, setup } from './helpers.ts';
 
 test('초안을 확정하면 답하지 않은 질문은 제안대로 규칙이 된다(제안 없는 질문은 그대로)', { timeout: 30_000 }, async (t) => {
@@ -76,6 +76,8 @@ test('화면 점검 순서: 모르는 단계·없는 요구사항·찍기 없는
 const PAGE = `<!doctype html><body><h1 id="h">대기</h1><button id="go">시작</button><script>
 document.getElementById('h').textContent = '최고 ' + (localStorage.getItem('hs') || '0');
 document.getElementById('go').onclick = () => console.error('clicked hs=' + localStorage.getItem('hs'));
+const dl = document.createElement('button'); dl.textContent = 'CSV 내보내기'; document.body.appendChild(dl);
+dl.onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\\uFEFF날짜,금액\\n2026-09-30,1000'], { type: 'text/csv' })); a.download = '가계부.csv'; a.click(); };
 addEventListener('keydown', (e) => { if (e.code === 'KeyZ') console.error('key ' + e.key); });
 </script></body>`;
 
@@ -97,6 +99,7 @@ test(
             { do: 'click', text: '시작' },
             { do: 'key', key: 'KeyZ' },
             { do: 'click', text: '없는 버튼' },
+            { do: 'click', text: 'CSV 내보내기' },
             { do: 'shot', label: '새로고침 뒤 최고 42' },
           ],
         },
@@ -129,6 +132,10 @@ test(
         cap.errors.some((e) => e.includes('clicked hs=null')),
         '순서마다 저장소를 비운다',
       );
+      const csv = cap.downloads.find((d) => d.name.endsWith('.csv'));
+      assert.ok(csv, `내려받은 파일을 모은다: ${JSON.stringify(cap.downloads)}`);
+      assert.equal(csv!.text?.bom, true);
+      assert.match(csv!.verdict, /엑셀에서 한글이 정상/);
     } finally {
       server.close();
     }
@@ -144,4 +151,43 @@ test('범위 밖 수정으로 멈추면 대표가 고른다: 보호 경로는 �
   const back = env.orch.resolveScopeHold(tk.id, false);
   assert.equal(back.status, 'changes_requested');
   assert.equal(back.hold, null);
+});
+
+test('검수 통과하면 자동 반영: 켜 둔 프로젝트에서 대표 확인 항목이 없는 업무만', { timeout: 180_000 }, async (t) => {
+  const env = await setup(t);
+  env.company.updateProject(env.projectId, { autoApprove: true });
+  const plain = newImplTicket(env);
+  const done = await driveUntil(env, plain.id, (x) => x.hold !== null || ['done', 'failed'].includes(x.status));
+  assert.equal(done.status, 'done', `보류: ${done.hold?.note}`);
+  const a = env.orch.records.approvals().find((x) => x.ticketId === plain.id && x.kind === 'integrate')!;
+  assert.equal((a.detail as { auto?: boolean }).auto, true, '대표가 누른 승인과 구분해 기록한다');
+
+  const attest = env.company.createTicket({
+    projectId: env.projectId,
+    type: 'impl',
+    title: '화면',
+    purpose: '눈으로 확인',
+    requirements: [{ text: '보기 좋다', evidenceType: 'human_attest' }],
+    doneCriteria: '대표 확인',
+    writeScope: ['src/**'],
+  });
+  const waiting = await driveUntil(env, attest.id, (x) => x.hold !== null || x.status === 'awaiting_approval');
+  await env.orch.tick();
+  assert.equal(env.company.requireTicket(attest.id).status, 'awaiting_approval', '대표 확인 항목이 있으면 대표를 기다린다');
+  assert.equal(waiting.hold, null);
+});
+
+test('내려받은 CSV 판정: BOM이 없으면 엑셀 한글 깨짐 경고, UTF-8이 아니면 알림', () => {
+  assert.match(inspectDownload('a.csv', Buffer.from('날짜,금액\n', 'utf8')).verdict, /깨질 수/);
+  assert.match(inspectDownload('a.csv', Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('날짜', 'utf8')])).verdict, /정상/);
+  assert.match(inspectDownload('a.csv', Buffer.from([0xb3, 0xaf, 0xc2, 0xa5])).verdict, /UTF-8이 아닙니다/);
+  assert.equal(inspectDownload('a.png', Buffer.from([1, 2, 3])).text, undefined);
+});
+
+test('내려받은 파일 미리보기는 앞뒤를 함께 보여 준다(합계 행이 끝에 있다)', () => {
+  const rows = ['날짜,금액', ...Array.from({ length: 10 }, (_, i) => `2026-09-${10 + i},${i}`), '합계,45'].join('\n');
+  const p = inspectDownload('a.csv', Buffer.from(rows, 'utf8')).text!.preview;
+  assert.match(p, /^날짜,금액/);
+  assert.match(p, /…/);
+  assert.match(p, /합계,45$/);
 });

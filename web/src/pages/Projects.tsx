@@ -21,7 +21,7 @@ export function Projects() {
           <h1>{t('nav_projects')}</h1>
           <div className="sub">
             {ko
-              ? '원본 저장소는 대표 승인 전까지 절대 수정되지 않습니다. 직원은 격리된 미러의 작업공간에서만 일합니다.'
+              ? '내 폴더는 내가 승인하기 전까지 바뀌지 않습니다. 직원은 따로 떼어 둔 복사본에서만 일합니다.'
               : 'Your repo is never modified before your approval. Employees work in isolated mirror worktrees.'}
           </div>
         </div>
@@ -37,7 +37,7 @@ export function Projects() {
             </div>
             <div style={{ marginTop: 4 }}>
               {ko
-                ? '로컬 git 저장소 경로와 검증 명령(예: npm test)만 있으면 됩니다.'
+                ? '작업할 폴더만 고르면 됩니다. 빈 폴더를 새로 만들어 처음부터 시작할 수도 있습니다.'
                 : 'All you need is a local git repository and a verify command (e.g. npm test).'}
             </div>
             <button className="btn primary" style={{ marginTop: 14 }} onClick={() => setEditing('new')}>
@@ -68,15 +68,20 @@ export function Projects() {
                 <span className={`chip ${p.integrationMode === 'auto_after_approval' ? 'warn' : 'info'}`}>
                   {p.integrationMode === 'auto_after_approval'
                     ? ko
-                      ? '승인 후 자동 병합'
-                      : 'Auto merge after approval'
+                      ? '승인하면 바로 반영'
+                      : 'Merge on approval'
                     : ko
-                      ? '브랜치만 (수동 병합)'
+                      ? '따로 보관만 (직접 합침)'
                       : 'Branch only (manual merge)'}
                 </span>
+                {p.autoApprove && (
+                  <span className="chip ok" title={ko ? '내가 직접 확인할 항목이 없는 업무는 검수 통과 시 바로 반영' : ''}>
+                    {ko ? '검수 통과하면 자동 반영' : 'Auto-merge after review'}
+                  </span>
+                )}
               </div>
               <div style={{ marginTop: 10 }}>
-                <b>{ko ? '검증 명령' : 'Verify commands'}</b>
+                <b>{ko ? '자동 검사' : 'Verify commands'}</b>
                 {p.verifyCommands.length === 0 ? (
                   <div className="sub">
                     {ko
@@ -96,7 +101,7 @@ export function Projects() {
                 const sugg = (state.verifySuggest?.[p.id] ?? []).filter((v) => !have.has(v.argv.join(' ')));
                 return sugg.length ? (
                   <div className="banner info" style={{ marginTop: 8 }}>
-                    {ko ? '병합된 코드에 검증 명령이 생겼습니다: ' : 'Verify commands found in the merged code: '}
+                    {ko ? '병합된 코드에 자동 검사 명령이 생겼습니다: ' : 'Verify commands found in the merged code: '}
                     {sugg.map((v) => v.argv.join(' ')).join(', ')}{' '}
                     <button
                       className="btn small primary"
@@ -113,7 +118,7 @@ export function Projects() {
                                 ],
                               },
                             }),
-                          ko ? '검증 명령을 추가했습니다.' : 'Added.',
+                          ko ? '자동 검사를 추가했습니다.' : 'Added.',
                         ).then(reload)
                       }
                     >
@@ -124,7 +129,7 @@ export function Projects() {
               })()}
               <ProjectRules projectId={p.id} />
               <div style={{ marginTop: 10 }}>
-                <b>{ko ? '보호 경로' : 'Protected paths'}</b>
+                <b>{ko ? '직원이 못 고치는 파일' : 'Protected paths'}</b>
                 <div className="row">
                   {p.protectedPaths.length ? (
                     p.protectedPaths.map((g) => (
@@ -207,6 +212,7 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
     project?.verifyCommands.map((v) => ({ label: v.label, evidenceType: v.evidenceType, command: joinArgs(v.argv) })) ?? [],
   );
   const [docRules, setDocRules] = useState(project?.docRules ?? '');
+  const [autoApprove, setAutoApprove] = useState(project?.autoApprove ?? false);
   const [picking, setPicking] = useState(false);
   const [info, setInfo] = useState<Inspection | null>(null);
   const [inspecting, setInspecting] = useState(false);
@@ -248,6 +254,7 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
       .filter((v) => v.command.trim())
       .map((v) => ({ label: v.label.trim() || v.command.trim(), evidenceType: v.evidenceType, argv: splitArgs(v.command) })),
     docRules,
+    autoApprove,
   };
   const save = () =>
     run(
@@ -298,165 +305,193 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
                       ? 'git 저장소의 최상위 폴더가 아닙니다. 저장소 루트를 고르세요.'
                       : 'Not the root of a git repository.'
                     : ko
-                      ? `git 저장소 확인 · 브랜치 ${info.branches.length}개 · 검증 명령 ${info.verify.length}개 제안`
+                      ? `확인했습니다 · 브랜치 ${info.branches.length}개 · 자동 검사 ${info.verify.length}개 찾음`
                       : `Git repository · ${info.branches.length} branches · ${info.verify.length} verify commands suggested`}
               </span>
             )}
             {info?.empty && !project && (
               <span className="hint">
                 {ko
-                  ? '빈 저장소입니다. 검증 명령은 비워 두어도 됩니다: 업무 초안을 확정할 때 비서실장이 제안한 명령이 함께 추가되고, 나중에 생기는 테스트도 자동으로 추가됩니다. 뒤 업무가 앞 업무 결과를 이어받도록 반영 방식은 자동 병합으로 두었습니다.'
+                  ? '빈 폴더입니다. 그대로 저장하면 됩니다: 자동 검사는 첫 업무 초안을 확정할 때 함께 정해지고, 승인한 결과는 이 폴더에 바로 반영됩니다.'
                   : 'Empty repository. You can leave verify commands empty: confirming a draft adds the suggested commands, and tests added later are picked up automatically. Merge mode is set to auto so later tickets build on earlier ones.'}
               </span>
             )}
           </label>
         )}
-        <div className="row" style={{ alignItems: 'flex-start' }}>
-          {!project && (
-            <label style={{ flex: 1 }}>
-              {t('name')}
-              <input
-                value={name}
-                onChange={(e) => {
-                  setNameTouched(true);
-                  setName(e.target.value);
-                }}
-              />
-            </label>
-          )}
-          <label style={{ flex: 1 }}>
-            {ko ? '기준 브랜치' : 'Base branch'}
-            {info?.branches.length ? (
-              <select value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)}>
-                {info.branches.map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} />
-            )}
+        {!project && (
+          <label>
+            {t('name')}
+            <input
+              value={name}
+              onChange={(e) => {
+                setNameTouched(true);
+                setName(e.target.value);
+              }}
+            />
           </label>
-        </div>
+        )}
+        {/* 비개발자용: 핵심 두 가지만 위에 두고, 개발 용어는 "고급 설정"에 접는다(실측: 기준 브랜치·보호 경로·검증 명령이 뭔지 몰라 멈칫). */}
         <label>
-          {ko ? '승인 후 반영 방식' : 'After approval'}
+          {ko ? '승인한 결과를 어떻게 넣을까요?' : 'After approval'}
           <Segmented
             value={mode}
             onChange={(v) => setMode(v)}
             options={[
-              { value: 'manual', label: ko ? '브랜치만 만들기 (병합은 내가)' : 'Create a branch (I merge)' },
-              { value: 'auto_after_approval', label: ko ? '자동 병합 (fast-forward만)' : 'Auto merge (fast-forward only)' },
+              { value: 'auto_after_approval', label: ko ? '내 폴더에 바로 반영 (추천)' : 'Merge into my folder (recommended)' },
+              { value: 'manual', label: ko ? '따로 보관만 (내가 직접 합침)' : 'Keep on a branch (I merge)' },
             ]}
           />
+          <span className="hint">
+            {mode === 'auto_after_approval'
+              ? ko
+                ? `승인하면 이 폴더의 ${baseBranch}에 바로 들어가고, 다음 업무가 그 결과를 이어받습니다.`
+                : `Approved work lands on ${baseBranch} and the next tickets build on it.`
+              : ko
+                ? '승인하면 별도 브랜치로만 남습니다. git으로 직접 합치는 개발자에게 맞습니다.'
+                : 'Approved work stays on a separate branch for you to merge with git.'}
+          </span>
         </label>
-
-        <div className="field-label">
-          {ko ? '검증 명령' : 'Verify commands'}{' '}
-          <span className="hint">
-            {ko
-              ? '직원이 제출하면 시스템이 깨끗한 사본에서 직접 실행합니다. 통과하면 고른 등급의 증거가 됩니다.'
-              : 'Run by the system in a clean checkout on every submission; a pass becomes evidence of the chosen kind.'}
-          </span>
-        </div>
-        <div className="verify-rows">
-          {verify.map((v, i) => (
-            <div className="verify-row" key={i}>
-              <input
-                value={v.label}
-                placeholder={ko ? '이름' : 'Label'}
-                onChange={(e) => setVerify(verify.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
-              />
-              <select
-                value={v.evidenceType}
-                onChange={(e) => setVerify(verify.map((x, j) => (j === i ? { ...x, evidenceType: e.target.value } : x)))}
-              >
-                {Object.keys(EVIDENCE.ko)
-                  .filter((k) => !['mockup', 'inspection', 'human_attest'].includes(k))
-                  .map((k) => (
-                    <option key={k} value={k}>
-                      {evidence(k)}
-                    </option>
-                  ))}
-              </select>
-              <input
-                className="mono"
-                value={v.command}
-                placeholder="npm test"
-                onChange={(e) => setVerify(verify.map((x, j) => (j === i ? { ...x, command: e.target.value } : x)))}
-              />
-              <button
-                type="button"
-                className="btn small"
-                aria-label={ko ? '삭제' : 'Remove'}
-                onClick={() => setVerify(verify.filter((_, j) => j !== i))}
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-          <button
-            type="button"
-            className="btn small"
-            style={{ justifySelf: 'start' }}
-            onClick={() => setVerify([...verify, { label: '', evidenceType: 'unit_test', command: '' }])}
-          >
-            <Icon name="plus" size={13} /> {ko ? '검증 명령 추가' : 'Add verify command'}
-          </button>
-          {verify.length === 0 && (
-            <div className="hint">
+        <label className="check-row">
+          <input type="checkbox" checked={autoApprove} onChange={(e) => setAutoApprove(e.target.checked)} />
+          <span>
+            {ko ? '검수를 통과하면 내 승인 없이 반영' : 'Merge automatically when review passes'}{' '}
+            <span className="hint">
               {ko
-                ? '검증 명령이 없으면 단위 테스트 증거가 필요한 요구사항은 승인될 수 없습니다.'
-                : 'Without verify commands, requirements needing test evidence cannot pass.'}
-            </div>
-          )}
-        </div>
-
-        <label>
-          {ko ? '보호 경로' : 'Protected paths'}{' '}
-          <span className="hint">
-            {ko ? '어떤 직원도 대표 승인 없이 수정할 수 없습니다.' : 'No employee may change these without your approval.'}
+                ? '— 내가 직접 보고 확인해야 하는 항목이 있는 업무는 제외하고 늘 나에게 묻습니다. 뒤 업무가 앞 업무 승인을 기다리지 않습니다.'
+                : '— tickets with items you must check yourself still wait for you.'}
+            </span>
           </span>
-          <ChipToggles
-            options={suggestions.map((s) => ({ value: s, label: s }))}
-            selected={protectedPaths}
-            onToggle={(s) => setProtected(protectedPaths.includes(s) ? protectedPaths.filter((x) => x !== s) : [...protectedPaths, s])}
-          />
-          <div className="row">
-            <input
-              className="mono"
-              value={newProtected}
-              onChange={(e) => setNewProtected(e.target.value)}
-              placeholder="docs/design/**"
-              style={{ flex: 1 }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && newProtected.trim()) {
-                  e.preventDefault();
-                  setProtected([...new Set([...protectedPaths, newProtected.trim()])]);
-                  setNewProtected('');
-                }
-              }}
-            />
-            <button
-              type="button"
-              className="btn small"
-              disabled={!newProtected.trim()}
-              onClick={() => {
-                setProtected([...new Set([...protectedPaths, newProtected.trim()])]);
-                setNewProtected('');
-              }}
-            >
-              <Icon name="plus" size={13} /> {ko ? '추가' : 'Add'}
-            </button>
-          </div>
         </label>
 
         <details className="advanced">
-          <summary>{ko ? '고급: 문서 권한 규칙' : 'Advanced: document rules'}</summary>
-          <label>
-            <span className="hint">{ko ? '모든 직원 작업에 주입됩니다.' : 'Injected into every task.'}</span>
-            <textarea value={docRules} onChange={(e) => setDocRules(e.target.value)} />
-          </label>
+          <summary>
+            {ko
+              ? `고급 설정 (개발자용) — 기준 브랜치 ${baseBranch} · 자동 검사 ${verify.filter((v) => v.command.trim()).length}개 · 못 고치는 파일 ${protectedPaths.length}개`
+              : `Advanced — base ${baseBranch} · ${verify.filter((v) => v.command.trim()).length} verify · ${protectedPaths.length} protected`}
+          </summary>
+          <div className="form" style={{ marginTop: 8 }}>
+            <label>
+              {ko ? '기준 브랜치 (보통 main)' : 'Base branch'}
+              {info?.branches.length ? (
+                <select value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)}>
+                  {info.branches.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} />
+              )}
+            </label>
+            <div className="field-label">
+              {ko ? '자동 검사 명령' : 'Verify commands'}{' '}
+              <span className="hint">
+                {ko
+                  ? '직원이 제출하면 시스템이 깨끗한 사본에서 직접 실행합니다(예: npm test). 비워 두면 초안 확정·병합 때 자동으로 채웁니다.'
+                  : 'Run by the system in a clean checkout on every submission; a pass becomes evidence of the chosen kind.'}
+              </span>
+            </div>
+            <div className="verify-rows">
+              {verify.map((v, i) => (
+                <div className="verify-row" key={i}>
+                  <input
+                    value={v.label}
+                    placeholder={ko ? '이름' : 'Label'}
+                    onChange={(e) => setVerify(verify.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                  />
+                  <select
+                    value={v.evidenceType}
+                    onChange={(e) => setVerify(verify.map((x, j) => (j === i ? { ...x, evidenceType: e.target.value } : x)))}
+                  >
+                    {Object.keys(EVIDENCE.ko)
+                      .filter((k) => !['mockup', 'inspection', 'human_attest'].includes(k))
+                      .map((k) => (
+                        <option key={k} value={k}>
+                          {evidence(k)}
+                        </option>
+                      ))}
+                  </select>
+                  <input
+                    className="mono"
+                    value={v.command}
+                    placeholder="npm test"
+                    onChange={(e) => setVerify(verify.map((x, j) => (j === i ? { ...x, command: e.target.value } : x)))}
+                  />
+                  <button
+                    type="button"
+                    className="btn small"
+                    aria-label={ko ? '삭제' : 'Remove'}
+                    onClick={() => setVerify(verify.filter((_, j) => j !== i))}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="btn small"
+                style={{ justifySelf: 'start' }}
+                onClick={() => setVerify([...verify, { label: '', evidenceType: 'unit_test', command: '' }])}
+              >
+                <Icon name="plus" size={13} /> {ko ? '명령 추가' : 'Add verify command'}
+              </button>
+              {verify.length === 0 && (
+                <div className="hint">
+                  {ko
+                    ? '비어 있어도 됩니다. 업무 초안을 확정할 때 비서실장이 제안한 명령이 함께 추가됩니다.'
+                    : 'Without verify commands, requirements needing test evidence cannot pass.'}
+                </div>
+              )}
+            </div>
+
+            <label>
+              {ko ? '직원이 못 고치는 파일' : 'Protected paths'}{' '}
+              <span className="hint">
+                {ko
+                  ? '어떤 직원도 대표 승인 없이 수정할 수 없습니다(예: docs/design/**).'
+                  : 'No employee may change these without your approval.'}
+              </span>
+              <ChipToggles
+                options={suggestions.map((s) => ({ value: s, label: s }))}
+                selected={protectedPaths}
+                onToggle={(s) => setProtected(protectedPaths.includes(s) ? protectedPaths.filter((x) => x !== s) : [...protectedPaths, s])}
+              />
+              <div className="row">
+                <input
+                  className="mono"
+                  value={newProtected}
+                  onChange={(e) => setNewProtected(e.target.value)}
+                  placeholder="docs/design/**"
+                  style={{ flex: 1 }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newProtected.trim()) {
+                      e.preventDefault();
+                      setProtected([...new Set([...protectedPaths, newProtected.trim()])]);
+                      setNewProtected('');
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn small"
+                  disabled={!newProtected.trim()}
+                  onClick={() => {
+                    setProtected([...new Set([...protectedPaths, newProtected.trim()])]);
+                    setNewProtected('');
+                  }}
+                >
+                  <Icon name="plus" size={13} /> {ko ? '추가' : 'Add'}
+                </button>
+              </div>
+            </label>
+
+            <label>
+              {ko ? '문서 권한 규칙' : 'Document rules'}
+              <span className="hint">{ko ? '모든 직원 작업에 주입됩니다.' : 'Injected into every task.'}</span>
+              <textarea value={docRules} onChange={(e) => setDocRules(e.target.value)} />
+            </label>
+          </div>
         </details>
       </div>
       {picking && <FolderPicker initial={originPath || pickerStart} onPick={setOriginPath} onClose={() => setPicking(false)} />}

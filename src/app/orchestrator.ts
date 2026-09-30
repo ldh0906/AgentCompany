@@ -64,7 +64,7 @@ import { dependencySetup, installDependencies } from './verify-setup.ts';
 import { estimates, ticketTokens, tokenBudget } from './cost.ts';
 import { suggestVerifyAt } from './repo-inspect.ts';
 import { PreviewManager, type PreviewInfo } from './preview.ts';
-import { captureScreens, findChrome } from './screen-check.ts';
+import { captureScreens, findChrome, type DownloadedFile } from './screen-check.ts';
 
 const ORCH: Actor = { kind: 'orchestrator' };
 const CEO: Actor = { kind: 'ceo' };
@@ -93,6 +93,8 @@ export interface ScreenCheck {
   qaBy: string | null;
   /** 담당 직원이 남긴 점검 순서를 따랐는지(아니면 흔한 조작만) */
   scripted?: boolean;
+  /** 조작 중 내려받은 파일과 인코딩 판정 */
+  downloads?: DownloadedFile[];
 }
 
 export interface RecoveryReport {
@@ -293,6 +295,7 @@ export class Orchestrator {
     check.shots = cap.shots;
     check.errors = cap.errors;
     check.scripted = scenarios.length > 0;
+    check.downloads = cap.downloads;
     check.state = 'done';
     check.note = info.url;
     const room = this.chat.ensureTicketChannel(t.id);
@@ -317,6 +320,7 @@ export class Orchestrator {
         errors: cap.errors,
         pageText: cap.text,
         scenarios,
+        downloads: cap.downloads.map((d) => `${d.name} (${d.size} bytes) — ${d.verdict}${d.text ? `\n${d.text.preview}` : ''}`),
         nonce,
         language: this.opts.language ?? 'ko',
       });
@@ -448,6 +452,10 @@ export class Orchestrator {
         if (this.records.run(run.id)?.status === 'orphaned') report.orphaned.push(run.id);
       }
     }
+    // 남아 있는 검증 명령 추천을 지금 규칙으로 다시 계산한다(추천 규칙이 나아져도 옛 추천이 계속 떠 있지 않게).
+    for (const p of this.company.projects())
+      if (!p.removedAt && p.verifyCommands.length && this.verifySuggestions(p.id).length)
+        await this.autoVerifyCommands(p.id).catch(() => {});
     this.company.store.appendEvent('orchestrator', 'orchestrator.recovered', 'system', report);
     return report;
   }
@@ -633,6 +641,7 @@ export class Orchestrator {
         return;
       case 'awaiting_approval':
         this.ensureIntegrationApproval(t);
+        this.maybeAutoApprove(t);
         return;
       case 'integrating':
         this.runBusy(t.id, () => this.integrate(t.id));
@@ -1033,10 +1042,12 @@ export class Orchestrator {
   async autoVerifyCommands(projectId: string): Promise<void> {
     const project = this.company.requireProject(projectId);
     const found = await suggestVerifyAt(project.originPath, project.baseBranch);
-    const have = new Set(project.verifyCommands.map((v) => v.argv.join(' ')));
+    // npx tsc --noEmit 과 tsc --noEmit 은 같은 명령이다.
+    const same = (cmd: string) => cmd.trim().replace(/^npx\s+/, '');
+    const have = new Set(project.verifyCommands.map((v) => same(v.argv.join(' '))));
     // 실측: node --test tests가 있는데 같은 일을 하는 npm test를 또 추천했다. 스크립트 본문이 이미 있으면 뺀다.
     const missing = found
-      .filter((f) => !have.has(f.argv.join(' ')) && !(f.runs && have.has(f.runs)))
+      .filter((f) => !have.has(same(f.argv.join(' '))) && !(f.runs && have.has(same(f.runs))))
       .map(({ label, argv, evidenceType }) => ({ label, argv, evidenceType }));
     if (!missing.length) {
       this.company.store.setSetting(`verify_suggest:${projectId}`, '');
@@ -1908,11 +1919,50 @@ ${failure.detail.slice(0, 400)}`,
     this.changed('approval', t.id);
   }
 
+  /**
+   * 검수 통과하면 자동 반영(프로젝트 설정). 실측(2026-09-30): 뒤 업무가 앞 업무의 대표 승인을 기다리며 멈췄다.
+   * 대표 직접 확인 항목이 있거나, 검수를 건너뛰었거나, 하위 직급이 검수했으면 대표에게 남긴다.
+   * tick에서만 부른다(상태 전이 안에서 또 전이하지 않게).
+   */
+  private maybeAutoApprove(t: Ticket): void {
+    const project = this.company.requireProject(t.projectId);
+    if (!project.autoApprove || t.hold || t.type === 'review' || t.reviewBelowRank) return;
+    if (t.requirements.some((r) => r.evidenceType === 'human_attest')) return;
+    const a = this.records.pendingApprovalFor(t.id, 'integrate');
+    const reviewed = this.records
+      .runsForTicket(t.id)
+      .some(
+        (r) =>
+          r.kind === 'review' &&
+          r.status === 'succeeded' &&
+          r.round === t.round &&
+          r.report?.kind === 'review' &&
+          r.report.verdict === 'approve',
+      );
+    if (!a || !reviewed) return;
+    try {
+      this.decideIntegration(a.id, 'approved', { auto: true });
+      const room = this.chat.ensureTicketChannel(t.id);
+      if (room)
+        this.chat.post(
+          room.id,
+          'system',
+          tr(
+            '검수를 통과해 대표 설정(검수 통과하면 자동 반영)에 따라 반영합니다.',
+            'Review passed; merging automatically per the project setting.',
+          ),
+          'event',
+        );
+    } catch {
+      // 승인 대상이 바뀌었으면 새 승인 요청이 생긴다: 다음 tick에 다시 본다.
+    }
+  }
+
   /** 대표의 승인·거부. mode를 주면 이번 반영에만 그 방식을 쓴다. */
   decideIntegration(
     approvalId: string,
     decision: 'approved' | 'rejected',
-    opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[] } = {},
+    opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[]; auto?: boolean } = {},
   ): Ticket {
     const t = this.decideIntegrationCore(approvalId, decision, opts);
     // 확인이 끝났으니 띄워 둔 미리보기를 끈다(반려 뒤 새 제출물이 오면 새로 띄운다).
@@ -1923,7 +1973,7 @@ ${failure.detail.slice(0, 400)}`,
   private decideIntegrationCore(
     approvalId: string,
     decision: 'approved' | 'rejected',
-    opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[] },
+    opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[]; auto?: boolean },
   ): Ticket {
     const a = this.records.approval(approvalId);
     if (!a || a.kind !== 'integrate' || a.state !== 'pending' || !a.ticketId)
@@ -1977,7 +2027,8 @@ ${failure.detail.slice(0, 400)}`,
     for (const r of checkedNow) this.attest(t.id, r.id, tr('승인하면서 대표가 직접 확인했습니다.', 'Confirmed by the CEO when approving.'));
     const mode = opts.mode ?? (a.detail as { mode: Project['integrationMode'] }).mode;
     return tx(() => {
-      this.records.setApprovalState(approvalId, 'approved', 'ceo', { mode });
+      // 자동 반영은 대표가 켠 설정에 따른 것: 기록에는 'auto'로 남겨 대표가 직접 누른 승인과 구분한다.
+      this.records.setApprovalState(approvalId, 'approved', opts.auto ? 'auto' : 'ceo', { mode, ...(opts.auto ? { auto: true } : {}) });
       return this.apply(t.id, { type: 'ceo_approve' }, CEO);
     });
   }
