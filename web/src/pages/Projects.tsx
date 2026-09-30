@@ -153,6 +153,7 @@ interface Inspection {
   verify: { label: string; evidenceType: string; argv: string[] }[];
   dirs: string[];
   protectedSuggestions: string[];
+  empty?: boolean;
 }
 
 function ProjectModal({ project, onClose }: { project: Project | null; onClose: () => void }) {
@@ -196,6 +197,8 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
             v.length ? v : r.verify.map((x) => ({ label: x.label, evidenceType: x.evidenceType, command: joinArgs(x.argv) })),
           );
           setProtected((p) => (p.length ? p : r.protectedSuggestions));
+          // 처음부터 만드는 프로젝트: 뒤 업무가 앞 업무 결과를 이어받아야 하므로 자동 병합이 기본.
+          if (r.empty && !project) setMode('auto_after_approval');
         })
         .catch(() => setInfo(null))
         .finally(() => setInspecting(false));
@@ -265,6 +268,13 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
                     : ko
                       ? `git 저장소 확인 · 브랜치 ${info.branches.length}개 · 검증 명령 ${info.verify.length}개 제안`
                       : `Git repository · ${info.branches.length} branches · ${info.verify.length} verify commands suggested`}
+              </span>
+            )}
+            {info?.empty && !project && (
+              <span className="hint">
+                {ko
+                  ? '빈 저장소입니다. 첫 업무가 만들 테스트 명령(예: npm test, node --test)을 아래 검증 명령에 미리 적어 두세요. 뒤 업무가 앞 업무 결과를 이어받도록 반영 방식은 자동 병합으로 두었습니다.'
+                  : 'Empty repository. Add the test command the first ticket will create (e.g. npm test, node --test) below. Merge mode is set to auto so later tickets build on earlier ones.'}
               </span>
             )}
           </label>

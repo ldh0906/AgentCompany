@@ -50,6 +50,8 @@ export interface RepoInspection {
   verify: VerifySuggestion[];
   dirs: string[];
   protectedSuggestions: string[];
+  /** 추적 파일이 하나도 없는 새 저장소(처음부터 시작하는 프로젝트). */
+  empty: boolean;
 }
 
 const PROTECT_CANDIDATES = [
@@ -75,6 +77,7 @@ export async function inspectRepo(repo: string): Promise<RepoInspection> {
     verify: [],
     dirs: [],
     protectedSuggestions: [],
+    empty: false,
   };
   if (!base.exists) return base;
   // 폴더 자체가 저장소 루트여야 한다(상위 폴더의 저장소 안에 있는 하위 폴더는 등록 대상이 아니다).
@@ -93,6 +96,7 @@ export async function inspectRepo(repo: string): Promise<RepoInspection> {
     .map((s) => s.trim())
     .filter(Boolean);
   base.dirs = await trackedDirs(p, base.baseBranch, '');
+  base.empty = !(await git(['ls-files'], p, { allowFail: true })).stdout.trim();
   base.verify = await suggestVerify(p);
   base.protectedSuggestions = PROTECT_CANDIDATES.filter((c) => existsSync(path.join(p, c))).map((c) =>
     ['.github', 'ProjectSettings'].includes(c) ? `${c}/**` : c,

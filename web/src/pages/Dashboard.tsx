@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { api, type Approval, type DomainEvent, type State } from '../api.ts';
 import { Link, useCompany, useRoute } from '../App.tsx';
-import { useT } from '../i18n.ts';
+import { ACCESS, josa, useT } from '../i18n.ts';
 import { MAX_ACTIVE_EMPLOYEES } from '../../../src/core/types.ts';
-import { Avatar, empName, EmptyState, HoldChip, Icon, Modal, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
+import { Avatar, empName, EmptyState, HoldChip, Icon, Modal, needsCeo, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
 import { useCliStatus } from '../components/kit.tsx';
 import { UsagePanel } from '../components/usage.tsx';
 import { RequestBox } from './Requests.tsx';
@@ -15,6 +15,8 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
   const p = (e.payload ?? {}) as Record<string, unknown>;
   const who = (id: unknown) => (s ? empName(s.employees, String(id)) : String(id));
   const ko = lang === 'ko';
+  const projectName = (id: string) => s?.projects.find((x) => x.id === id)?.name ?? id;
+  const access = (v: unknown) => ACCESS[ko ? 'ko' : 'en'][String(v)] ?? String(v);
   switch (e.type) {
     case 'ticket.created':
       return ko ? `${e.entityId} 업무 생성: ${p.title}` : `${e.entityId} created: ${p.title}`;
@@ -87,10 +89,10 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
     case 'approval.delegated':
       return p.allow
         ? ko
-          ? `${who(e.actor)}이(가) 권한 요청 허용: ${p.summary ?? ''}`
-          : `${who(e.actor)} allowed: ${p.summary ?? ''}`
+          ? `${josa(who(e.actor), '이/가')} 허용: ${p.command ? String(p.command) : (p.summary ?? '')}`
+          : `${who(e.actor)} allowed: ${p.command ? String(p.command) : (p.summary ?? '')}`
         : ko
-          ? `⛔ ${who(e.actor)}이(가) 권한 요청 차단: ${p.reason ?? ''}`
+          ? `⛔ ${josa(who(e.actor), '이/가')} 차단: ${p.reason ?? ''}`
           : `⛔ ${who(e.actor)} blocked: ${p.reason ?? ''}`;
     case 'approval.approved':
       return ko ? `대표 승인: ${p.ticketId ?? ''}` : `CEO approved ${p.ticketId ?? ''}`;
@@ -108,6 +110,36 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
       return ko ? `결정 기록: ${String(p.text ?? '').slice(0, 60)}` : `Decision: ${String(p.text ?? '').slice(0, 60)}`;
     case 'project.registered':
       return ko ? `프로젝트 등록: ${p.name}` : `Project registered: ${p.name}`;
+    case 'project.updated':
+      return ko ? `프로젝트 설정 변경: ${projectName(e.entityId)}` : `Project settings changed: ${projectName(e.entityId)}`;
+    case 'project.removed':
+      return ko ? `프로젝트 삭제: ${projectName(e.entityId)}` : `Project removed: ${projectName(e.entityId)}`;
+    case 'employee.access_changed':
+      return ko
+        ? `${who(e.entityId)} 접근 등급: ${access(p.from)} → ${access(p.to)}`
+        : `${who(e.entityId)} access: ${access(p.from)} → ${access(p.to)}`;
+    case 'employee.rank_changed':
+      return ko ? `${who(e.entityId)} 직급 변경 → ${String(p.to)}` : `${who(e.entityId)} rank → ${String(p.to)}`;
+    case 'employee.model_changed':
+      return ko
+        ? `${who(e.entityId)} 모델 변경 → ${(p.to as unknown[] | undefined)?.filter(Boolean).join(' · ') || '기본'}`
+        : `${who(e.entityId)} model → ${(p.to as unknown[] | undefined)?.filter(Boolean).join(' · ') || 'default'}`;
+    case 'employee.profile_changed':
+      return ko ? `${who(e.entityId)} 정보 수정` : `${who(e.entityId)} profile updated`;
+    case 'employee.removed':
+      return ko ? `직원 삭제: ${who(e.entityId)}` : `Employee removed: ${who(e.entityId)}`;
+    case 'decision.status':
+      return ko ? `결정 상태 변경 → ${String(p.to)}` : `Decision status → ${String(p.to)}`;
+    case 'request.dismissed':
+      return ko ? '대표 요청 초안을 버렸습니다' : 'Request drafts dismissed';
+    case 'request.failed':
+      return ko ? '비서실장 초안 작성 실패' : 'Chief of staff drafting failed';
+    case 'ticket.review_skipped':
+      return ko ? `${e.entityId} 대표가 검수를 건너뛰고 승인 단계로` : `${e.entityId} review skipped by the CEO`;
+    case 'ticket.reverify':
+      return ko ? `${e.entityId} 대표가 다시 검증 요청` : `${e.entityId} re-verification requested`;
+    case 'orchestrator.error':
+      return ko ? `시스템 오류: ${String(p.message ?? p.error ?? '')}` : `System error: ${String(p.message ?? p.error ?? '')}`;
     default:
       if (e.type.startsWith('deliberation.'))
         return `${e.entityId} ${who(e.actor)} ${e.type.split('.')[1]} ${p.summary ?? ''}${p.error ? ` ✗ ${p.error}` : ''}`;
@@ -193,7 +225,21 @@ export function ApprovalItem({ a }: { a: Approval }) {
           {toolInputText(d.input)}
         </pre>
       )}
-      {a.kind === 'integrate' && typeof d.summary === 'string' && d.summary && <div className="note">{d.summary}</div>}
+      {a.kind === 'integrate' && typeof d.summary === 'string' && d.summary && (
+        <div className="note">
+          <b>{lang === 'ko' ? '담당' : 'Assignee'}</b> {d.summary}
+        </div>
+      )}
+      {a.kind === 'integrate' && d.mode !== 'review' && (
+        <div className="note">
+          <b>{lang === 'ko' ? '검수' : 'Review'}</b>{' '}
+          {(d.review as { by: string; summary: string } | null)?.summary
+            ? `${empName(state?.employees ?? [], (d.review as { by: string }).by)}: ${(d.review as { summary: string }).summary}`
+            : lang === 'ko'
+              ? '검수 의견 없음 (대표가 검수를 건너뛰었거나 이전 버전 승인 요청)'
+              : 'No review verdict (review skipped by the CEO, or an older approval request)'}
+        </div>
+      )}
       {tk && ceoChecks.length > 0 && (
         <div className="ceo-checks">
           <div className="spread">
@@ -222,7 +268,7 @@ export function ApprovalItem({ a }: { a: Approval }) {
       {a.kind === 'integrate' && tk?.reviewBelowRank && (
         <div className="banner warn" style={{ margin: '8px 0 0' }}>
           {lang === 'ko'
-            ? `하위 직급 검수: ${empName(state?.employees ?? [], tk.assigneeId)}의 작업을 더 낮은 직급인 ${empName(state?.employees ?? [], tk.reviewerId)}이(가) 검수했습니다(같은 직급 이상 직원 없음). 변경 내용을 더 꼼꼼히 확인하고 승인하세요.`
+            ? `하위 직급 검수: ${empName(state?.employees ?? [], tk.assigneeId)}의 작업을 더 낮은 직급인 ${josa(empName(state?.employees ?? [], tk.reviewerId), '이/가')} 검수했습니다(같은 직급 이상 직원 없음). 변경 내용을 더 꼼꼼히 확인하고 승인하세요.`
             : `Lower-rank review: ${empName(state?.employees ?? [], tk.reviewerId)} reviewed work by a higher-ranked ${empName(state?.employees ?? [], tk.assigneeId)} (no peer available). Check the changes more closely before approving.`}
         </div>
       )}
@@ -302,8 +348,8 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
   const { t, lang, hold } = useT();
   const { busy, run } = useAction();
   if (!state) return <Skeleton />;
-  const held = state.tickets.filter((x) => x.hold);
-  const active = state.tickets.filter((x) => ACTIVE.includes(x.status) && !x.hold);
+  const held = state.tickets.filter(needsCeo);
+  const active = state.tickets.filter((x) => ACTIVE.includes(x.status) && !needsCeo(x));
   const done = state.tickets.filter((x) => x.status === 'done');
   const ko = lang === 'ko';
 
@@ -496,6 +542,9 @@ function TeamPanel() {
     if (work) return { tone: 'info', text: ko ? `${work.id} 작업 중` : `Working on ${work.id}`, to: work.id };
     const review = state.tickets.find((x) => x.reviewerId === id && x.status === 'in_review');
     if (review) return { tone: 'accent', text: ko ? `${review.id} 검수 중` : `Reviewing ${review.id}`, to: review.id };
+    const drafting = state.requests.filter((r) => r.employeeId === id && r.status === 'drafting').length;
+    if (drafting)
+      return { tone: 'info', text: ko ? `업무 초안 작성 중${drafting > 1 ? ` (${drafting}건)` : ''}` : `Drafting tickets`, to: null };
     const owns = state.tickets.filter((x) => x.ownerId === id && !['done', 'failed', 'cancelled'].includes(x.status)).length;
     if (owns) return { tone: '', text: ko ? `책임 업무 ${owns}개` : `Owns ${owns}`, to: null };
     return { tone: '', text: ko ? '대기 중' : 'Idle', to: null };
@@ -654,7 +703,7 @@ function SetupGuide({ onNewTicket }: { onNewTicket: () => void }) {
   const ko = lang === 'ko';
   const hasProject = state.projects.length > 0;
   const hasTeam = state.employees.filter((e) => e.active).length >= 2;
-  const hasTicket = state.tickets.length > 0;
+  const hasTicket = state.tickets.length > 0 || state.requests.length > 0;
   if (hasProject && hasTeam && hasTicket) return null;
   const steps = [
     {

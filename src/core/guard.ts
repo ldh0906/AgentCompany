@@ -27,7 +27,7 @@ const HARD: [RegExp, string][] = [
 ];
 
 /** 도구 요청 입력에서 명령 문자열을 꺼낸다(Claude: {tool_name,input:{command}}, Codex: {command: string|argv}). */
-function commandOf(input: unknown): string | null {
+export function commandOf(input: unknown): string | null {
   const o = input && typeof input === 'object' ? (input as Record<string, unknown>) : null;
   if (!o) return null;
   const c = o.command ?? o.cmd;

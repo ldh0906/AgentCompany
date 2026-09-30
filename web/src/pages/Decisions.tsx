@@ -67,7 +67,9 @@ export function Decisions() {
                 className="btn primary"
                 disabled={busy || !text.trim()}
                 onClick={() =>
-                  run(() => api('decisions', { body: { projectId: pid, text } }), 'OK').then((ok) => ok && (setText(''), reload()))
+                  run(() => api('decisions', { body: { projectId: pid, text } }), ko ? '결정을 기록했습니다.' : 'Decision recorded.').then(
+                    (ok) => ok && (setText(''), reload()),
+                  )
                 }
               >
                 {ko ? '확정' : 'Record'}
@@ -100,7 +102,12 @@ export function Decisions() {
                   </div>
                   <select
                     value={d.status}
-                    onChange={(e) => run(() => api(`decisions/${d.id}/status`, { body: { status: e.target.value } }), 'OK').then(reload)}
+                    onChange={(e) =>
+                      run(
+                        () => api(`decisions/${d.id}/status`, { body: { status: e.target.value } }),
+                        ko ? '결정 상태를 바꿨습니다.' : 'Status changed.',
+                      ).then(reload)
+                    }
                     style={{ width: 'auto' }}
                   >
                     {Object.keys(label).map((s) => (

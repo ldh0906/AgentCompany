@@ -27,6 +27,10 @@ export function HoldChip({ ticket }: { ticket: Ticket }) {
   );
 }
 
+/** 대표가 손써야 하는 보류만(선행 업무 대기·사용량 한도 대기는 저절로 풀린다). */
+const CEO_HOLDS = ['needs_decision', 'needs_permission', 'on_hold'];
+export const needsCeo = (t: { hold: { reason: string } | null }): boolean => Boolean(t.hold && CEO_HOLDS.includes(t.hold.reason));
+
 export function CliChip({ cli, model, effort }: { cli: string; model?: string | null; effort?: string | null }) {
   const names: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', agy: 'Antigravity', fake: 'Demo' };
   const { lang, effort: effortLabel } = useT();

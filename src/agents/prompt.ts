@@ -138,6 +138,7 @@ Done criteria: ${i.ticket.doneCriteria}
 
 ## How to judge
 - For each requirement decide met=true/false.
+- The review copy has no installed dependencies and package installs are blocked: rely on the system-generated evidence for test and build results instead of re-running them.
 ${
   ceoChecks.length
     ? `- ${ceoChecks.map((r) => r.id).join(', ')} need the CEO's own hands-on check (human_attest). You cannot provide or demand that evidence: the CEO checks it at final approval. Judge only whether the code plausibly supports it; set met=true unless the code clearly cannot work, and never request changes just because human_attest evidence is missing.
@@ -207,8 +208,9 @@ Your current directory is a READ-ONLY copy of the project "${i.project.name}". R
 Turn the CEO request below into a small set of well-scoped tickets that other employees will implement and independently review.
 Rules:
 - Each ticket has a narrow write scope (globs). Tickets that touch the same files must depend on each other (dependsOn = earlier ticket indexes).
-- Each requirement names the MINIMUM evidence that proves it: unit_test / static_check need a verify command to exist; runtime or visual checks need "human_attest"; documents need "inspection".
-- Do not decide product rules or numbers the CEO has not decided. Put them in "questions".
+- Each requirement names the MINIMUM evidence that proves it. unit_test / static_check / runtime are produced ONLY by the project verify commands listed below: use a type only if a verify command of that exact type exists. If a requirement needs a check the project cannot run yet (e.g. type checking or lint), add that command to "verifySuggestions" (no shell operators) so the CEO can add it before confirming.
+- Use "human_attest" only for what a person must see, hear or play (visuals, feel, sound). Anything a reviewer can confirm by reading code is "inspection". Documents are "inspection".
+- Do not decide product rules or numbers the CEO has not decided. Put them in "questions", each with your recommended default as "proposal" so the CEO can accept it in one click. Ask only what really matters; small tuning values can simply be proposed.
 - Prefer 1-5 tickets. Fewer is better.
 - Give each ticket a "difficulty": "easy" (small, local, low risk), "normal" (a typical feature or fix), or "hard" (cross-cutting, risky, or design-heavy). Difficulty decides the minimum rank: easy = junior+, normal = senior+, hard = lead.
 
@@ -225,7 +227,7 @@ ${dataBlock('Project document rules', i.project.docRules)}
 ## Final answer format (required)
 Write titles and text in language "${i.language}". End with exactly one JSON code block:
 ${fence}json
-{"nonce":"${i.nonce}","kind":"drafts","summary":"...","tickets":[{"type":"impl|doc|review|research","difficulty":"easy|normal|hard","title":"...","purpose":"...","requirements":[{"text":"...","evidenceType":"unit_test"}],"doneCriteria":"...","writeScope":["src/feature/**"],"dependsOn":[]}],"questions":[]}
+{"nonce":"${i.nonce}","kind":"drafts","summary":"...","tickets":[{"type":"impl|doc|review|research","difficulty":"easy|normal|hard","title":"...","purpose":"...","requirements":[{"text":"...","evidenceType":"unit_test"}],"doneCriteria":"...","writeScope":["src/feature/**"],"dependsOn":[]}],"questions":[{"question":"...","proposal":"..."}],"verifySuggestions":[{"label":"typecheck","command":"npx tsc --noEmit","evidenceType":"static_check"}]}
 ${fence}
 `;
 }

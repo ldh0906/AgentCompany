@@ -53,6 +53,9 @@ export interface CeoRequest {
     difficulty?: 'easy' | 'normal' | 'hard';
   }[];
   questions: string[];
+  proposals?: (string | null)[];
+  answers?: (string | null)[];
+  verifySuggestions?: { label: string; argv: string[]; evidenceType: string }[];
   error: string | null;
   ticketIds: string[];
   createdAt: string;
@@ -87,6 +90,8 @@ export interface PreviewInfo {
   command: string;
   log: string;
   startedAt: string;
+  /** 업무 제출물이 바뀌어 옛 버전을 띄우고 있음. */
+  stale?: boolean;
 }
 
 const TOKEN_KEY = 'agent-company-token';
@@ -106,6 +111,14 @@ export function getToken(): string {
   cachedToken ||= token();
   return cachedToken;
 }
+
+// 앱을 다시 켜면 토큰이 바뀐다. 열린 창에 새 주소(#token=…)만 붙여 넣으면 페이지가 다시 읽히지 않으므로 여기서 받는다.
+window.addEventListener('hashchange', () => {
+  if (new URLSearchParams(location.hash.slice(1)).get('token')) {
+    cachedToken = token();
+    location.reload();
+  }
+});
 
 export class ApiError extends Error {
   status: number;

@@ -109,6 +109,21 @@ const MODEL_PATTERNS = [
   /model[^\n]{0,40}(not found|not supported|unsupported|does not exist)/i,
 ];
 const USAGE_PATTERNS = [/usage limit/i, /rate limit/i, /quota/i, /limit reached/i, /429/, /too many requests/i, /사용량/];
+// 실측(2026-09-30, Claude Code): "Failed to refresh OAuth token: another Claude Code process is refreshing it ...
+// This is usually transient; retry in a minute". 로그인 문제가 아니라 잠시 뒤 다시 하면 되는 오류.
+export const TRANSIENT_PATTERNS = [
+  /failed to refresh oauth token/i,
+  /usually transient/i,
+  /retry in a minute/i,
+  /overloaded/i,
+  /\b(502|503|504|529)\b/,
+  /internal server error/i,
+  /ECONNRESET|ETIMEDOUT|socket hang up|network error/i,
+];
+
+export function isTransient(text: string | null | undefined): boolean {
+  return Boolean(text && TRANSIENT_PATTERNS.some((p) => p.test(text)));
+}
 const AUTH_PATTERNS = [
   /not logged in/i,
   /authentication required/i,
@@ -128,6 +143,7 @@ export function classifyCommon(input: {
 }): FailureClass {
   if (input.timedOut) return 'timeout';
   const text = `${input.stderr}\n${input.finalText ?? ''}`;
+  if (isTransient(text)) return 'transient';
   if (AUTH_PATTERNS.some((p) => p.test(text))) return 'auth_required';
   if (MODEL_PATTERNS.some((p) => p.test(text))) return 'model_unsupported';
   if (USAGE_PATTERNS.some((p) => p.test(text))) return 'usage_limit';

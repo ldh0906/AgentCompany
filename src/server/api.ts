@@ -249,6 +249,8 @@ export class Api {
       }
       case 'POST tickets/:id/assign':
         return this.orch.assign(id!, str(b, 'assigneeId'), str(b, 'reviewerId'));
+      case 'POST tickets/:id/reverify':
+        return this.orch.reverify(id!);
       case 'POST tickets/:id/skip-review':
         return this.orch.skipReview(id!);
       case 'POST tickets/:id/attest':
@@ -284,6 +286,18 @@ export class Api {
         return this.orch.submitRequest(str(b, 'projectId'), str(b, 'text', { max: 10_000 }));
       case 'POST requests/:id/accept':
         return this.orch.acceptRequest(id!, Array.isArray(b.drafts) ? (b.drafts as never) : undefined);
+      case 'POST requests/:id/answer': {
+        const items = Array.isArray(b.items) ? (b.items as Record<string, unknown>[]) : [];
+        return this.orch.answerQuestions(
+          id!,
+          items.map((x) => ({
+            index: Number(x?.index),
+            answer: typeof x?.answer === 'string' && x.answer.trim() ? x.answer.slice(0, 2000) : null,
+          })),
+        );
+      }
+      case 'POST requests/:id/retry':
+        return this.orch.retryRequest(id!);
       case 'POST requests/:id/dismiss':
         this.orch.dismissRequest(id!);
         return { ok: true };
@@ -324,7 +338,7 @@ export class Api {
       chiefOfStaff: this.orch.chiefOfStaff()?.id ?? null,
       permissionDelegate: this.orch.permissionDelegate()?.id ?? null,
       usage: r.usageSummary(),
-      previews: this.orch.previews.list(),
+      previews: this.orch.previewList(),
     };
   }
 

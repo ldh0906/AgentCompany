@@ -12,7 +12,8 @@ export function PreviewButton({ projectId, ticketId = null }: { projectId: strin
   const { busy, run } = useAction();
   const [last, setLast] = useState<PreviewInfo | null>(null);
   const key = `${projectId}:${ticketId ?? 'base'}`;
-  const live = state?.previews?.find((p) => p.key === key) ?? last;
+  const fromState = state?.previews?.find((p) => p.key === key);
+  const live = fromState ?? (state?.previews ? null : last);
   const open = (url: string) => window.open(url, '_blank', 'noopener');
   const start = () =>
     run(async () => {
@@ -32,7 +33,7 @@ export function PreviewButton({ projectId, ticketId = null }: { projectId: strin
 
   return (
     <span className="preview">
-      {live?.state === 'running' && live.url ? (
+      {live?.state === 'running' && live.url && !live.stale ? (
         <>
           <button className="btn small ok" onClick={() => open(live.url!)}>
             <Icon name="arrow" size={13} /> {ko ? '열기' : 'Open'}
@@ -48,7 +49,18 @@ export function PreviewButton({ projectId, ticketId = null }: { projectId: strin
           onClick={() => void start()}
           title={ko ? '설치 후 개발 서버를 띄웁니다' : 'Installs and starts the dev server'}
         >
-          <Icon name="bolt" size={13} /> {busy ? (ko ? '띄우는 중…' : 'Starting…') : ko ? '실행해 보기' : 'Run it'}
+          <Icon name="bolt" size={13} />{' '}
+          {busy
+            ? ko
+              ? '띄우는 중…'
+              : 'Starting…'
+            : live?.stale
+              ? ko
+                ? '새 제출물로 다시 실행'
+                : 'Run the new submission'
+              : ko
+                ? '실행해 보기'
+                : 'Run it'}
         </button>
       )}
       {live && live.state === 'failed' && (

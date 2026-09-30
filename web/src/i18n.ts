@@ -234,9 +234,17 @@ export function useT() {
     hold: (s: string) => HOLD[lang][s] ?? s,
     role: (s: string) => ROLE[lang][s] ?? s,
     access: (s: string) => ACCESS[lang][s] ?? s,
-    evidence: (s: string) => EVIDENCE[lang][s] ?? s,
+    evidence: (s: string) => EVIDENCE[lang][s] ?? (s === 'setup' ? (lang === 'ko' ? '준비(설치)' : 'Setup') : s),
     rank: (s: string | null | undefined) => RANK[lang][s ?? 'senior'] ?? s ?? '',
     difficulty: (s: string | null | undefined) => DIFFICULTY[lang][s ?? 'normal'] ?? s ?? '',
     effort: (s: string | null | undefined) => (s ? (EFFORT[lang][s] ?? s) : ''),
   };
+}
+
+/** 한국어 조사: 이름 끝 글자의 받침에 맞춰 을/를, 이/가, 은/는을 고른다. 한글이 아니면 "을(를)" 형태로 둔다. */
+export function josa(word: string, pair: '을/를' | '이/가' | '은/는'): string {
+  const [withBatchim, without] = pair.split('/') as [string, string];
+  const code = word.trim().charCodeAt(word.trim().length - 1);
+  if (code < 0xac00 || code > 0xd7a3) return `${word}${withBatchim}(${without})`;
+  return word + ((code - 0xac00) % 28 ? withBatchim : without);
 }

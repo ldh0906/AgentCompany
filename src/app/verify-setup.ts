@@ -21,5 +21,5 @@ export function dependencySetup(dir: string, commands: VerifyCommand[]): VerifyC
       : has('package-lock.json')
         ? ['npm', 'ci', '--no-audit', '--no-fund']
         : ['npm', 'install', '--no-audit', '--no-fund'];
-  return { label: tr('의존성 설치', 'Install dependencies'), argv, evidenceType: 'static_check', timeoutMs: 10 * 60_000 };
+  return { label: tr('의존성 설치', 'Install dependencies'), argv, evidenceType: 'setup', timeoutMs: 10 * 60_000 };
 }

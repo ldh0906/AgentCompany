@@ -73,6 +73,22 @@ export function TicketPage({ id }: { id: string }) {
           {latestHead && !['done', 'failed', 'cancelled'].includes(tk.status) && (
             <PreviewButton projectId={tk.projectId} ticketId={tk.id} />
           )}
+          {latestHead && ['in_review', 'changes_requested'].includes(tk.status) && (
+            <button
+              className="btn"
+              disabled={busy}
+              title={
+                ko
+                  ? '직원에게 한 회차 더 시키지 않고, 마지막 제출물을 지금 검증 명령으로 다시 검증하고 검수합니다(검증 명령을 바꾼 뒤 등).'
+                  : 'Re-run verification and review on the last submission without another work round (e.g. after changing verify commands).'
+              }
+              onClick={() =>
+                run(() => api(`tickets/${tk.id}/reverify`, { body: {} }), ko ? '다시 검증합니다.' : 'Re-verifying.').then(reload)
+              }
+            >
+              {ko ? '다시 검증' : 'Re-verify'}
+            </button>
+          )}
           {tk.hold?.reason === 'needs_decision' && ['in_review', 'changes_requested'].includes(tk.status) && (
             <button
               className="btn primary"
@@ -116,7 +132,7 @@ export function TicketPage({ id }: { id: string }) {
               disabled={busy}
               onClick={() =>
                 confirm(ko ? '이 업무를 취소할까요?' : 'Cancel this ticket?') &&
-                run(() => api(`tickets/${tk.id}/cancel`, { body: {} }), 'OK').then(reload)
+                run(() => api(`tickets/${tk.id}/cancel`, { body: {} }), ko ? '업무를 취소했습니다.' : 'Ticket cancelled.').then(reload)
               }
             >
               {t('cancel')}
@@ -187,7 +203,10 @@ export function TicketPage({ id }: { id: string }) {
                                   : `Attest ${r.id} for commit ${latestHead.slice(0, 8)}. Note:`,
                               );
                               if (note !== null)
-                                void run(() => api(`tickets/${tk.id}/attest`, { body: { requirementId: r.id, note } }), 'OK').then(reload);
+                                void run(
+                                  () => api(`tickets/${tk.id}/attest`, { body: { requirementId: r.id, note } }),
+                                  ko ? '직접 확인을 기록했습니다.' : 'Confirmation recorded.',
+                                ).then(reload);
                             }}
                           >
                             {ko ? '직접 확인' : 'Attest'}
@@ -224,7 +243,7 @@ export function TicketPage({ id }: { id: string }) {
                           </pre>
                         )}
                       </td>
-                      <td className="sub">R{e.round}</td>
+                      <td className="sub">{ko ? `${e.round}회차` : `round ${e.round}`}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -392,9 +411,10 @@ function AssignModal({ ticket, onClose }: { ticket: Ticket; onClose: () => void 
           className="btn primary"
           disabled={busy || a === r}
           onClick={() =>
-            run(() => api(`tickets/${ticket.id}/assign`, { body: { assigneeId: a, reviewerId: r } }), 'OK').then(
-              (ok) => ok && (reload(), onClose()),
-            )
+            run(
+              () => api(`tickets/${ticket.id}/assign`, { body: { assigneeId: a, reviewerId: r } }),
+              lang === 'ko' ? '배정했습니다.' : 'Assigned.',
+            ).then((ok) => ok && (reload(), onClose()))
           }
         >
           {t('save')}

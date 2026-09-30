@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, type Employee } from '../api.ts';
 import { useCompany } from '../App.tsx';
-import { ACCESS, ROLE, useT } from '../i18n.ts';
+import { ACCESS, josa, ROLE, useT } from '../i18n.ts';
 import { MAX_ACTIVE_EMPLOYEES } from '../../../src/core/types.ts';
 import { Avatar, CliChip, EmptyState, Icon, Modal, useAction, Skeleton } from '../components/ui.tsx';
 import { ChipToggles, ModelPicker, Segmented, useCliStatus } from '../components/kit.tsx';
@@ -18,6 +18,7 @@ export function Org() {
   const [modeling, setModeling] = useState<Employee | null>(null);
   const [removing, setRemoving] = useState<Employee | null>(null);
   const [profiling, setProfiling] = useState<Employee | null>(null);
+  const [quickTeam, setQuickTeam] = useState(false);
   if (!state) return <Skeleton />;
   const ko = lang === 'ko';
   const activeCount = state.employees.filter((e) => e.active).length;
@@ -64,9 +65,14 @@ export function Org() {
                   ? '구현 담당과 검수 담당을 서로 다른 CLI로 두 명 이상 뽑으세요. 예: 구현 Claude Code, 검수 Codex.'
                   : 'Hire at least two, on different CLIs for implementing and reviewing — e.g. Claude Code builds, Codex reviews.'}
               </div>
-              <button className="btn primary" style={{ marginTop: 14 }} onClick={() => setHiring(true)}>
-                <Icon name="plus" /> {t('hire')}
-              </button>
+              <div className="row" style={{ marginTop: 14, justifyContent: 'center' }}>
+                <button className="btn primary" onClick={() => setQuickTeam(true)}>
+                  <Icon name="team" /> {ko ? '기본 팀 한 번에 만들기' : 'Create a standard team'}
+                </button>
+                <button className="btn" onClick={() => setHiring(true)}>
+                  <Icon name="plus" /> {t('hire')}
+                </button>
+              </div>
             </EmptyState>
           </div>
         )}
@@ -127,7 +133,12 @@ export function Org() {
                 <button
                   className="btn small"
                   disabled={busy}
-                  onClick={() => run(() => api(`employees/${e.id}/active`, { body: { active: !e.active } }), 'OK').then(reload)}
+                  onClick={() =>
+                    run(
+                      () => api(`employees/${e.id}/active`, { body: { active: !e.active } }),
+                      e.active ? (ko ? '비활성화했습니다.' : 'Deactivated.') : ko ? '활성화했습니다.' : 'Activated.',
+                    ).then(reload)
+                  }
                 >
                   {e.active ? (ko ? '비활성화' : 'Deactivate') : ko ? '활성화' : 'Activate'}
                 </button>
@@ -140,8 +151,8 @@ export function Org() {
         ))}
       </div>
 
-      <div className="card" style={{ marginTop: 16 }}>
-        <h2>{ko ? 'CLI별 지원 현황 (실측 기반)' : 'CLI capabilities (measured)'}</h2>
+      <details className="card advanced" style={{ marginTop: 16 }}>
+        <summary>{ko ? 'CLI별 지원 현황 (개발자용 세부 정보)' : 'CLI capabilities (developer details)'}</summary>
         <table>
           <thead>
             <tr>
@@ -176,15 +187,16 @@ export function Org() {
             ))}
           </tbody>
         </table>
-      </div>
+      </details>
 
       {hiring && <HireModal onClose={() => setHiring(false)} />}
+      {quickTeam && <QuickTeamModal onClose={() => setQuickTeam(false)} />}
       {editing && <AccessModal employee={editing} onClose={() => setEditing(null)} />}
       {modeling && <ModelModal employee={modeling} onClose={() => setModeling(null)} />}
       {profiling && <ProfileModal employee={profiling} onClose={() => setProfiling(null)} />}
       {removing && (
         <Modal
-          title={ko ? `${removing.name}을(를) 삭제할까요?` : `Remove ${removing.name}?`}
+          title={ko ? `${josa(removing.name, '을/를')} 삭제할까요?` : `Remove ${removing.name}?`}
           onClose={() => setRemoving(null)}
           actions={
             <button
@@ -307,7 +319,7 @@ function HireModal({ onClose }: { onClose: () => void }) {
                 api('employees', {
                   body: { name: finalName.trim(), cli, model: model || null, effort: effort || null, roles, rank, accessLevel: level },
                 }),
-              ko ? `${finalName}을(를) 채용했습니다.` : `Hired ${finalName}.`,
+              ko ? `${josa(finalName, '을/를')} 채용했습니다.` : `Hired ${finalName}.`,
             ).then((ok) => ok && (reload(), onClose()))
           }
         >
@@ -434,6 +446,90 @@ function HireModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** 기본 팀 한 번에: 팀장(비서실장) + 구현 2 + 검수 2, 준비된 CLI를 섞어서. 실측: 채용 창을 5번 여는 게 가장 번거로웠다. */
+function QuickTeamModal({ onClose }: { onClose: () => void }) {
+  const { reload } = useCompany();
+  const { lang } = useT();
+  const ko = lang === 'ko';
+  const { busy, run } = useAction();
+  const clis = useCliStatus();
+  const [fullAuto, setFullAuto] = useState(true);
+  const ready = (clis ?? []).filter((c) => c.found && c.login !== 'missing').map((c) => c.kind);
+  const a = ready.includes('claude') ? 'claude' : ready[0];
+  const b = ready.find((k) => k !== a) ?? a;
+  const label = (k: string | undefined) => CLI_SHORT[k ?? ''] ?? k ?? '';
+  const plan =
+    a === undefined
+      ? []
+      : [
+          { name: `${label(a)} 팀장`, cli: a, roles: ['chief-of-staff', 'planner', 'qa'], rank: 'lead', lead: true },
+          { name: `${label(a)} 구현`, cli: a, roles: ['implementer'], rank: 'senior' },
+          ...(b !== a ? [{ name: `${label(b)} 구현`, cli: b, roles: ['implementer'], rank: 'senior' }] : []),
+          { name: `${label(b)} 검수`, cli: b, roles: ['qa'], rank: 'senior' },
+          ...(b !== a ? [{ name: `${label(a)} 검수`, cli: a, roles: ['qa'], rank: 'senior' }] : []),
+        ];
+  const create = () =>
+    run(
+      async () => {
+        for (const p of plan) {
+          const e = await api<Employee>('employees', {
+            body: { name: p.name, cli: p.cli, roles: p.roles, rank: p.rank, accessLevel: 'write-allowlist' },
+          });
+          if ('lead' in p && fullAuto) await api(`employees/${e.id}/access`, { body: { accessLevel: 'full-auto', confirm: 'full-auto' } });
+        }
+      },
+      ko ? `직원 ${plan.length}명을 채용했습니다.` : `Hired ${plan.length} employees.`,
+    ).then((ok) => ok && (reload(), onClose()));
+  return (
+    <Modal
+      title={ko ? '기본 팀 한 번에 만들기' : 'Create a standard team'}
+      onClose={onClose}
+      actions={
+        <button className="btn primary" disabled={busy || !plan.length} onClick={() => void create()}>
+          <Icon name="plus" /> {ko ? `${plan.length}명 채용` : `Hire ${plan.length}`}
+        </button>
+      }
+    >
+      <div className="form">
+        {clis === null ? (
+          <div className="sub">{ko ? 'CLI 확인 중…' : 'Checking CLIs…'}</div>
+        ) : !plan.length ? (
+          <div className="banner bad">
+            {ko ? '준비된 CLI가 없습니다. 시스템 화면에서 설치·로그인을 확인하세요.' : 'No CLI is ready. Check the System page.'}
+          </div>
+        ) : (
+          <div className="list">
+            {plan.map((p) => (
+              <div className="item" key={p.name}>
+                <b>{p.name}</b>{' '}
+                <span className="sub">
+                  {p.roles.map((r) => ROLE[lang][r] ?? r).join(' · ')} · {RANK_LABEL(ko, p.rank)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        <label className="check-row">
+          <input type="checkbox" checked={fullAuto} onChange={() => setFullAuto(!fullAuto)} />
+          <span>
+            {ko
+              ? '팀장을 전체 자동으로 두고, 다른 직원의 권한 요청을 대표 대신 처리하게 합니다(치명적인 명령만 차단). 끄면 권한 요청마다 대표가 허용을 눌러야 합니다.'
+              : 'Make the lead full-auto so it answers the others’ permission requests for you (only catastrophic commands are blocked). Otherwise you click Allow for each request.'}
+          </span>
+        </label>
+        <div className="hint">
+          {ko
+            ? '서로 다른 AI가 구현과 검수를 나눠 맡습니다. 모델·이름은 채용 뒤 바꿀 수 있습니다.'
+            : 'Different AIs build and review. Models and names can be changed later.'}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+const RANK_LABEL = (ko: boolean, r: string) =>
+  ko ? (({ lead: '팀장', senior: '선임', junior: '사원' } as Record<string, string>)[r] ?? r) : r;
+
 function ProfileModal({ employee, onClose }: { employee: Employee; onClose: () => void }) {
   const { reload } = useCompany();
   const { t, lang, role } = useT();
@@ -533,7 +629,18 @@ function AccessModal({ employee, onClose }: { employee: Employee; onClose: () =>
   const { busy, run } = useAction();
   const [level, setLevel] = useState<string>(employee.accessLevel);
   const [confirmText, setConfirmText] = useState('');
-  const [allowText, setAllowText] = useState(employee.allowedCommands.map((a) => a.join(' ')).join('\n'));
+  // 비어 있으면 프로젝트 검증 명령과 흔한 읽기 명령을 제안으로 채운다(빈 허용 목록은 등급 2와 같다).
+  const suggestedAllow = [
+    ...new Set([
+      ...(state?.projects ?? []).flatMap((p) => p.verifyCommands.map((v) => v.argv.join(' '))),
+      'git status',
+      'git diff',
+      'git log',
+    ]),
+  ];
+  const [allowText, setAllowText] = useState(
+    employee.allowedCommands.length ? employee.allowedCommands.map((a) => a.join(' ')).join('\n') : suggestedAllow.join('\n'),
+  );
   const levels = state?.adapters.find((a) => a.kind === employee.cli)?.capabilities.accessLevels ?? [];
   const ko = lang === 'ko';
   return (
@@ -561,7 +668,7 @@ function AccessModal({ employee, onClose }: { employee: Employee; onClose: () =>
                       : {}),
                   },
                 }),
-              'OK',
+              ko ? '접근 등급을 바꿨습니다.' : 'Access level changed.',
             ).then((ok) => ok && (reload(), onClose()))
           }
         >
@@ -599,8 +706,8 @@ function AccessModal({ employee, onClose }: { employee: Employee; onClose: () =>
         {level === 'full-auto' && (
           <div className="banner bad">
             {ko
-              ? '전체 자동은 직원이 묻지 않고 명령을 실행합니다. CLI에 따라 브라우저 조작·웹 검색·메시지 보내기 같은 도구까지 허용됩니다(agy 실측). 사후 범위 검사는 그대로 적용되지만, 실행 중 차단은 되지 않습니다. 계속하려면 full-auto 를 입력하세요.'
-              : 'Full auto runs commands without asking. Depending on the CLI this also allows tools like browser control, web search and sending messages (measured on agy). Post-run scope checks still apply, but nothing is blocked during the run. Type full-auto to confirm.'}
+              ? '전체 자동은 직원이 묻지 않고 명령을 실행합니다(드라이브 삭제·포맷 같은 치명적 명령만 막음). CLI에 따라 브라우저 조작·웹 검색 같은 도구까지 허용됩니다. 전체 자동 직원 중 직급이 가장 높은 사람이 다른 직원들의 권한 요청도 대표 대신 처리하므로, 보통 팀장 한 명을 전체 자동으로 두면 일일이 허용을 누를 필요가 없습니다. 계속하려면 full-auto 를 입력하세요.'
+              : "Full auto runs commands without asking (only catastrophic ones like drive wipes are blocked). Depending on the CLI this includes tools like browser control and web search. The highest-ranked full-auto employee also answers the other employees' permission requests for you, so one full-auto lead usually means no more clicking Allow. Type full-auto to confirm."}
             <input style={{ marginTop: 8 }} value={confirmText} onChange={(e) => setConfirmText(e.target.value)} />
           </div>
         )}

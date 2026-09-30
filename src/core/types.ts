@@ -131,7 +131,8 @@ export type EvidenceType =
   | 'static_check'
   | 'unit_test'
   | 'runtime'
-  | 'human_attest'; // 대표 직접 확인 (가장 강함)
+  | 'human_attest' // 대표 직접 확인 (가장 강함)
+  | 'setup'; // 검증 전 의존성 설치 기록. 어떤 요구사항의 증거도 되지 않는다
 
 export const EVIDENCE_STRENGTH: Record<EvidenceType, number> = {
   mockup: 0,
@@ -140,6 +141,7 @@ export const EVIDENCE_STRENGTH: Record<EvidenceType, number> = {
   unit_test: 2,
   runtime: 3,
   human_attest: 4,
+  setup: -1,
 };
 
 export interface Requirement {
@@ -197,6 +199,7 @@ export type FailureClass =
   | 'auth_required'
   | 'usage_limit'
   | 'model_unsupported' // 설치된 CLI가 이 모델을 지원하지 않음(업데이트 필요)
+  | 'transient' // 잠시 뒤 다시 하면 되는 오류(로그인 토큰 갱신 경합, 서버 과부하 등)
   | 'crash'
   | 'schema_invalid'
   | 'nonce_mismatch'

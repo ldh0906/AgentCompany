@@ -55,6 +55,7 @@ export type TicketCommand =
   | { type: 'hold'; reason: HoldReason; note: string }
   | { type: 'release_hold' }
   | { type: 'ceo_skip_review'; reason: string; round: number }
+  | { type: 'ceo_reverify'; round: number }
   | { type: 'cancel'; reason: string }
   | { type: 'fail'; reason: string };
 
@@ -65,7 +66,7 @@ export interface TransitionEvent {
 
 export type TransitionResult = { ok: true; ticket: Ticket; events: TransitionEvent[] } | { ok: false; error: string };
 
-const ALLOWED_WHILE_HELD = new Set<TicketCommand['type']>(['release_hold', 'ceo_skip_review', 'cancel', 'fail']);
+const ALLOWED_WHILE_HELD = new Set<TicketCommand['type']>(['release_hold', 'ceo_skip_review', 'ceo_reverify', 'cancel', 'fail']);
 
 /** 대표만 풀 수 있는 보류 사유. 나머지는 오케스트레이터도 해제 가능. */
 const CEO_ONLY_HOLDS = new Set<HoldReason>(['needs_decision', 'needs_permission', 'on_hold']);
@@ -443,6 +444,19 @@ export function applyTicketCommand(ticket: Ticket, cmd: TicketCommand, actor: Ac
         reason: cmd.reason,
         round: cmd.round,
       });
+    }
+
+    case 'ceo_reverify': {
+      // 검증 명령을 고친 뒤 등: 직원에게 한 회차 더 시키지 않고 마지막 제출물을 다시 검증·검수한다.
+      if (!isCeo(actor)) return reject(tr('다시 검증은 대표만 할 수 있습니다.', 'Only the CEO can re-run verification.'));
+      if (!['in_review', 'changes_requested'].includes(ticket.status))
+        return reject(
+          tr(
+            '검수 중이거나 수정 요청 상태에서만 다시 검증할 수 있습니다.',
+            'Only tickets in review or changes requested can be re-verified.',
+          ),
+        );
+      return next({ status: 'verifying', hold: null, round: cmd.round }, 'ticket.reverify', { round: cmd.round });
     }
 
     case 'cancel': {

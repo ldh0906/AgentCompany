@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
-import { Avatar, EmptyState, empName, HoldChip, Icon, Skeleton, when } from '../components/ui.tsx';
+import { Avatar, EmptyState, empName, HoldChip, Icon, needsCeo, Skeleton, when } from '../components/ui.tsx';
 import { fmtTokens } from '../components/usage.tsx';
 
 const COLUMNS: { key: string; statuses: string[]; dot: string; ko: string; en: string }[] = [
@@ -63,7 +63,7 @@ export function Board({ onNewTicket }: { onNewTicket?: () => void }) {
       (!project || x.projectId === project),
   );
   const open = state.tickets.filter((x) => !['done', 'failed', 'cancelled'].includes(x.status)).length;
-  const yourTurn = state.tickets.filter((x) => x.status === 'awaiting_approval' || x.hold).length;
+  const yourTurn = state.tickets.filter((x) => x.status === 'awaiting_approval' || needsCeo(x)).length;
 
   return (
     <>

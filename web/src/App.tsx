@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api, ApiError, getToken, subscribe, type State } from './api.ts';
 import { LangContext, useT, type Lang } from './i18n.ts';
-import { Icon, ToastProvider } from './components/ui.tsx';
+import { Icon, needsCeo, ToastProvider } from './components/ui.tsx';
 import { Dashboard } from './pages/Dashboard.tsx';
 import { Board } from './pages/Board.tsx';
 import { TicketPage } from './pages/TicketPage.tsx';
@@ -80,7 +80,7 @@ function Shell() {
   const { state, live } = useCompany();
   const [newTicket, setNewTicket] = useState(false);
   const pending = state?.approvals.length ?? 0;
-  const held = state?.tickets.filter((x) => x.hold).length ?? 0;
+  const held = state?.tickets.filter(needsCeo).length ?? 0;
 
   // 승인 알림: 탭 제목에 건수, 켜 두면 새 승인 요청마다 데스크톱 알림.
   const [notify, setNotify] = useState(() => {

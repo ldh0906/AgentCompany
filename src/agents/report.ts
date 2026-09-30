@@ -172,12 +172,22 @@ export interface TicketDraft {
   difficulty: Difficulty; // 비서실장 제안. 모르는 값은 보통
 }
 
+/** 비서실장이 제안하는 검증 명령: 요구사항에 필요한 검사를 프로젝트가 아직 못 돌릴 때(예: 타입 검사). */
+export interface VerifySuggestion {
+  label: string;
+  argv: string[];
+  evidenceType: 'static_check' | 'unit_test' | 'runtime';
+}
+
 export interface DraftReport {
   kind: 'drafts';
   nonce: string;
   summary: string;
   tickets: TicketDraft[];
   questions: string[];
+  /** questions와 같은 순서: 비서실장이 제안하는 기본 답(대표가 한 번에 받아들일 수 있게). */
+  proposals: (string | null)[];
+  verifySuggestions: VerifySuggestion[];
 }
 
 const DRAFT_TYPES = ['impl', 'doc', 'review', 'research'];
@@ -244,7 +254,43 @@ export function parseDrafts(
       nonce,
       summary: isStr(raw.summary) ? raw.summary : '',
       tickets,
-      questions: Array.isArray(raw.questions) ? (raw.questions as unknown[]).filter(isStr) : [],
+      ...questionsOf(raw.questions),
+      verifySuggestions: suggestionsOf(raw.verifySuggestions),
     },
   };
+}
+
+/** 질문은 문자열이나 {question, proposal}. */
+function questionsOf(v: unknown): { questions: string[]; proposals: (string | null)[] } {
+  const questions: string[] = [];
+  const proposals: (string | null)[] = [];
+  for (const q of Array.isArray(v) ? v : []) {
+    if (isStr(q) && q.trim()) {
+      questions.push(q.slice(0, 1000));
+      proposals.push(null);
+    } else if (q && typeof q === 'object' && isStr((q as Record<string, unknown>).question)) {
+      const o = q as Record<string, unknown>;
+      questions.push(String(o.question).slice(0, 1000));
+      proposals.push(isStr(o.proposal) && o.proposal.trim() ? o.proposal.slice(0, 1000) : null);
+    }
+  }
+  return { questions: questions.slice(0, 20), proposals: proposals.slice(0, 20) };
+}
+
+const SUGGEST_TYPES = ['static_check', 'unit_test', 'runtime'];
+const SHELL_META = /[;&|`$<>(){}\n]/;
+
+function suggestionsOf(v: unknown): VerifySuggestion[] {
+  const out: VerifySuggestion[] = [];
+  for (const x of Array.isArray(v) ? v : []) {
+    const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
+    const cmd = isStr(o.command) ? o.command.trim() : Array.isArray(o.argv) ? (o.argv as unknown[]).filter(isStr).join(' ') : '';
+    if (!cmd || SHELL_META.test(cmd) || !SUGGEST_TYPES.includes(String(o.evidenceType))) continue;
+    out.push({
+      label: isStr(o.label) && o.label.trim() ? o.label.slice(0, 60) : cmd.split(/\s+/).slice(0, 3).join(' '),
+      argv: cmd.split(/\s+/),
+      evidenceType: o.evidenceType as VerifySuggestion['evidenceType'],
+    });
+  }
+  return out.slice(0, 5);
 }

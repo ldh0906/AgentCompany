@@ -3,7 +3,7 @@ import { tr } from '../core/i18n.ts';
 
 import { createHash, randomUUID } from 'node:crypto';
 import type { Store } from '../store/db.ts';
-import type { AgentReport, TicketDraft } from '../agents/report.ts';
+import type { AgentReport, TicketDraft, VerifySuggestion } from '../agents/report.ts';
 import type {
   Approval,
   ApprovalKind,
@@ -59,6 +59,14 @@ export interface CeoRequest {
   summary: string;
   drafts: TicketDraft[];
   questions: string[];
+  /** 질문별 비서실장 제안 답(없으면 null). */
+  proposals?: (string | null)[];
+  /** 질문별 대표 답(답하면 결정으로도 기록된다). */
+  answers?: (string | null)[];
+  /** 요구사항에 필요한데 프로젝트에 없는 검증 명령(비서실장 제안). */
+  verifySuggestions?: VerifySuggestion[];
+  /** 실패한 요청을 다시 보낸 것이면 원래 요청 ID(자동 재시도는 한 번만). */
+  retriedFrom?: string;
   error: string | null;
   ticketIds: string[];
   createdAt: string;

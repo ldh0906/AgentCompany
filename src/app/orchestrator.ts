@@ -7,6 +7,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { adapterFor } from '../adapters/index.ts';
+import { isTransient } from '../adapters/types.ts';
 import { buildDraftPrompt, buildReviewPrompt, buildWorkPrompt } from '../agents/prompt.ts';
 import {
   blindPrompt,
@@ -24,7 +25,7 @@ import type { Actor } from '../core/ticket-machine.ts';
 import type { Claim, Employee, Evidence, FailureClass, Project, Ticket, TicketStatus } from '../core/types.ts';
 import { DEFAULT_BUDGET, DIFFICULTIES, DIFFICULTY_RANK, RANK_ORDER, TERMINAL_STATUSES, difficultyOf, rankOf } from '../core/types.ts';
 import { pickPanel, pickStaff } from '../core/staffing.ts';
-import { judgeToolRequest } from '../core/guard.ts';
+import { commandOf, judgeToolRequest } from '../core/guard.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
 import { locateExecutable } from '../runner/locate.ts';
 import { abandonAndTerminate, isSameProcessAlive, readExitRecord, reapGroup, startProcess, waitForExit } from '../runner/process.ts';
@@ -138,6 +139,22 @@ export class Orchestrator {
   // ======================= 실행해 보기 =======================
 
   readonly previews = new PreviewManager();
+
+  /** 띄워 둔 미리보기 목록. 업무 제출물이 바뀌었으면 stale(옛 제출물을 보고 확인하지 않게). */
+  previewList(): (PreviewInfo & { stale: boolean })[] {
+    return this.previews.list().map((p) => {
+      if (!p.ticketId) return { ...p, stale: false };
+      const head = this.records
+        .runsForTicket(p.ticketId)
+        .filter((r) => r.kind === 'work' && r.status === 'succeeded' && r.headSha)
+        .at(-1)?.headSha;
+      return { ...p, stale: Boolean(head && head !== p.sha) };
+    });
+  }
+
+  private stopTicketPreview(t: Ticket): void {
+    this.previews.stop(`${t.projectId}:${t.id}`);
+  }
 
   /** 제출물(ticketId) 또는 기준 브랜치 최신 상태를 띄운다. 대표 직접 확인용. */
   async preview(projectId: string, ticketId: string | null): Promise<PreviewInfo> {
@@ -704,10 +721,11 @@ export class Orchestrator {
     });
     if (outcome?.timedOut) return this.finishRun(fresh, { failure: 'timeout', detail: tr('실행 시간 초과', 'Run timed out') });
     if (!report.ok) {
+      // CLI가 오류로 끝났으면(최종 응답이 오류 메시지) 형식 오류가 아니라 그 오류로 분류한다(실측: 토큰 갱신 경합).
       const cls: FailureClass =
         report.reason === 'nonce_mismatch'
           ? 'nonce_mismatch'
-          : parsed.finalText
+          : parsed.finalText && !parsed.errorText
             ? 'schema_invalid'
             : adapter.classifyFailure({ exitCode: run.exitCode, timedOut: false, stderr, finalText: parsed.errorText ?? parsed.finalText });
       return this.finishRun(fresh, {
@@ -797,7 +815,8 @@ ${failure.detail.slice(0, 400)}`,
     // 검수 실행
     if (ticket.status !== 'in_review') return;
     if (failure) {
-      const n = (this.reviewFailures.get(ticket.id) ?? 0) + 1;
+      // 일시적 오류(토큰 갱신 경합 등)는 검수자 탓이 아니므로 실패 횟수에 넣지 않는다.
+      const n = (this.reviewFailures.get(ticket.id) ?? 0) + (failure.failure === 'transient' ? 0 : 1);
       this.reviewFailures.set(ticket.id, n);
       if (n >= 2 || failure.failure === 'usage_limit' || failure.failure === 'auth_required' || failure.failure === 'model_unsupported') {
         this.apply(ticket.id, {
@@ -1149,6 +1168,14 @@ ${failure.detail.slice(0, 400)}`,
         changedPaths: sub.changedPaths,
         mode: project.integrationMode,
         summary: sub.summary,
+        // 대표가 구현자 말만 보고 승인하지 않게: 이번 제출물을 본 검수자의 의견(검수를 건너뛰었으면 없음).
+        review: (() => {
+          const rv = this.records
+            .runsForTicket(t.id)
+            .filter((r) => r.kind === 'review' && r.status === 'succeeded' && r.round === t.round)
+            .at(-1);
+          return rv ? { by: rv.employeeId, summary: rv.summary } : null;
+        })(),
       },
       requestedBy: 'orchestrator',
     });
@@ -1160,6 +1187,17 @@ ${failure.detail.slice(0, 400)}`,
     approvalId: string,
     decision: 'approved' | 'rejected',
     opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[] } = {},
+  ): Ticket {
+    const t = this.decideIntegrationCore(approvalId, decision, opts);
+    // 확인이 끝났으니 띄워 둔 미리보기를 끈다(반려 뒤 새 제출물이 오면 새로 띄운다).
+    this.stopTicketPreview(t);
+    return t;
+  }
+
+  private decideIntegrationCore(
+    approvalId: string,
+    decision: 'approved' | 'rejected',
+    opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[] },
   ): Ticket {
     const a = this.records.approval(approvalId);
     if (!a || a.kind !== 'integrate' || a.state !== 'pending' || !a.ticketId)
@@ -1391,6 +1429,8 @@ ${failure.detail.slice(0, 400)}`,
         tool: d.tool,
         reason: verdict.reason ?? null,
         summary: a.summary,
+        // 대표가 나중에 무엇이 허용됐는지 볼 수 있게 실제 명령(앞부분)을 남긴다.
+        command: commandOf(d.input)?.slice(0, 300) ?? null,
       });
       this.changed('approval', a.ticketId ?? a.id);
     }
@@ -1647,6 +1687,19 @@ ${failure.detail.slice(0, 400)}`,
   }
 
   /** 대표 요청을 비서실장에게 보낸다. 비서실장은 읽기 전용으로 저장소를 보고 티켓 초안만 낸다. */
+  /** 실패한 초안 요청을 같은 내용으로 다시 보낸다(예전 요청은 버린 것으로 남긴다). */
+  async retryRequest(requestId: string): Promise<CeoRequest> {
+    const old = this.records.request(requestId);
+    if (!old || old.status !== 'failed')
+      throw new DomainError(tr('다시 시도할 수 있는 요청이 아닙니다.', 'This request cannot be retried.'));
+    this.records.saveRequest({ ...old, status: 'dismissed' });
+    const next = await this.submitRequest(old.projectId, old.text);
+    const saved = { ...this.records.request(next.id)!, retriedFrom: old.id };
+    this.records.saveRequest(saved);
+    this.changed('request', next.id);
+    return saved;
+  }
+
   async submitRequest(projectId: string, text: string): Promise<CeoRequest> {
     const project = this.company.requireProject(projectId);
     const chief = this.chiefOfStaff();
@@ -1713,6 +1766,7 @@ ${failure.detail.slice(0, 400)}`,
     stderr: string,
   ): Promise<void> {
     const req = this.records.request(run.ticketId);
+    const transient = !outcome?.timedOut && isTransient(finalText);
     const parsed = outcome?.timedOut
       ? ({ ok: false, reason: 'timeout', detail: tr('시간 초과', 'Timed out') } as const)
       : parseDrafts(finalText, run.nonce);
@@ -1729,13 +1783,56 @@ ${failure.detail.slice(0, 400)}`,
         summary: parsed.ok ? parsed.report.summary : '',
         drafts: parsed.ok ? parsed.report.tickets : [],
         questions: parsed.ok ? parsed.report.questions : [],
-        error: parsed.ok ? null : run.reportError,
+        proposals: parsed.ok ? parsed.report.proposals : [],
+        answers: parsed.ok ? parsed.report.questions.map(() => null) : [],
+        verifySuggestions: parsed.ok ? parsed.report.verifySuggestions : [],
+        error: parsed.ok
+          ? null
+          : transient && !req.retriedFrom
+            ? tr(
+                `일시적인 오류라 1분 뒤 자동으로 다시 시도합니다: ${String(finalText).slice(0, 200)}`,
+                `Transient error; retrying automatically in a minute: ${String(finalText).slice(0, 200)}`,
+              )
+            : run.reportError,
       });
+      // 일시적 오류(실측: Claude 로그인 토큰 갱신 경합)는 한 번 자동으로 다시 요청한다.
+      if (transient && !req.retriedFrom) setTimeout(() => void this.retryRequest(req.id).catch(() => {}), 60_000).unref?.();
       this.company.store.appendEvent(run.employeeId, parsed.ok ? 'request.drafted' : 'request.failed', req.id, {
         count: parsed.ok ? parsed.report.tickets.length : 0,
       });
     }
     this.changed('request', run.ticketId);
+  }
+
+  /**
+   * 비서실장 질문에 답한다. answer가 null이면 비서실장 제안을 그대로 받아들인다.
+   * 답은 프로젝트의 현재 결정으로도 기록되어 이후 모든 직원(검수자 포함)에게 전달된다.
+   */
+  answerQuestions(requestId: string, items: { index: number; answer: string | null }[]): CeoRequest {
+    const req = this.records.request(requestId);
+    if (!req) throw new DomainError(tr('요청이 없습니다.', 'Request not found.'));
+    const answers = req.questions.map((_, i) => req.answers?.[i] ?? null);
+    const lines: string[] = [];
+    for (const it of items) {
+      const q = req.questions[it.index];
+      if (q === undefined || answers[it.index]) continue;
+      const a = (it.answer ?? req.proposals?.[it.index] ?? '').trim();
+      if (!a)
+        throw new DomainError(
+          tr(
+            `질문 ${it.index + 1}에는 제안된 답이 없습니다. 직접 답해 주세요.`,
+            `Question ${it.index + 1} has no proposal. Answer it yourself.`,
+          ),
+        );
+      answers[it.index] = a;
+      lines.push(`${q} → ${a}`);
+    }
+    if (!lines.length) return req;
+    this.records.recordDecision(req.projectId, lines.join('\n'), [req.id]);
+    const next = { ...req, answers };
+    this.records.saveRequest(next);
+    this.changed('request', requestId);
+    return next;
   }
 
   /** 대표가 초안을 확정한다(고친 초안을 넘길 수 있음). 티켓은 대표 명의로 만들어진다. */
@@ -1816,6 +1913,27 @@ ${failure.detail.slice(0, 400)}`,
   }
 
   /** 검수가 막혔을 때(회차 초과 등) 대표가 검수를 건너뛰고 승인 단계로 보낸다. 시스템 검증을 통과한 제출물만. */
+  /**
+   * 다시 검증: 검증 명령을 바꾼 뒤 등, 직원에게 한 회차 더 시키지 않고(토큰 없이) 마지막 제출물을 검증·검수부터 다시 한다.
+   * 직원이 이미 다음 회차 작업을 시작했으면 거부한다.
+   */
+  reverify(ticketId: string): Ticket {
+    const t = this.company.requireTicket(ticketId);
+    if (this.records.runsByStatus('running').some((r) => r.ticketId === t.id && r.kind === 'work'))
+      throw new DomainError(
+        tr(
+          '직원이 이미 다음 회차 작업을 시작했습니다. 끝난 뒤 검증됩니다.',
+          'The employee already started the next round; it will be verified when done.',
+        ),
+      );
+    const sub = this.records
+      .runsForTicket(t.id)
+      .filter((r) => r.kind === 'work' && r.status === 'succeeded' && r.headSha)
+      .at(-1);
+    if (!sub) throw new DomainError(tr('다시 검증할 제출물이 없습니다.', 'There is no submission to verify.'));
+    return this.apply(t.id, { type: 'ceo_reverify', round: sub.round }, CEO);
+  }
+
   skipReview(ticketId: string): Ticket {
     const t = this.company.requireTicket(ticketId);
     const project = this.company.requireProject(t.projectId);
@@ -1865,7 +1983,9 @@ ${failure.detail.slice(0, 400)}`,
   }
 
   cancel(ticketId: string, reason: string): Ticket {
-    return this.apply(ticketId, { type: 'cancel', reason }, CEO);
+    const t = this.apply(ticketId, { type: 'cancel', reason }, CEO);
+    this.stopTicketPreview(t);
+    return t;
   }
 
   assign(ticketId: string, assigneeId: string, reviewerId: string): Ticket {
