@@ -14,7 +14,8 @@ import type { ScreenScenario } from '../agents/report.ts';
 
 /** 사진 상한: 전체와 확인 순서 하나당. 실측(2026-09-30): 전체 12장이 앞 순서에서 다 쓰여 뒤 요구사항(R4)이 한 장도 못 찍혔다. */
 const MAX_SHOTS = 24;
-const MAX_SHOTS_PER_SCENARIO = 5;
+export const MAX_SHOTS_PER_SCENARIO = 5;
+export const SCENARIO_MIN_MS = 90_000;
 /** 녹화: 초당 몇 장, 조작 뒤 최대 몇 ms 더 찍는지, 순서 하나에 최대 몇 장 */
 const CLIP_FPS = 4;
 const CLIP_SETTLE_MAX_MS = 3000;
@@ -386,7 +387,8 @@ export async function captureScreens(
       }
     };
     // 순서마다 시간과 사진을 나눠 준다: 앞 순서가 다 써 버려 뒤 순서가 빠지지 않게.
-    const perScenarioMs = Math.max(30_000, Math.floor(240_000 / Math.max(1, scenarios.length)));
+    // 실측(2026-09-30): 순서당 60초로는 보스전(여러 번 공격 + 녹화)이 처치 장면까지 가지 못했다. 최소 90초.
+    const perScenarioMs = Math.max(SCENARIO_MIN_MS, Math.floor(360_000 / Math.max(1, scenarios.length)));
     for (const sc of scenarios) {
       if (shots.length >= MAX_SHOTS) break;
       const deadline = Date.now() + perScenarioMs;
