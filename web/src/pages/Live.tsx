@@ -71,7 +71,13 @@ export function Live({ runId }: { runId: string | null }) {
       const next: Record<string, { at: string | null; line: string; busy?: string | null }> = {};
       for (const r of running) {
         const a = await api<Activity>(`runs/${r.id}/activity`).catch(() => null);
-        if (a) next[r.id] = { at: a.lastOutputAt, busy: a.busy, line: [...a.items].reverse().find((i) => i.text)?.text ?? '' };
+        if (a)
+          next[r.id] = {
+            at: a.lastOutputAt,
+            busy: a.busy,
+            line: [...a.items].reverse().find((i) => i.text && i.kind !== 'output')?.text ?? '',
+          };
+        // 카드 한 줄은 명령 결과(예: "Exit code 1")가 아니라 직원이 한 말·행동으로: 중간 결과가 오류처럼 보였다(실측).
       }
       if (live) setLast(next);
     };

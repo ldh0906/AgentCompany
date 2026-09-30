@@ -1142,12 +1142,31 @@ export class Orchestrator {
     const used = ticketTokens(this.records, t.id);
     const budget = tokenBudget(t);
     if (used < budget) return;
+    // 대표가 판단할 수 있게: 어디까지 왔는지, 실제 비용은 얼마인지(대부분 캐시 재사용이면 토큰 수보다 훨씬 싸다).
+    // 실측(2026-09-30): 1225만 토큰 중 97%가 캐시 재사용이었고 비용은 약 $6.4였다. 작업은 이미 제출돼 검사·검수만 남아 있었다.
+    const runs = this.records.runsForTicket(t.id);
+    const cost = runs.reduce((a, r) => a + (r.usage?.costUsd ?? 0), 0);
+    const cached = runs.reduce((a, r) => a + (r.usage?.cacheRead ?? 0), 0);
+    const submitted = ['verifying', 'in_review', 'awaiting_approval'].includes(t.status);
     this.apply(t.id, {
       type: 'hold',
       reason: 'needs_decision',
       note: tr(
-        `토큰 예산을 넘었습니다: ${Math.round(used / 1e4)}만 / 예산 ${Math.round(budget / 1e4)}만. 예산을 늘려 계속하거나 취소하세요.`,
-        `Token budget exceeded: ${Math.round(used / 1e3)}k of ${Math.round(budget / 1e3)}k. Raise the budget to continue, or cancel.`,
+        [
+          `토큰 예산을 넘었습니다: ${Math.round(used / 1e4)}만 / 예산 ${Math.round(budget / 1e4)}만.`,
+          cached > used / 2
+            ? `그중 ${Math.round((cached / used) * 100)}%는 캐시 재사용이라 실제 비용은 더 작습니다${cost ? ` (추정 $${cost.toFixed(1)})` : ''}.`
+            : cost
+              ? `추정 비용 $${cost.toFixed(1)}.`
+              : '',
+          submitted
+            ? '작업은 이미 끝나 제출되었습니다. 남은 것은 자동 검사와 검수뿐입니다(보통 10~20만 토큰).'
+            : '작업이 아직 끝나지 않았습니다.',
+          '예산을 늘려 계속하거나 취소하세요.',
+        ]
+          .filter(Boolean)
+          .join(' '),
+        `Token budget exceeded: ${Math.round(used / 1e3)}k of ${Math.round(budget / 1e3)}k${cost ? ` (est. $${cost.toFixed(1)})` : ''}.${submitted ? ' The work is already submitted; only checks and review remain.' : ''} Raise the budget to continue, or cancel.`,
       ),
     });
   }

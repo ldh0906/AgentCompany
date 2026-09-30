@@ -12,7 +12,9 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ScreenScenario } from '../agents/report.ts';
 
-const MAX_SHOTS = 12;
+/** 사진 상한: 전체와 확인 순서 하나당. 실측(2026-09-30): 전체 12장이 앞 순서에서 다 쓰여 뒤 요구사항(R4)이 한 장도 못 찍혔다. */
+const MAX_SHOTS = 24;
+const MAX_SHOTS_PER_SCENARIO = 5;
 /** 녹화: 초당 몇 장, 조작 뒤 최대 몇 ms 더 찍는지, 순서 하나에 최대 몇 장 */
 const CLIP_FPS = 4;
 const CLIP_SETTLE_MAX_MS = 3000;
@@ -383,9 +385,12 @@ export async function captureScreens(
         clip.frames.push(file);
       }
     };
-    const deadline = Date.now() + 120_000;
+    // 순서마다 시간과 사진을 나눠 준다: 앞 순서가 다 써 버려 뒤 순서가 빠지지 않게.
+    const perScenarioMs = Math.max(30_000, Math.floor(240_000 / Math.max(1, scenarios.length)));
     for (const sc of scenarios) {
-      if (shots.length >= MAX_SHOTS || Date.now() > deadline) break;
+      if (shots.length >= MAX_SHOTS) break;
+      const deadline = Date.now() + perScenarioMs;
+      const shotsBefore = shots.length;
       // 각 순서는 깨끗한 상태에서: 저장소를 비우고 새로 연다.
       await cdp.send('Storage.clearDataForOrigin', {
         origin: new URL(url).origin,
@@ -395,7 +400,10 @@ export async function captureScreens(
       const clip: ScreenClip = { label: sc.requirementId, fps: CLIP_FPS, frames: [] };
       clips.push(clip);
       for (const st of sc.steps) {
-        if (shots.length >= MAX_SHOTS || Date.now() > deadline) break;
+        if (shots.length >= MAX_SHOTS || shots.length - shotsBefore >= MAX_SHOTS_PER_SCENARIO || Date.now() > deadline) {
+          errors.push(`[${sc.requirementId}] 사진·시간 상한에 닿아 뒤 단계를 건너뜀`);
+          break;
+        }
         const fail = (why: string) => errors.push(`[${sc.requirementId}] ${why}`);
         if (st.do === 'key')
           await recorded(clip, async () => {
