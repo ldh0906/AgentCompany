@@ -70,7 +70,9 @@ ${
   Changes outside this scope are detected automatically and your whole submission is quarantined.
 - Protected paths must not be touched: ${i.project.protectedPaths.map((g) => `\`${g}\``).join(', ') || '(none)'}.
 - Do NOT run git commit, git push, git branch, or change git refs. The system commits your working tree for you.
-- Do NOT decide game rules, product numbers, or anything marked undecided. Put such items in "questions" and set status "needs_decision".
+- Do not override the CEO's decisions or invent product rules the ticket does not ask for. When the ticket itself asks you to define values or content (for example balance numbers or item lists), propose sensible values, implement them, and write down the reasoning; you are not blocked by the absence of a decision. Use status "needs_decision" only when you truly cannot proceed without the CEO, and put those items in "questions".
+- Requirements that need "human_attest" (the CEO playing or looking at the result) are checked by the CEO at approval. Do not stop for them: finish the work and submit with status "done", noting in "notes" how the CEO can check it.
+- Problems you notice outside your write scope (another ticket's area) are not blockers: finish your part, submit "done", and describe the problem in "summary" so it can become a follow-up ticket.
 - Saying "done" does not complete the ticket. The system runs its own verification and an independent reviewer checks your work.
 - Never read credential or auth files (~/.claude, ~/.codex, tokens, .env secrets).
 

@@ -29,7 +29,7 @@ import { commandOf, judgeToolRequest } from '../core/guard.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
 import { locateExecutable } from '../runner/locate.ts';
 import { abandonAndTerminate, isSameProcessAlive, readExitRecord, reapGroup, startProcess, waitForExit } from '../runner/process.ts';
-import { git } from '../workspace/git.ts';
+import { AGENT_IDENTITY, git } from '../workspace/git.ts';
 import {
   changedPaths,
   checkScope,
@@ -50,7 +50,7 @@ import {
 import { Company, DomainError } from './company.ts';
 import { newId, Records, sha256, type CeoRequest, type RunRecord } from './records.ts';
 import { appProfileDir } from './doctor.ts';
-import { dependencySetup } from './verify-setup.ts';
+import { dependencySetup, installDependencies } from './verify-setup.ts';
 import { PreviewManager, type PreviewInfo } from './preview.ts';
 
 const ORCH: Actor = { kind: 'orchestrator' };
@@ -167,8 +167,18 @@ export class Orchestrator {
         const sub = this.records.latestSubmission(t);
         sha = sub?.headSha ?? null;
         if (!sha) throw new DomainError(tr('이 업무에는 아직 실행해 볼 제출물이 없습니다.', 'This ticket has no submission to run yet.'));
+        // 제출물만 띄우면 그사이 병합된 다른 업무가 빠진다(실측: T-5 미리보기에 T-11 맵이 없음).
+        // 최신 기준 브랜치에 제출물을 합친 모습을 띄우고, 충돌하면 제출물만 띄운다.
+        const base = await this.syncMirrorRecorded(project, paths);
+        const dir = await ensureDetachedWorktree(paths, 'preview', ticketId, base);
+        const merged = await git([...AGENT_IDENTITY, 'merge', '--no-edit', '--no-ff', sha], dir, { allowFail: true });
+        if (merged.code !== 0) {
+          await git(['merge', '--abort'], dir, { allowFail: true });
+          return { sha, dir: await ensureDetachedWorktree(paths, 'preview', ticketId, sha) };
+        }
+        return { sha, dir };
       } else sha = await this.syncMirrorRecorded(project, paths);
-      return { sha, dir: await ensureDetachedWorktree(paths, 'preview', ticketId ?? 'base', sha) };
+      return { sha, dir: await ensureDetachedWorktree(paths, 'preview', 'base', sha) };
     });
     return this.previews.start({ projectId, ticketId, sha, dir });
   }
@@ -529,31 +539,44 @@ export class Orchestrator {
       };
     });
 
-    const nonce = randomBytes(6).toString('hex');
-    const feedback = this.lastFeedback(next);
-    const prompt = buildWorkPrompt({
-      employee,
-      owner: next.ownerId ? this.company.employees().find((e) => e.id === next.ownerId) : null,
-      project,
-      ticket: next,
-      nonce,
-      decisions: this.records.decisions(project.id, 'current'),
-      feedback,
-      language: this.opts.language,
-    });
-    await this.launch({
-      ticket: next,
-      employee,
-      kind: 'work',
-      cwd: wt.path,
-      prompt,
-      nonce,
-      accessLevel: employee.accessLevel,
-      baseSha: wt.baseSha,
-      refsBefore,
-      originBefore,
-      originRefsBefore,
-      moveSeqBefore,
+    const go = async () => {
+      const nonce = randomBytes(6).toString('hex');
+      const feedback = this.lastFeedback(next);
+      const prompt = buildWorkPrompt({
+        employee,
+        owner: next.ownerId ? this.company.employees().find((e) => e.id === next.ownerId) : null,
+        project,
+        ticket: next,
+        nonce,
+        decisions: this.records.decisions(project.id, 'current'),
+        feedback,
+        language: this.opts.language,
+      });
+      await this.launch({
+        ticket: next,
+        employee,
+        kind: 'work',
+        cwd: wt.path,
+        prompt,
+        nonce,
+        accessLevel: employee.accessLevel,
+        baseSha: wt.baseSha,
+        refsBefore,
+        originBefore,
+        originRefsBefore,
+        moveSeqBefore,
+      });
+    };
+    // 작업공간에 의존성을 미리 깐다(실측: 직원이 "vitest 미설치로 테스트 실행 불가"). 설치는 몇 분 걸릴 수 있어
+    // 다른 업무를 막지 않게 따로 돌린다. node_modules가 git에서 무시될 때만: 아니면 제출 커밋에 통째로 들어간다.
+    const needsInstall =
+      dependencySetup(wt.path, []) !== null && (await git(['check-ignore', '-q', 'node_modules'], wt.path, { allowFail: true })).code === 0;
+    if (!needsInstall) return go();
+    this.runBusy(t.id, async () => {
+      const inst = await installDependencies(wt.path);
+      if (inst.ran && !inst.ok)
+        this.company.store.appendEvent('orchestrator', 'ticket.setup_failed', t.id, { output: inst.output.slice(-500) });
+      await go();
     });
   }
 
@@ -806,6 +829,8 @@ ${failure.detail.slice(0, 400)}`,
           ),
           hold: { reason: 'needs_decision', note: [wr.summary, ...wr.questions].join('\n').slice(0, 2000) },
         });
+        // 대표가 업무 화면에서 바로 답할 수 있게 질문을 따로 남긴다.
+        this.company.store.setSetting(`ticket_questions:${ticket.id}`, JSON.stringify(wr.questions));
         return;
       }
       this.apply(ticket.id, { type: 'submit' });
@@ -1957,6 +1982,28 @@ ${failure.detail.slice(0, 400)}`,
       { type: 'ceo_skip_review', reason: tr('대표가 검수를 건너뛰었습니다.', 'The CEO skipped review.'), round: sub.round },
       CEO,
     );
+  }
+
+  /**
+   * 직원이 "대표 결정 필요"로 멈췄을 때: 대표가 답하거나(answer) 직원 판단에 맡기고(null) 바로 재개한다.
+   * 답은 프로젝트의 현재 결정으로 기록되어 다음 실행부터 모든 직원에게 전달된다.
+   */
+  answerTicket(ticketId: string, answer: string | null): Ticket {
+    const t = this.company.requireTicket(ticketId);
+    if (t.hold?.reason !== 'needs_decision')
+      throw new DomainError(tr('대표 결정을 기다리는 업무가 아닙니다.', 'This ticket is not waiting for a decision.'));
+    const raw = this.company.store.getSetting(`ticket_questions:${t.id}`);
+    const questions: string[] = raw ? (JSON.parse(raw) as string[]) : [];
+    const asked = questions.length ? questions.map((q) => `- ${q}`).join('\n') : t.hold.note.slice(0, 1000);
+    const text = answer?.trim()
+      ? tr(`${t.id} 질문에 대한 대표 답:\n${asked}\n→ ${answer.trim()}`, `CEO answer to ${t.id}:\n${asked}\n→ ${answer.trim()}`)
+      : tr(
+          `${t.id}: 아래 질문은 담당 직원이 합리적인 값으로 정하고, 정한 값과 근거를 문서에 남긴다.\n${asked}`,
+          `${t.id}: the assignee decides these with sensible values and documents the values and reasoning.\n${asked}`,
+        );
+    this.records.recordDecision(t.projectId, text, [t.id]);
+    this.company.store.setSetting(`ticket_questions:${t.id}`, '');
+    return this.releaseHold(t.id);
   }
 
   releaseHold(ticketId: string): Ticket {

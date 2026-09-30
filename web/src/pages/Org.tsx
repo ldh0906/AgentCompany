@@ -471,9 +471,30 @@ function QuickTeamModal({ onClose }: { onClose: () => void }) {
   const create = () =>
     run(
       async () => {
+        // 채용 폼과 같게: CLI마다 쓸 수 있는 첫 모델의 정확한 이름과 기본 effort, 흔한 읽기 명령 허용 목록.
+        const pick: Record<string, { id: string; defaultEffort?: string } | undefined> = {};
+        for (const cli of new Set(plan.map((p) => p.cli))) {
+          const list = await api<{ models: { id: string; defaultEffort?: string; unavailable?: string }[] }>(`models?cli=${cli}`).catch(
+            () => ({ models: [] }),
+          );
+          pick[cli] = list.models.find((m) => !m.unavailable);
+        }
         for (const p of plan) {
           const e = await api<Employee>('employees', {
-            body: { name: p.name, cli: p.cli, roles: p.roles, rank: p.rank, accessLevel: 'write-allowlist' },
+            body: {
+              name: p.name,
+              cli: p.cli,
+              model: pick[p.cli]?.id ?? null,
+              effort: pick[p.cli]?.defaultEffort ?? null,
+              roles: p.roles,
+              rank: p.rank,
+              accessLevel: 'write-allowlist',
+              allowedCommands: [
+                ['git', 'status'],
+                ['git', 'diff'],
+                ['git', 'log'],
+              ],
+            },
           });
           if ('lead' in p && fullAuto) await api(`employees/${e.id}/access`, { body: { accessLevel: 'full-auto', confirm: 'full-auto' } });
         }

@@ -27,6 +27,7 @@ export function TicketPage({ id }: { id: string }) {
   const [diff, setDiff] = useState<{ diff: string; changedPaths: string[] } | null>(null);
   const [log, setLog] = useState<{ id: string; text: string; reportError: string | null } | null>(null);
   const [assigning, setAssigning] = useState(false);
+  const [answer, setAnswer] = useState('');
   const { busy, run } = useAction();
   const ko = lang === 'ko';
 
@@ -147,6 +148,45 @@ export function TicketPage({ id }: { id: string }) {
             <Icon name="pause" size={14} /> {holdLabel(tk.hold.reason)}
           </b>
           <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{tk.hold.note}</div>
+          {tk.hold.reason === 'needs_decision' && tk.status === 'assigned' && (
+            <div className="form" style={{ marginTop: 10 }}>
+              <textarea
+                value={answer}
+                onChange={(e) => setAnswer(e.target.value)}
+                placeholder={
+                  ko
+                    ? '직원의 질문에 답하세요. 답은 결정으로 기록되어 모든 직원에게 전달됩니다.'
+                    : 'Answer the questions. Recorded as a decision for everyone.'
+                }
+              />
+              <div className="row" style={{ justifyContent: 'flex-end' }}>
+                <button
+                  className="btn"
+                  disabled={busy}
+                  onClick={() =>
+                    run(
+                      () => api(`tickets/${tk.id}/answer`, { body: {} }),
+                      ko ? '직원 판단에 맡기고 재개했습니다.' : 'Left to the employee; resumed.',
+                    ).then(reload)
+                  }
+                >
+                  {ko ? '직원 판단에 맡기고 재개' : 'Let the employee decide'}
+                </button>
+                <button
+                  className="btn primary"
+                  disabled={busy || !answer.trim()}
+                  onClick={() =>
+                    run(
+                      () => api(`tickets/${tk.id}/answer`, { body: { answer } }),
+                      ko ? '답을 기록하고 재개했습니다.' : 'Answered; resumed.',
+                    ).then((ok) => ok && (setAnswer(''), reload()))
+                  }
+                >
+                  {ko ? '답하고 재개' : 'Answer and resume'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
       {pending.length > 0 && (

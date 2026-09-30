@@ -1,6 +1,7 @@
 // 프로젝트 등록·업무 작성 도우미: 폴더 찾아보기와 저장소 자동 분석(읽기만), 새 프로젝트용 빈 저장소 만들기.
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { AGENT_IDENTITY, git } from '../workspace/git.ts';
 import { tr } from '../core/i18n.ts';
@@ -24,7 +25,8 @@ export async function listDirs(dir: string): Promise<DirListing> {
           .map((l) => `${l}:\\`)
           .filter((r) => existsSync(r))
       : ['/'];
-  const target = dir ? path.resolve(dir) : roots[0]!;
+  // 시작 위치가 없으면 드라이브 루트(시스템 폴더투성이) 대신 사용자 홈에서 연다.
+  const target = dir ? path.resolve(dir) : homedir();
   const entries = await readdir(target, { withFileTypes: true });
   const dirs = entries
     .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !SKIP.has(e.name))
