@@ -42,6 +42,11 @@ const MIGRATIONS: string[] = [
   `
   CREATE TABLE requests (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL);
   `,
+  `
+  CREATE TABLE channels (id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at TEXT NOT NULL);
+  CREATE TABLE chat (id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL);
+  CREATE INDEX chat_channel ON chat(channel_id);
+  `,
 ];
 
 export const GENESIS_HASH = '0'.repeat(64);
@@ -49,7 +54,18 @@ export const GENESIS_HASH = '0'.repeat(64);
 type Row = Record<string, unknown>;
 
 export type EntityTable =
-  'projects' | 'employees' | 'tickets' | 'runs' | 'approvals' | 'evidence' | 'claims' | 'decisions' | 'messages' | 'requests';
+  | 'projects'
+  | 'employees'
+  | 'tickets'
+  | 'runs'
+  | 'approvals'
+  | 'evidence'
+  | 'claims'
+  | 'decisions'
+  | 'messages'
+  | 'requests'
+  | 'channels'
+  | 'chat';
 
 export class Store {
   readonly db: DatabaseSync;
@@ -185,8 +201,17 @@ export class Store {
       // 실행 중에 끝부분이 지워졌을 수도 있다: 추가할 때마다 기존 체크포인트와 DB가 맞는지 확인하고, 어긋나면 영구 동결.
       if (!this.checkpointFrozen && !this.pendingCheckpoint && !this.checkpointMatchesDb()) this.checkpointFrozen = true;
       if (!this.checkpointFrozen) this.pendingCheckpoint = { seq, hash };
-      return { seq, ts, actor, type, entityId, payload, prevHash, hash };
+      const event = { seq, ts, actor, type, entityId, payload, prevHash, hash };
+      // 구독자(대화 투영 등)는 같은 트랜잭션 안에서 돈다: 이벤트가 되돌려지면 투영도 함께 되돌려진다.
+      for (const fn of this.eventListeners) fn(event);
+      return event;
     });
+  }
+
+  private eventListeners: ((e: DomainEvent) => void)[] = [];
+  /** 이벤트가 기록될 때마다 부른다. 구독자는 이벤트를 새로 쓰면 안 된다(재귀). */
+  onEvent(fn: (e: DomainEvent) => void): void {
+    this.eventListeners.push(fn);
   }
 
   events(entityId?: string, limit = 500): DomainEvent[] {

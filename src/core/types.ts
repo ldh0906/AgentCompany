@@ -189,7 +189,7 @@ export interface Ticket {
 
 // ---- 실행 ----
 
-export type RunKind = 'work' | 'review' | 'analysis' | 'synthesis';
+export type RunKind = 'work' | 'review' | 'analysis' | 'synthesis' | 'chat';
 
 export type RunStatus = 'prepared' | 'running' | 'exited' | 'succeeded' | 'failed' | 'orphaned';
 

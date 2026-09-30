@@ -8,7 +8,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { adapterFor } from '../adapters/index.ts';
 import { isTransient } from '../adapters/types.ts';
-import { buildDraftPrompt, buildReviewPrompt, buildWorkPrompt } from '../agents/prompt.ts';
+import { buildChatPrompt, buildDraftPrompt, buildReviewPrompt, buildWorkPrompt } from '../agents/prompt.ts';
 import {
   blindPrompt,
   crossPrompt,
@@ -19,7 +19,8 @@ import {
   synthesize,
   type DeliberationPhase,
 } from '../agents/deliberation.ts';
-import { parseDrafts, parseReport, type TicketDraft, type WorkReport } from '../agents/report.ts';
+import { parseChatReply, parseDrafts, parseReport, type TicketDraft, type WorkReport } from '../agents/report.ts';
+import { Chat, ticketChannelId, type ChatMessage } from './chat.ts';
 import { writeDecision } from '../approvals/file-queue.ts';
 import type { Actor } from '../core/ticket-machine.ts';
 import type { Claim, Employee, Evidence, FailureClass, Project, Ticket, TicketStatus } from '../core/types.ts';
@@ -87,6 +88,8 @@ const LOCK_HOLDING: TicketStatus[] = [
 export class Orchestrator {
   readonly company: Company;
   readonly records: Records;
+  /** 사내 대화(업무방·1:1·그룹방). 직원끼리의 보고·검수는 이벤트에서 자동으로 옮겨진다. */
+  readonly chat: Chat;
   private readonly opts: Required<Omit<OrchestratorOptions, 'onChange'>> & Pick<OrchestratorOptions, 'onChange'>;
   private readonly busy = new Set<string>(); // 티켓 단위 비동기 작업 중
   private readonly liveRuns = new Map<string, Promise<void>>();
@@ -97,6 +100,11 @@ export class Orchestrator {
   constructor(company: Company, opts: OrchestratorOptions) {
     this.company = company;
     this.records = new Records(company.store);
+    this.chat = new Chat(company.store, {
+      employees: () => company.employees(),
+      ticket: (id) => company.store.get<Ticket>('tickets', id),
+    });
+    this.chat.onMessage = (m) => this.changed('chat', m.channelId);
     this.opts = {
       dataDir: opts.dataDir,
       language: opts.language ?? 'ko',
@@ -551,6 +559,10 @@ export class Orchestrator {
         decisions: this.records.decisions(project.id, 'current'),
         feedback,
         language: this.opts.language,
+        colleagues: this.company
+          .activeEmployees()
+          .filter((e) => e.id !== employee.id)
+          .map((e) => `"${e.name}" (${e.roles.join('/')})`),
       });
       await this.launch({
         ticket: next,
@@ -581,12 +593,29 @@ export class Orchestrator {
   }
 
   private lastFeedback(t: Ticket): string | null {
-    if (t.round <= 1) return null;
-    const ev = this.company.store
-      .events(t.id)
-      .filter((e) => e.type === 'ticket.changes_requested')
-      .at(-1);
-    return ev ? String((ev.payload as { reason?: string }).reason ?? '') : null;
+    const ev =
+      t.round <= 1
+        ? null
+        : this.company.store
+            .events(t.id)
+            .filter((e) => e.type === 'ticket.changes_requested')
+            .at(-1);
+    const review = ev ? String((ev.payload as { reason?: string }).reason ?? '') : null;
+    // 대표가 업무방에 남긴 말(지난 작업 시작 이후)도 다음 작업 지시에 넣는다.
+    const since =
+      this.records
+        .runsForTicket(t.id)
+        .filter((r) => r.kind === 'work')
+        .at(-1)?.startedAt ?? '';
+    const notes = this.chat
+      .messages(ticketChannelId(t.id), 200)
+      .filter((m) => m.author === 'ceo' && (m.kind === 'chat' || m.kind === 'steer') && m.createdAt > since)
+      .map((m) => `- ${m.text}`);
+    const parts = [
+      review,
+      notes.length ? tr(`대표가 업무방에 남긴 말:\n${notes.join('\n')}`, `CEO notes in the ticket room:\n${notes.join('\n')}`) : null,
+    ].filter((x): x is string => Boolean(x));
+    return parts.length ? parts.join('\n\n') : null;
   }
 
   private profileEnv(employee: Employee): Record<string, string> {
@@ -597,7 +626,7 @@ export class Orchestrator {
   private async launch(p: {
     ticket: Pick<Ticket, 'id' | 'round' | 'budget'>;
     employee: Employee;
-    kind: 'work' | 'review' | 'analysis';
+    kind: 'work' | 'review' | 'analysis' | 'chat';
     cwd: string;
     prompt: string;
     nonce: string;
@@ -609,7 +638,7 @@ export class Orchestrator {
     moveSeqBefore?: number;
     phase?: DeliberationPhase;
     claimIds?: string[];
-  }): Promise<void> {
+  }): Promise<string> {
     const adapter = adapterFor(p.employee.cli);
     const runId = newId('R');
     const runDir = path.join(this.opts.dataDir, 'runs', runId);
@@ -685,7 +714,7 @@ export class Orchestrator {
           `${adapter.displayName} executable (${inv.file}) not found.`,
         ),
       });
-      return;
+      return runId;
     }
     try {
       const proc = await startProcess({
@@ -709,6 +738,7 @@ export class Orchestrator {
     } catch (error) {
       await this.finishRun(run, { failure: 'spawn_failed', detail: String(error) });
     }
+    return runId;
   }
 
   /**
@@ -735,6 +765,7 @@ export class Orchestrator {
         outcome?.timedOut ? tr('시간 초과', 'Timed out') : stderr,
       );
     if (run.kind === 'analysis') return this.finishDrafts(run, parsed.finalText, outcome, stderr);
+    if (run.kind === 'chat') return this.finishChat(run, outcome?.timedOut ? null : parsed.finalText, parsed.errorText ?? stderr);
 
     const ticket = this.company.requireTicket(run.ticketId);
     const report = parseReport(parsed.finalText, {
@@ -765,8 +796,321 @@ export class Orchestrator {
   private async finishRun(run: RunRecord, failure: { failure: FailureClass; detail: string; orphan?: boolean } | null): Promise<void> {
     if (run.kind === 'analysis' && run.phase) return this.finishDeliberationRun(run, null, failure?.detail ?? tr('실패', 'Failed'));
     if (run.kind === 'analysis') return this.finishDrafts(run, null, null, failure?.detail ?? '');
+    if (run.kind === 'chat') return this.finishChat(run, null, failure?.detail ?? '');
     // 실행 결과·이벤트·티켓 전이를 한 트랜잭션으로: 중간에 죽어도 "성공했는데 제출 안 됨" 상태가 남지 않는다.
     this.company.store.transact(() => this.finishRunTx(run, failure));
+    if (!failure && run.kind === 'work' && run.report?.kind === 'work') this.afterWorkReport(run, run.report);
+  }
+
+  // ======================= 사내 대화 =======================
+
+  /** 대화 답장의 연쇄 깊이(대표 메시지 = 0). 직원끼리 끝없이 부르는 것을 막는다. */
+  private readonly chatDepth = new Map<string, number>();
+  /** 답장 중인데 또 불리면 끝난 뒤 한 번 더 답하게 표시한다. */
+  private readonly chatAgain = new Map<string, number>();
+  static readonly CHAT_MAX_DEPTH = 3;
+  static readonly CHAT_MAX_AI_REPLIES_PER_HOUR = 12;
+
+  private nameOf(id: string): string {
+    if (id === 'ceo') return tr('대표', 'CEO');
+    if (id === 'system') return tr('시스템', 'System');
+    return this.company.employees().find((e) => e.id === id)?.name ?? id;
+  }
+
+  private liveWorkRun(ticketId: string, employeeId: string): RunRecord | null {
+    return (
+      this.records
+        .runsForTicket(ticketId)
+        .find((r) => r.kind === 'work' && r.employeeId === employeeId && r.status === 'running' && this.liveRuns.has(r.id)) ?? null
+    );
+  }
+
+  /**
+   * 대표가 대화방에 쓴다. 1:1이면 그 직원이, 다른 방이면 멘션된 직원이 답한다.
+   * 멘션된 직원이 이 업무를 지금 작업 중이면 대화 대신 작업에 지시로 전달한다(Codex는 실행 중에, 나머지는 다음 회차에).
+   */
+  async ceoMessage(channelId: string, text: string): Promise<ChatMessage> {
+    const c = this.chat.channel(channelId);
+    if (!c) throw new DomainError(tr('방을 찾을 수 없습니다.', 'Channel not found.'));
+    if (!text.trim()) throw new DomainError(tr('내용이 비어 있습니다.', 'Message is empty.'));
+    const m = this.chat.post(channelId, 'ceo', text.trim(), 'chat');
+    const responders = c.kind === 'dm' ? c.members.filter((x) => x !== 'ceo') : m.mentions.filter((x) => x !== 'ceo');
+    for (const id of responders) {
+      if (c.ticketId) {
+        const live = this.liveWorkRun(c.ticketId, id);
+        if (live) {
+          await this.deliverSteer(live, text.trim(), channelId);
+          continue;
+        }
+      }
+      await this.dispatchChat(channelId, id, 0, m);
+    }
+    return m;
+  }
+
+  /** 작업 중인 직원에게 지시: Codex는 진행 중인 턴에 끼워 넣고(turn/steer), 나머지 CLI는 다음 회차 지시에 넣는다. */
+  async deliverSteer(run: RunRecord, text: string, channelId: string | null): Promise<'live' | 'next_round'> {
+    const room = channelId ?? (run.ticketId.startsWith('T-') ? this.chat.ensureTicketChannel(run.ticketId)?.id : null);
+    if (run.cli === 'codex' && run.status === 'running') {
+      const dir = path.join(run.runDir, 'steer');
+      await mkdir(dir, { recursive: true });
+      await writeFile(path.join(dir, `${Date.now()}.json`), JSON.stringify({ text }), 'utf8');
+      if (room)
+        this.chat.post(
+          room,
+          'system',
+          tr(
+            `${this.nameOf(run.employeeId)}에게 작업 중 지시로 전달했습니다(다음 단계에서 반영).`,
+            `Sent to ${this.nameOf(run.employeeId)} mid-run (applied at the next step).`,
+          ),
+          'event',
+        );
+      return 'live';
+    }
+    if (room) {
+      if (!channelId) this.chat.post(room, 'ceo', text, 'steer');
+      this.chat.post(
+        room,
+        'system',
+        tr(
+          `${this.nameOf(run.employeeId)}은(는) 작업 중이라 이 말은 다음 회차 지시에 포함됩니다(${run.cli}는 실행 중 지시를 받지 못함).`,
+          `${this.nameOf(run.employeeId)} is working; this goes into the next round's instructions (${run.cli} can't take mid-run input).`,
+        ),
+        'event',
+      );
+    }
+    return 'next_round';
+  }
+
+  /** 실행 화면의 "지시 보내기". */
+  async steerRun(runId: string, text: string): Promise<'live' | 'next_round'> {
+    const run = this.records.run(runId);
+    if (!run || run.status !== 'running') throw new DomainError(tr('진행 중인 실행이 아닙니다.', 'That run is not running.'));
+    if (!text.trim()) throw new DomainError(tr('내용이 비어 있습니다.', 'Message is empty.'));
+    const room = run.ticketId.startsWith('T-') ? this.chat.ensureTicketChannel(run.ticketId)?.id : null;
+    if (room) this.chat.post(room, 'ceo', `@${this.nameOf(run.employeeId)} ${text.trim()}`, 'steer');
+    return this.deliverSteer(run, text.trim(), room ?? null);
+  }
+
+  /** 직원에게 답장을 시킨다(읽기 전용 짧은 실행). 깊이·빈도 제한과 중복 실행 방지를 여기서 한다. */
+  private async dispatchChat(channelId: string, employeeId: string, depth: number, trigger: ChatMessage): Promise<void> {
+    const employee = this.company.employees().find((e) => e.id === employeeId);
+    if (!employee) return;
+    if (!employee.active || employee.removedAt) {
+      this.chat.post(
+        channelId,
+        'system',
+        tr(`${employee.name}은(는) 지금 비활성 상태라 답할 수 없습니다.`, `${employee.name} is inactive.`),
+        'event',
+      );
+      return;
+    }
+    if (depth > Orchestrator.CHAT_MAX_DEPTH) {
+      this.chat.post(
+        channelId,
+        'system',
+        tr(
+          '직원끼리 주고받은 대화가 길어져 여기서 멈춥니다. 이어가려면 대표가 다시 불러 주세요.',
+          'The AI-to-AI thread got long, so it stops here. Mention someone to continue.',
+        ),
+        'event',
+      );
+      return;
+    }
+    const hourAgo = new Date(Date.now() - 3600_000).toISOString();
+    const aiReplies = this.records
+      .runsForTicket(channelId)
+      .filter((r) => r.kind === 'chat' && r.startedAt > hourAgo && (this.chatDepth.get(r.id) ?? 1) > 0).length;
+    if (depth > 0 && aiReplies >= Orchestrator.CHAT_MAX_AI_REPLIES_PER_HOUR) {
+      this.chat.post(
+        channelId,
+        'system',
+        tr(
+          '이 방의 직원 간 대화가 한 시간 한도에 닿았습니다(토큰 절약).',
+          'This room hit its hourly AI-to-AI reply limit (saving tokens).',
+        ),
+        'event',
+      );
+      return;
+    }
+    const busy = this.records
+      .runsForTicket(channelId)
+      .some((r) => r.kind === 'chat' && r.employeeId === employeeId && r.status === 'running');
+    if (busy) {
+      this.chatAgain.set(`${channelId}|${employeeId}`, depth);
+      return;
+    }
+    await this.startChatRun(channelId, employee, depth, trigger);
+  }
+
+  private async startChatRun(channelId: string, employee: Employee, depth: number, trigger: ChatMessage): Promise<void> {
+    const c = this.chat.channel(channelId)!;
+    const ticket = c.ticketId ? this.company.store.get<Ticket>('tickets', c.ticketId) : null;
+    const projectId = c.projectId ?? ticket?.projectId ?? this.company.projects().find((p) => !p.removedAt)?.id ?? null;
+    const project = projectId ? this.company.requireProject(projectId) : null;
+    let cwd = this.opts.dataDir;
+    if (project) {
+      const paths = projectPaths(this.opts.dataDir, project.id);
+      const ticketWt = ticket ? path.join(paths.worktrees, ticket.id) : null;
+      cwd =
+        ticketWt && existsSync(ticketWt)
+          ? ticketWt
+          : await this.withProjectLock(project.id, async () =>
+              ensureDetachedWorktree(paths, 'review', '_chat', await this.syncMirrorRecorded(project, paths)),
+            );
+    }
+    const history = this.chat
+      .messages(channelId, 40)
+      .filter((m) => m.id !== trigger.id)
+      .map((m) => ({ author: this.nameOf(m.author), text: m.kind === 'event' ? `(${m.text})` : m.text, at: m.createdAt }));
+    const nonce = randomBytes(6).toString('hex');
+    const prompt = buildChatPrompt({
+      employee,
+      employees: this.company.employees(),
+      channel: { kind: c.kind, name: c.name, topic: c.topic, memberNames: c.members.map((x) => this.nameOf(x)) },
+      history,
+      trigger: { author: this.nameOf(trigger.author), text: trigger.text },
+      project,
+      ticket,
+      decisions: project ? this.records.decisions(project.id, 'current') : [],
+      nonce,
+      language: this.opts.language,
+      canOpenRoom: depth < Orchestrator.CHAT_MAX_DEPTH,
+      board: this.boardSummary(projectId),
+    });
+    const runId = await this.launch({
+      ticket: { id: channelId, round: 1, budget: { ...DEFAULT_BUDGET, runTimeoutMs: 10 * 60_000 } },
+      employee,
+      kind: 'chat',
+      cwd,
+      prompt,
+      nonce,
+      accessLevel: 'read-only',
+      baseSha: null,
+    });
+    this.chatDepth.set(runId, depth);
+    this.changed('chat', channelId);
+  }
+
+  /** 대화용 업무판 요약: 최근·진행 중 업무의 상태와 담당(한 줄씩). */
+  private boardSummary(projectId: string | null): string {
+    const tickets = this.company.tickets(projectId ?? undefined);
+    const open = tickets.filter((t) => !TERMINAL_STATUSES.includes(t.status));
+    const done = tickets.filter((t) => t.status === 'done').slice(-8);
+    const line = (t: Ticket) =>
+      `${t.id} [${t.status}${t.hold ? `, hold: ${t.hold.reason}` : ''}] r${t.round} ${t.title} — ${tr('담당', 'assignee')} ${this.nameOf(t.assigneeId ?? '-')}, ${tr('검수', 'reviewer')} ${this.nameOf(t.reviewerId ?? '-')}`;
+    return [...open.map(line), ...(done.length ? [tr('최근 완료:', 'Recently done:'), ...done.map(line)] : [])].join('\n');
+  }
+
+  private async finishChat(run: RunRecord, finalText: string | null, errorText: string): Promise<void> {
+    const parsed = parseChatReply(finalText, run.nonce);
+    const failed = !parsed || (isTransient(finalText) && !finalText?.includes(run.nonce));
+    run.endedAt = new Date().toISOString();
+    run.status = failed ? 'failed' : 'succeeded';
+    run.summary = parsed?.reply.slice(0, 200) ?? '';
+    run.reportError = failed ? (errorText || finalText || tr('답이 없습니다.', 'No reply.')).slice(0, 1000) : null;
+    this.records.saveRun(run);
+    const channelId = run.ticketId;
+    const depth = this.chatDepth.get(run.id) ?? 1;
+    this.chatDepth.delete(run.id);
+    if (!this.chat.channel(channelId)) return;
+    if (failed || !parsed) {
+      this.chat.post(
+        channelId,
+        'system',
+        tr(
+          `${this.nameOf(run.employeeId)} 답장 실패: ${(run.reportError ?? '').slice(0, 300)}`,
+          `${this.nameOf(run.employeeId)} could not reply: ${(run.reportError ?? '').slice(0, 300)}`,
+        ),
+        'event',
+      );
+    } else {
+      const msg = this.chat.post(channelId, run.employeeId, parsed.reply, 'chat', { runId: run.id });
+      const byName = (n: string) => this.company.employees().find((e) => e.name === n.trim() && !e.removedAt)?.id;
+      const called = new Set(
+        [...parsed.mentions.map(byName), ...msg.mentions].filter((x): x is string => Boolean(x) && x !== 'ceo' && x !== run.employeeId),
+      );
+      for (const id of called) await this.dispatchChat(channelId, id, depth + 1, msg);
+      if (parsed.openRoom && depth < Orchestrator.CHAT_MAX_DEPTH) {
+        const members = parsed.openRoom.members.map(byName).filter((x): x is string => Boolean(x) && x !== run.employeeId);
+        const src = this.chat.channel(channelId)!;
+        const room = this.chat.createGroup({
+          name: parsed.openRoom.name,
+          members,
+          createdBy: run.employeeId,
+          topic: parsed.openRoom.topic,
+          projectId: src.projectId,
+          ticketId: src.ticketId,
+        });
+        this.chat.post(
+          channelId,
+          'system',
+          tr(
+            `${this.nameOf(run.employeeId)}이(가) 그룹 방 "${room.name}"을 열었습니다.`,
+            `${this.nameOf(run.employeeId)} opened the group room "${room.name}".`,
+          ),
+          'event',
+        );
+        const first = this.chat.post(room.id, run.employeeId, parsed.openRoom.message || parsed.openRoom.topic || parsed.reply, 'chat');
+        for (const id of members) await this.dispatchChat(room.id, id, depth + 1, first);
+      }
+    }
+    // 답하는 동안 또 불렸으면 한 번 더.
+    const key = `${channelId}|${run.employeeId}`;
+    const again = this.chatAgain.get(key);
+    if (again !== undefined) {
+      this.chatAgain.delete(key);
+      const last = this.chat.messages(channelId, 1).at(-1);
+      const emp = this.company.employees().find((e) => e.id === run.employeeId);
+      if (last && emp && last.author !== run.employeeId) await this.startChatRun(channelId, emp, again, last);
+    }
+    this.changed('chat', channelId);
+    this.changed('run', run.id);
+  }
+
+  /** 작업 보고의 후속 업무 제안·동료 질문을 업무방에 올린다. */
+  private afterWorkReport(run: RunRecord, report: WorkReport): void {
+    const t = this.company.store.get<Ticket>('tickets', run.ticketId);
+    if (!t || (!report.followUps?.length && !report.ask?.length)) return;
+    const room = this.chat.ensureTicketChannel(t.id);
+    if (!room) return;
+    for (const f of report.followUps ?? [])
+      this.chat.post(
+        room.id,
+        run.employeeId,
+        tr(`후속 업무 제안: ${f.title}\n${f.reason}`, `Follow-up suggestion: ${f.title}\n${f.reason}`),
+        'followup',
+        {
+          followUp: { title: f.title, reason: f.reason, projectId: t.projectId, ticketId: t.id },
+        },
+      );
+    for (const a of report.ask ?? []) {
+      const to = this.company.employees().find((e) => e.name === a.to && !e.removedAt);
+      if (!to || to.id === run.employeeId) continue;
+      if (!room.members.includes(to.id)) this.chat.addMembers(room.id, [to.id]);
+      const m = this.chat.post(room.id, run.employeeId, `@${to.name} ${a.text}`, 'chat');
+      void this.dispatchChat(room.id, to.id, 1, m);
+    }
+  }
+
+  /** 후속 업무 제안 → 비서실장에게 요청(대표가 누름). */
+  async followUpToRequest(messageId: string): Promise<CeoRequest> {
+    const m = this.company.store.get<ChatMessage>('chat', messageId);
+    if (!m?.followUp) throw new DomainError(tr('후속 업무 제안이 아닙니다.', 'Not a follow-up suggestion.'));
+    const projectId = m.followUp.projectId ?? this.company.projects().find((p) => !p.removedAt)?.id;
+    if (!projectId) throw new DomainError(tr('프로젝트가 없습니다.', 'No project.'));
+    const req = await this.submitRequest(
+      projectId,
+      `${m.followUp.title}\n\n${m.followUp.reason}${m.followUp.ticketId ? tr(`\n(출처: ${m.followUp.ticketId} 업무방)`, `\n(from ${m.followUp.ticketId})`) : ''}`,
+    );
+    this.company.store.put(
+      'chat',
+      m.id,
+      { ...m, followUp: { ...m.followUp, requestId: req.id } },
+      { channel_id: m.channelId, created_at: m.createdAt },
+    );
+    this.changed('chat', m.channelId);
+    return req;
   }
 
   private finishRunTx(run: RunRecord, failure: { failure: FailureClass; detail: string; orphan?: boolean } | null): void {
@@ -1511,7 +1855,7 @@ ${failure.detail.slice(0, 400)}`,
     phase: DeliberationPhase,
     e: Employee,
     needed: boolean,
-    launch: () => Promise<void>,
+    launch: () => Promise<unknown>,
   ): Promise<boolean> {
     if (!needed) return true;
     const runs = this.phaseRuns(t, phase, e.id);

@@ -71,6 +71,9 @@ export function TicketPage({ id }: { id: string }) {
           </div>
         </div>
         <div className="row">
+          <Link to={`/chat/${encodeURIComponent(`t:${tk.id}`)}`} className="btn">
+            {ko ? '업무방 대화' : 'Ticket chat'}
+          </Link>
           {latestHead && !['done', 'failed', 'cancelled'].includes(tk.status) && (
             <PreviewButton projectId={tk.projectId} ticketId={tk.id} />
           )}

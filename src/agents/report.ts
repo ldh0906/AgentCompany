@@ -10,6 +10,10 @@ export interface WorkReport {
   summary: string;
   requirements: { id: string; claim: 'met' | 'partial' | 'not_met'; notes: string }[];
   questions: string[];
+  /** 내 범위 밖에서 발견한 문제: 대표가 후속 업무로 만들 수 있게 업무방에 올린다. */
+  followUps?: { title: string; reason: string }[];
+  /** 다른 직원에게 묻는 말(이름). 업무방에 올라가고 그 직원이 답한다. */
+  ask?: { to: string; text: string }[];
 }
 
 export interface ReviewReport {
@@ -126,6 +130,14 @@ export function parseReport(
         summary: r.summary,
         requirements: reqs,
         questions,
+        followUps: (isArr(r.followUps) ? (r.followUps as Record<string, unknown>[]) : [])
+          .filter((f) => isStr(f?.title) && f.title.trim())
+          .slice(0, 5)
+          .map((f) => ({ title: String(f.title).slice(0, 200), reason: isStr(f.reason) ? f.reason.slice(0, 2000) : '' })),
+        ask: (isArr(r.ask) ? (r.ask as Record<string, unknown>[]) : [])
+          .filter((a) => isStr(a?.to) && isStr(a?.text) && a.text.trim())
+          .slice(0, 3)
+          .map((a) => ({ to: String(a.to).replace(/^@/, '').slice(0, 60), text: String(a.text).slice(0, 2000) })),
       },
     };
   }
@@ -293,4 +305,47 @@ function suggestionsOf(v: unknown): VerifySuggestion[] {
     });
   }
   return out.slice(0, 5);
+}
+
+export interface ChatReply {
+  reply: string;
+  /** 부르는 동료 이름 */
+  mentions: string[];
+  openRoom: { name: string; members: string[]; topic: string; message: string } | null;
+}
+
+/**
+ * 대화 답장. 대화는 결과물이 아니므로 관대하게 읽는다: JSON이 있으면 쓰고(nonce가 맞아야 함),
+ * 없으면 최종 응답 본문을 그대로 답으로 쓴다.
+ */
+export function parseChatReply(finalText: string | null, nonce: string): ChatReply | null {
+  if (!finalText?.trim()) return null;
+  const raw = extractLastJson(finalText) as Record<string, unknown> | null;
+  if (raw && typeof raw === 'object' && raw.nonce === nonce && isStr(raw.reply) && raw.reply.trim()) {
+    const room = raw.openRoom as Record<string, unknown> | null;
+    return {
+      reply: raw.reply.slice(0, 6000),
+      mentions: isArr(raw.mentions)
+        ? (raw.mentions as unknown[])
+            .filter(isStr)
+            .map((m) => m.replace(/^@/, ''))
+            .slice(0, 5)
+        : [],
+      openRoom:
+        room && typeof room === 'object' && isStr(room.name) && isArr(room.members)
+          ? {
+              name: room.name.slice(0, 60),
+              members: (room.members as unknown[])
+                .filter(isStr)
+                .map((m) => m.replace(/^@/, ''))
+                .slice(0, 8),
+              topic: isStr(room.topic) ? room.topic.slice(0, 300) : '',
+              message: isStr(room.message) ? room.message.slice(0, 4000) : '',
+            }
+          : null,
+    };
+  }
+  // JSON 없이 답만 한 경우: 코드 블록을 떼고 본문만.
+  const text = finalText.replace(/```[\s\S]*?```/g, '').trim();
+  return text ? { reply: text.slice(0, 6000), mentions: [], openRoom: null } : null;
 }

@@ -8,7 +8,7 @@ export interface RunSummary {
   id: string;
   ticketId: string;
   employeeId: string;
-  kind: 'work' | 'review' | 'analysis' | 'synthesis';
+  kind: 'work' | 'review' | 'analysis' | 'synthesis' | 'chat';
   status: string;
   round: number;
   cli: string;
@@ -77,6 +77,41 @@ export interface State {
   permissionDelegate?: string | null;
   usage?: UsageSummary;
   previews?: PreviewInfo[];
+  channels?: Channel[];
+  /** 직원이 대표를 부른 최근 메시지 */
+  mentions?: ChatMessage[];
+}
+
+export interface Channel {
+  id: string;
+  kind: 'general' | 'ticket' | 'dm' | 'group';
+  name: string;
+  projectId: string | null;
+  ticketId: string | null;
+  members: string[];
+  createdBy: string;
+  topic: string;
+  createdAt: string;
+  lastMessageAt: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  channelId: string;
+  author: string;
+  text: string;
+  kind: 'chat' | 'report' | 'review' | 'feedback' | 'event' | 'steer' | 'followup';
+  mentions: string[];
+  refs: string[];
+  createdAt: string;
+  runId?: string | null;
+  followUp?: { title: string; reason: string; projectId: string | null; ticketId: string | null; requestId?: string } | null;
+}
+
+export interface ActivityItem {
+  kind: 'say' | 'think' | 'tool' | 'output' | 'command' | 'file' | 'approval' | 'steer' | 'error' | 'done';
+  text: string;
+  detail?: string;
 }
 
 /** 실행해 보기(대표 직접 확인용으로 띄운 개발 서버). */

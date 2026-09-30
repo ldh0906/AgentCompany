@@ -10,6 +10,9 @@ import { Projects } from './pages/Projects.tsx';
 import { Decisions } from './pages/Decisions.tsx';
 import { System } from './pages/System.tsx';
 import { NewTicket } from './pages/NewTicket.tsx';
+import { ChatPage } from './pages/Chat.tsx';
+import { Live } from './pages/Live.tsx';
+import { isUnread, unreadMentions } from './components/unread.ts';
 
 // ---- 라우팅(경로 기반, 의존성 없음) ----
 const RouteContext = createContext<{ path: string; go: (p: string) => void }>({ path: '/', go: () => {} });
@@ -81,6 +84,9 @@ function Shell() {
   const [newTicket, setNewTicket] = useState(false);
   const pending = state?.approvals.length ?? 0;
   const held = state?.tickets.filter(needsCeo).length ?? 0;
+  const chatUnread = (state?.channels ?? []).filter((c) => c.kind !== 'ticket' && isUnread(c)).length;
+  const chatMentions = unreadMentions(state?.mentions).length;
+  const runningNow = (state?.runs ?? []).filter((r) => r.status === 'running').length;
 
   // 승인 알림: 탭 제목에 건수, 켜 두면 새 승인 요청마다 데스크톱 알림.
   const [notify, setNotify] = useState(() => {
@@ -91,12 +97,26 @@ function Shell() {
     }
   });
   const seen = useRef<Set<string> | null>(null);
+  const seenMentions = useRef<Set<string> | null>(null);
   useEffect(() => {
     document.title = pending + held > 0 ? `(${pending + held}) Agent Company` : 'Agent Company';
     if (!state) return;
     const fresh = state.approvals.filter((a) => !seen.current?.has(a.id));
     const first = seen.current === null;
     seen.current = new Set(state.approvals.map((a) => a.id));
+    // 직원이 대표를 부른 메시지도 알린다.
+    const freshMentions = (state.mentions ?? []).filter((m) => !seenMentions.current?.has(m.id));
+    const firstMentions = seenMentions.current === null;
+    seenMentions.current = new Set((state.mentions ?? []).map((m) => m.id));
+    if (notify && !firstMentions)
+      for (const m of freshMentions.slice(0, 3))
+        new Notification(
+          lang === 'ko' ? `${state.employees.find((e) => e.id === m.author)?.name ?? ''}이(가) 대표를 불렀습니다` : 'You were mentioned',
+          {
+            body: m.text.slice(0, 140),
+            tag: m.id,
+          },
+        );
     if (first || !notify || !fresh.length) return;
     for (const a of fresh.slice(0, 3))
       new Notification(lang === 'ko' ? '대표 승인 필요' : 'Approval needed', { body: a.summary, tag: a.id });
@@ -120,6 +140,9 @@ function Shell() {
   let page: React.ReactNode;
   if (path.startsWith('/tickets/')) page = <TicketPage id={decodeURIComponent(path.slice('/tickets/'.length))} />;
   else if (path.startsWith('/board')) page = <Board onNewTicket={() => setNewTicket(true)} />;
+  else if (path.startsWith('/chat'))
+    page = <ChatPage channelId={path.length > 6 ? decodeURIComponent(path.slice('/chat/'.length)) : null} />;
+  else if (path.startsWith('/live')) page = <Live runId={path.length > 6 ? decodeURIComponent(path.slice('/live/'.length)) : null} />;
   else if (path.startsWith('/org')) page = <Org />;
   else if (path.startsWith('/projects')) page = <Projects />;
   else if (path.startsWith('/decisions')) page = <Decisions />;
@@ -143,6 +166,18 @@ function Shell() {
           </Link>
           <Link to="/board">
             <Icon name="board" /> {t('nav_board')}
+          </Link>
+          <Link to="/chat">
+            <Icon name="chat" /> {lang === 'ko' ? '대화' : 'Chat'}
+            {chatMentions > 0 ? (
+              <span className="count bad">@{chatMentions}</span>
+            ) : chatUnread > 0 ? (
+              <span className="count">{chatUnread}</span>
+            ) : null}
+          </Link>
+          <Link to="/live">
+            <Icon name="activity" /> {lang === 'ko' ? '작업 현황' : 'Live work'}
+            {runningNow > 0 && <span className="count info">{runningNow}</span>}
           </Link>
           <Link to="/decisions">
             <Icon name="book" /> {t('nav_decisions')}

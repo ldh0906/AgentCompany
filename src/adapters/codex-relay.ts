@@ -7,6 +7,7 @@
 
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { readdir, readFile, rm } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { createApprovalRequest, waitForDecision } from '../approvals/file-queue.ts';
@@ -109,7 +110,24 @@ async function main(): Promise<void> {
     if (m.method === 'item/completed' && m.params?.item?.type === 'agentMessage') {
       out({ type: 'item.completed', item: { type: 'agent_message', text: m.params.item.text } });
     } else if (m.method === 'item/completed' && m.params?.item?.type === 'commandExecution') {
-      out({ type: 'item.completed', item: { type: 'command_execution', command: m.params.item.command } });
+      out({
+        type: 'item.completed',
+        item: {
+          type: 'command_execution',
+          command: m.params.item.command,
+          exit_code: m.params.item.exitCode ?? null,
+          aggregated_output: String(m.params.item.aggregatedOutput ?? '').slice(-2000),
+        },
+      });
+    } else if (m.method === 'item/completed' && m.params?.item?.type === 'fileChange') {
+      const changes = Array.isArray(m.params.item.changes) ? m.params.item.changes : [];
+      out({
+        type: 'item.completed',
+        item: {
+          type: 'file_change',
+          changes: changes.map((c: any) => ({ path: String(c?.path ?? ''), kind: String(c?.kind?.type ?? c?.kind ?? '') })),
+        },
+      });
     } else if (m.method === 'turn/completed' && m.params?.threadId === threadId) {
       const status = m.params.turn?.status;
       if (status !== 'completed')
@@ -199,12 +217,43 @@ async function main(): Promise<void> {
     return;
   }
   out({ type: 'thread.started', thread_id: threadId });
-  await request('turn/start', {
+  const started = await request('turn/start', {
     threadId,
     input: [{ type: 'text', text: prompt, text_elements: [] }],
     ...(env.AC_CODEX_EFFORT ? { effort: env.AC_CODEX_EFFORT } : {}),
   });
+  // 실행 중 지시(대표가 대화에서 보낸 말): steer 폴더에 파일이 생기면 진행 중인 턴에 끼워 넣는다.
+  // Codex는 다음 단계 경계에서 이 말을 받아 방향을 바꾼다(turn/steer).
+  const turnId: string | null = started.result?.turn?.id ?? null;
+  const steerDir = env.AC_STEER_DIR ?? '';
+  let steering = false;
+  const steerTimer =
+    steerDir && turnId
+      ? setInterval(async () => {
+          if (steering) return;
+          steering = true;
+          try {
+            const files = (await readdir(steerDir).catch(() => [] as string[])).filter((f) => f.endsWith('.json')).sort();
+            for (const f of files) {
+              const full = path.join(steerDir, f);
+              const msg = JSON.parse(await readFile(full, 'utf8')) as { text: string };
+              await rm(full, { force: true });
+              const res = await request('turn/steer', {
+                threadId,
+                input: [{ type: 'text', text: msg.text, text_elements: [] }],
+                expectedTurnId: turnId,
+              });
+              out({ type: 'steer.delivered', ok: !res.error, text: msg.text.slice(0, 300) });
+            }
+          } catch {
+            // 다음 주기에 다시
+          } finally {
+            steering = false;
+          }
+        }, 1000)
+      : null;
   const ok = await done;
+  if (steerTimer) clearInterval(steerTimer);
   child.stdin.end();
   child.kill();
   process.exitCode = ok ? 0 : 1;

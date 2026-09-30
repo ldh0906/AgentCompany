@@ -68,6 +68,7 @@ export const codexAdapter: CliAdapter = {
         ...process.env,
         ...req.profileEnv,
         AC_CODEX_CWD: req.cwd,
+        AC_STEER_DIR: path.join(req.runDir, 'steer'),
         AC_CODEX_POLICY: 'untrusted',
         AC_CODEX_SANDBOX: req.accessLevel === 'read-only' ? 'read-only' : 'workspace-write',
         AC_AUTO_APPROVE: auto,

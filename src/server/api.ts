@@ -1,7 +1,9 @@
 // REST API. 모든 변경은 Company/Orchestrator를 거친다(상태기계와 권한 규칙이 그대로 적용됨).
 import { tr } from '../core/i18n.ts';
 
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { readAllJsonl } from '../runner/jsonl.ts';
+import { activityFrom } from '../app/activity.ts';
 import path from 'node:path';
 import { ADAPTERS } from '../adapters/index.ts';
 import type { Orchestrator } from '../app/orchestrator.ts';
@@ -85,10 +87,18 @@ export class Api {
 
   async handle(method: string, pathname: string, query: URLSearchParams, body: unknown): Promise<unknown> {
     const b = (body && typeof body === 'object' ? body : {}) as Body;
+    // 대화방 ID처럼 ':'가 든 경로 조각은 인코딩되어 온다(t%3AT-14).
     const parts = pathname
       .replace(/^\/api\/?/, '')
       .split('/')
-      .filter(Boolean);
+      .filter(Boolean)
+      .map((x) => {
+        try {
+          return decodeURIComponent(x);
+        } catch {
+          return x;
+        }
+      });
     const [head, id, action] = parts;
     const route = `${method} ${head ?? ''}${id ? '/:id' : ''}${action ? `/${action}` : ''}`;
 
@@ -101,6 +111,40 @@ export class Api {
         return this.ticketDiff(id!);
       case 'GET runs/:id/log':
         return this.runLog(id!, query.get('stream') === 'stderr' ? 'stderr' : 'stdout');
+      case 'GET runs/:id/activity':
+        return this.runActivity(id!);
+      case 'POST runs/:id/steer':
+        return { delivered: await this.orch.steerRun(id!, str(b, 'text', { max: 4000 })) };
+
+      // ---- 사내 대화 ----
+      case 'GET channels': {
+        this.orch.chat.ensureGeneral();
+        this.orch.chat.backfill(this.company.store.events(undefined, 5000));
+        // 기능이 생기기 전에 만든 업무도 업무방을 갖게 한다.
+        for (const t of this.company.tickets()) if (!['cancelled'].includes(t.status)) this.orch.chat.ensureTicketChannel(t.id);
+        return this.orch.chat.channels();
+      }
+      case 'GET channels/:id/messages':
+        return this.orch.chat.messages(id!, Math.min(Number(query.get('limit') ?? 300), 1000));
+      case 'POST channels/:id/messages':
+        return this.orch.ceoMessage(id!, str(b, 'text', { max: 8000 }));
+      case 'POST channels': {
+        const c = this.orch.chat.createGroup({
+          name: str(b, 'name', { max: 60 }),
+          members: strList(b, 'members'),
+          createdBy: 'ceo',
+          topic: str(b, 'topic', { optional: true, max: 300 }),
+          projectId: str(b, 'projectId', { optional: true }) || null,
+        });
+        this.orch.chat.post(c.id, 'system', tr('대표가 방을 열었습니다.', 'The CEO opened this room.'), 'event');
+        return c;
+      }
+      case 'POST channels/:id/members':
+        return this.orch.chat.addMembers(id!, strList(b, 'members'));
+      case 'POST dm/:id':
+        return this.orch.chat.ensureDm(id!);
+      case 'POST chat/:id/followup':
+        return this.orch.followUpToRequest(id!);
       case 'GET events':
         return this.company.store.events(query.get('entity') ?? undefined, Math.min(Number(query.get('limit') ?? 200), 1000));
       case 'GET doctor':
@@ -341,6 +385,12 @@ export class Api {
       permissionDelegate: this.orch.permissionDelegate()?.id ?? null,
       usage: r.usageSummary(),
       previews: this.orch.previewList(),
+      channels: this.orch.chat.channels(),
+      // 직원이 대표를 부른 최근 메시지(알림·배지용)
+      mentions: this.orch.chat
+        .recent(300)
+        .filter((m) => m.mentions.includes('ceo') && m.author !== 'ceo')
+        .slice(-20),
     };
   }
 
@@ -381,6 +431,20 @@ export class Api {
       finalText: run.finalText,
       reportError: run.reportError,
     };
+  }
+
+  /** 작업 로그: 사람이 읽는 타임라인과 마지막 출력 시각(멈춤 감지용). */
+  async runActivity(id: string) {
+    const run = this.orch.records.run(id);
+    if (!run) throw new ApiError(404, tr('실행 기록이 없습니다.', 'Run record not found.'));
+    const file = path.join(run.runDir, 'stdout.log');
+    const { events } = await readAllJsonl(file);
+    const items = activityFrom(events);
+    const lastOutputAt = await stat(file)
+      .then((s) => s.mtime.toISOString())
+      .catch(() => null);
+    const { report, finalText, refsBefore, ...rest } = run;
+    return { run: rest, items: items.slice(-400), total: items.length, lastOutputAt };
   }
 
   async doctor(refresh: boolean): Promise<DoctorReport> {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, type Employee } from '../api.ts';
-import { useCompany } from '../App.tsx';
+import { useCompany, useRoute } from '../App.tsx';
 import { ACCESS, josa, ROLE, useT } from '../i18n.ts';
 import { MAX_ACTIVE_EMPLOYEES } from '../../../src/core/types.ts';
 import { Avatar, CliChip, EmptyState, Icon, Modal, useAction, Skeleton } from '../components/ui.tsx';
@@ -11,6 +11,7 @@ const ROLES = Object.keys(ROLE.ko);
 
 export function Org() {
   const { state, reload } = useCompany();
+  const { go } = useRoute();
   const { t, lang, role, access, rank: rankLabel } = useT();
   const { busy, run } = useAction();
   const [hiring, setHiring] = useState(false);
@@ -103,6 +104,12 @@ export function Org() {
                   ` · ${ko ? '토큰' : 'tokens'} ${fmtTokens(state.usage!.byEmployee[e.id]!.total, lang)}`}
               </div>
               <div className="row" style={{ marginTop: 12 }}>
+                <button
+                  className="btn small primary"
+                  onClick={() => void api<{ id: string }>(`dm/${e.id}`, { body: {} }).then((c) => go(`/chat/${encodeURIComponent(c.id)}`))}
+                >
+                  {ko ? '1:1 대화' : 'Chat'}
+                </button>
                 <button className="btn small" onClick={() => setProfiling(e)}>
                   {ko ? '정보 수정' : 'Edit'}
                 </button>

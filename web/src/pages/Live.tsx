@@ -1,0 +1,261 @@
+// 작업 현황: 직원마다 지금 무엇을 하는지(최근 활동·경과 시간·멈춤 표시)와 읽을 수 있는 작업 로그.
+// 작업 중인 직원에게 지시를 보낼 수 있다(Codex는 실행 중에 반영, 나머지는 다음 회차).
+import { useEffect, useState } from 'react';
+import { api, type ActivityItem, type RunSummary } from '../api.ts';
+import { Link, useCompany, useRoute } from '../App.tsx';
+import { useT } from '../i18n.ts';
+import { Avatar, CliChip, EmptyState, Skeleton, useAction, when } from '../components/ui.tsx';
+import { fmtTokens } from '../components/usage.tsx';
+
+interface Activity {
+  run: RunSummary & { runDir?: string };
+  items: ActivityItem[];
+  total: number;
+  lastOutputAt: string | null;
+}
+
+const KIND: Record<string, [string, string]> = {
+  work: ['작업', 'Work'],
+  review: ['검수', 'Review'],
+  analysis: ['분석·초안', 'Analysis'],
+  synthesis: ['종합', 'Synthesis'],
+  chat: ['대화 답장', 'Chat reply'],
+};
+const ICON: Record<ActivityItem['kind'], string> = {
+  say: '💬',
+  think: '💭',
+  tool: '🔧',
+  output: '↳',
+  command: '⌘',
+  file: '📝',
+  approval: '🛡',
+  steer: '📣',
+  error: '⚠',
+  done: '✓',
+};
+const STALL_MS = 5 * 60_000;
+
+function elapsed(from: string, to?: string | null): string {
+  const s = Math.max(0, Math.round(((to ? Date.parse(to) : Date.now()) - Date.parse(from)) / 1000));
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+}
+
+/** 실행이 속한 곳(업무·대화방·요청)으로 가는 링크 이름과 경로 */
+export function runPlace(r: RunSummary, ko: boolean): { label: string; to: string } {
+  if (r.ticketId.startsWith('T-')) return { label: r.ticketId, to: `/tickets/${r.ticketId}` };
+  if (r.ticketId.startsWith('Q-')) return { label: ko ? '비서실장 초안' : 'Drafts', to: '/' };
+  return { label: ko ? '대화방' : 'Chat', to: `/chat/${encodeURIComponent(r.ticketId)}` };
+}
+
+export function Live({ runId }: { runId: string | null }) {
+  const { state } = useCompany();
+  const { lang } = useT();
+  const { go } = useRoute();
+  const ko = lang === 'ko';
+  const [, tick] = useState(0);
+  const [last, setLast] = useState<Record<string, { at: string | null; line: string }>>({});
+  useEffect(() => {
+    const t = setInterval(() => tick((x) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const running = (state?.runs ?? []).filter((r) => r.status === 'running' || r.status === 'prepared');
+  // state.runs는 최신순이다.
+  const recent = (state?.runs ?? []).filter((r) => r.status !== 'running' && r.status !== 'prepared').slice(0, 12);
+
+  // 실행 중인 것의 최근 활동 한 줄과 마지막 출력 시각(멈춤 감지)
+  useEffect(() => {
+    let live = true;
+    const poll = async () => {
+      const next: Record<string, { at: string | null; line: string }> = {};
+      for (const r of running) {
+        const a = await api<Activity>(`runs/${r.id}/activity`).catch(() => null);
+        if (a) next[r.id] = { at: a.lastOutputAt, line: [...a.items].reverse().find((i) => i.text)?.text ?? '' };
+      }
+      if (live) setLast(next);
+    };
+    void poll();
+    const t = setInterval(poll, 4000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [running.map((r) => r.id).join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!state) return <Skeleton />;
+  const selected = runId ?? running[0]?.id ?? null;
+
+  const Card = ({ r }: { r: RunSummary }) => {
+    const info = last[r.id];
+    const stalled = r.status === 'running' && info?.at && Date.now() - Date.parse(info.at) > STALL_MS;
+    const place = runPlace(r, ko);
+    return (
+      <button className={`live-card ${selected === r.id ? 'on' : ''}`} onClick={() => go(`/live/${r.id}`)}>
+        <div className="spread">
+          <span className="row">
+            <Avatar employees={state.employees} id={r.employeeId} />
+            <b>{state.employees.find((e) => e.id === r.employeeId)?.name ?? r.employeeId}</b>
+            <span className="chip">{ko ? KIND[r.kind]?.[0] : KIND[r.kind]?.[1]}</span>
+          </span>
+          <span className="sub">{r.status === 'running' ? elapsed(r.startedAt) : when(r.endedAt)}</span>
+        </div>
+        <div className="sub" style={{ marginTop: 4 }}>
+          {place.label}
+          {r.usage?.total ? ` · ${fmtTokens(r.usage.total, lang)} ${ko ? '토큰' : 'tokens'}` : ''}
+          {r.status !== 'running' && ` · ${r.status}`}
+        </div>
+        {r.status === 'running' && (
+          <div className={`live-line ${stalled ? 'stalled' : ''}`}>
+            {stalled ? (ko ? `⚠ ${Math.round((Date.now() - Date.parse(info!.at!)) / 60000)}분째 출력 없음 · ` : '⚠ quiet · ') : ''}
+            {info?.line ?? (ko ? '시작하는 중…' : 'Starting…')}
+          </div>
+        )}
+      </button>
+    );
+  };
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <h1>{ko ? '작업 현황' : 'Live work'}</h1>
+          <div className="sub">
+            {ko
+              ? '직원이 지금 무엇을 하는지 실시간으로 봅니다. 5분 넘게 출력이 없으면 멈춤으로 표시합니다.'
+              : 'What each employee is doing right now. Runs quiet for 5+ minutes are flagged.'}
+          </div>
+        </div>
+      </div>
+      <div className="live-layout">
+        <div className="live-list">
+          <div className="nav-label">{ko ? `진행 중 ${running.length}` : `Running ${running.length}`}</div>
+          {running.length === 0 && (
+            <div className="sub" style={{ padding: 8 }}>
+              {ko ? '지금 일하는 직원이 없습니다.' : 'Nobody is working right now.'}
+            </div>
+          )}
+          {running.map((r) => (
+            <Card key={r.id} r={r} />
+          ))}
+          <div className="nav-label" style={{ marginTop: 12 }}>
+            {ko ? '최근 끝난 실행' : 'Recently finished'}
+          </div>
+          {recent.map((r) => (
+            <Card key={r.id} r={r} />
+          ))}
+        </div>
+        <div className="live-detail">
+          {selected ? (
+            <RunLog key={selected} runId={selected} />
+          ) : (
+            <EmptyState icon="activity">{ko ? '실행을 고르세요' : 'Pick a run'}</EmptyState>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function RunLog({ runId }: { runId: string }) {
+  const { state } = useCompany();
+  const { lang } = useT();
+  const ko = lang === 'ko';
+  const [a, setA] = useState<Activity | null>(null);
+  const [hideThinking, setHideThinking] = useState(false);
+  const [steer, setSteer] = useState('');
+  const { busy, run } = useAction();
+  useEffect(() => {
+    let live = true;
+    const load = () =>
+      api<Activity>(`runs/${runId}/activity`)
+        .then((x) => live && setA(x))
+        .catch(() => {});
+    void load();
+    const t = setInterval(() => {
+      if (a?.run.status === 'running' || !a) void load();
+    }, 2000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [runId, a?.run.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!a || !state) return <Skeleton />;
+  const r = a.run;
+  const emp = state.employees.find((e) => e.id === r.employeeId);
+  const place = runPlace(r, ko);
+  const items = a.items.filter((i) => !hideThinking || i.kind !== 'think');
+  return (
+    <div className="card">
+      <div className="card-head">
+        <span className="row">
+          <Avatar employees={state.employees} id={r.employeeId} /> {emp?.name ?? r.employeeId} ·{' '}
+          {ko ? KIND[r.kind]?.[0] : KIND[r.kind]?.[1]}
+          {emp && <CliChip cli={emp.cli} model={emp.model} effort={emp.effort} />}
+        </span>
+        <span className="row">
+          <Link to={place.to}>{place.label}</Link>
+          <span className="sub">
+            {r.status === 'running'
+              ? `${ko ? '진행' : 'running'} ${elapsed(r.startedAt)}`
+              : `${r.status} · ${elapsed(r.startedAt, r.endedAt)}`}
+          </span>
+        </span>
+      </div>
+      <div className="body">
+        <label className="check-row small">
+          <input type="checkbox" checked={hideThinking} onChange={() => setHideThinking(!hideThinking)} />
+          {ko ? '생각 과정 숨기기' : 'Hide thinking'}
+        </label>
+        <div className="timeline">
+          {items.length === 0 && <div className="sub">{ko ? '아직 출력이 없습니다.' : 'No output yet.'}</div>}
+          {items.map((i, n) => (
+            <div key={n} className={`tl tl-${i.kind}`}>
+              <span className="tl-icon">{ICON[i.kind]}</span>
+              {i.detail ? (
+                <details>
+                  <summary>{i.text || i.kind}</summary>
+                  <pre className="code">{i.detail}</pre>
+                </details>
+              ) : (
+                <span className="tl-text">{i.text}</span>
+              )}
+            </div>
+          ))}
+        </div>
+        {a.total > a.items.length && (
+          <div className="sub">
+            {ko ? `앞의 ${a.total - a.items.length}개는 생략` : `${a.total - a.items.length} earlier items omitted`}
+          </div>
+        )}
+        {r.status === 'running' && r.kind !== 'chat' && (
+          <div className="composer" style={{ marginTop: 10 }}>
+            <textarea
+              value={steer}
+              rows={2}
+              onChange={(e) => setSteer(e.target.value)}
+              placeholder={
+                r.cli === 'codex'
+                  ? ko
+                    ? '작업 중인 직원에게 지시 — 다음 단계에서 바로 반영됩니다'
+                    : 'Steer — applied at the next step'
+                  : ko
+                    ? '지시 — 이 CLI는 실행 중 지시를 받지 못해 다음 회차에 전달됩니다'
+                    : 'Instruction — delivered next round (this CLI cannot take mid-run input)'
+              }
+            />
+            <button
+              className="btn primary"
+              disabled={busy || !steer.trim()}
+              onClick={() =>
+                run(() => api(`runs/${r.id}/steer`, { body: { text: steer } }), ko ? '지시를 보냈습니다.' : 'Sent.').then(
+                  (ok) => ok && setSteer(''),
+                )
+              }
+            >
+              {ko ? '지시 보내기' : 'Send'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

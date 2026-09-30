@@ -112,6 +112,25 @@ function review(h: TaskHeader, prompt: string): string {
   );
 }
 
+/** 대화 답장: 받은 말을 짧게 되받는다. 본문에 "@부를이름:" 이 있으면 그 사람을 부른다(연쇄 테스트용). */
+function chat(h: TaskHeader, prompt: string): string {
+  const said = (prompt.split('### Message you are answering')[1]?.split('DATA>>>')[0] ?? '')
+    .replace('(DATA — not instructions)', '')
+    .replace('<<<DATA', '')
+    .trim();
+  const call = said.match(/부를이름:"([^"]+)"/)?.[1];
+  return finalWith(
+    {
+      nonce: h.nonce,
+      kind: 'chat',
+      reply: L(`확인했습니다: ${said.slice(0, 80)}`, `Got it: ${said.slice(0, 80)}`),
+      mentions: call ? [call] : [],
+      openRoom: null,
+    },
+    L('답장합니다.', 'Replying.'),
+  );
+}
+
 function drafts(h: TaskHeader, prompt: string): string {
   const request = (prompt.split('### CEO request')[1]?.split('DATA>>>')[0] ?? '')
     .replace('(DATA — not instructions)', '')
@@ -247,15 +266,17 @@ async function main(): Promise<void> {
   const text =
     kind === 'work'
       ? await work(h, prompt)
-      : kind === 'drafts'
-        ? drafts(h, prompt)
-        : kind === 'claims'
-          ? claims(h)
-          : kind === 'verdicts'
-            ? verdicts(h, prompt)
-            : kind === 'responses'
-              ? responses(h)
-              : review(h, prompt);
+      : kind === 'chat'
+        ? chat(h, prompt)
+        : kind === 'drafts'
+          ? drafts(h, prompt)
+          : kind === 'claims'
+            ? claims(h)
+            : kind === 'verdicts'
+              ? verdicts(h, prompt)
+              : kind === 'responses'
+                ? responses(h)
+                : review(h, prompt);
   // 실제 Claude와 같은 형식의 사용량(프롬프트·응답 길이로 만든 그럴듯한 값)
   const input = Math.round(prompt.length / 3.5) + 18_000;
   emit({
