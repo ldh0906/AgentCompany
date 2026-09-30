@@ -5,10 +5,19 @@ import { tr } from '../core/i18n.ts';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { adapterFor } from '../adapters/index.ts';
 import { isTransient } from '../adapters/types.ts';
-import { buildChatPrompt, buildDraftPrompt, buildReviewPrompt, buildScreenCheckPrompt, buildWorkPrompt } from '../agents/prompt.ts';
+import {
+  buildChatPrompt,
+  buildDraftPrompt,
+  buildPlaytestPrompt,
+  buildReviewPrompt,
+  buildScreenCheckPrompt,
+  buildWorkPrompt,
+} from '../agents/prompt.ts';
+import { MAX_STEPS, stopPlay } from './play.ts';
 import {
   blindPrompt,
   crossPrompt,
@@ -66,6 +75,8 @@ import { dependencySetup, installDependencies } from './verify-setup.ts';
 import { estimates, ticketTokens, tokenBudget } from './cost.ts';
 import { suggestVerifyAt } from './repo-inspect.ts';
 import { PreviewManager, type PreviewInfo } from './preview.ts';
+import { verdictsOf } from '../core/verdicts.ts';
+import { showToast, toastBlocked, type CeoNotice, type CeoTodo } from './notify.ts';
 import { captureScreens, findChrome, type DownloadedFile, type ScreenClip } from './screen-check.ts';
 
 const ORCH: Actor = { kind: 'orchestrator' };
@@ -81,6 +92,19 @@ export interface OrchestratorOptions {
   onChange?: (kind: string, id: string) => void;
   /** 승인 대기에 오면 결과물을 띄워 화면을 찍고 QA 직원 의견을 받는다(기본 켬). */
   screenCheck?: boolean;
+}
+
+/** 고급 QA(직접 플레이) 기록(설정 playtest:<업무 ID 또는 Q:요청 ID>). */
+export interface PlaytestInfo {
+  state: 'running' | 'done' | 'failed';
+  at: string;
+  by: 'ceo' | 'auto';
+  qaBy: string;
+  dir: string;
+  url: string;
+  runId: string | null;
+  opinion: string | null;
+  note: string;
 }
 
 /** 자동 화면 점검 기록(설정 screen:<업무 ID>에 JSON으로 저장). */
@@ -229,6 +253,8 @@ export class Orchestrator {
   // ======================= 자동 화면 점검 =======================
 
   private screenBusy = new Set<string>();
+  /** 화면 QA 실행의 nonce → 업무 ID(의견이 저장보다 먼저 와도 알아보게) */
+  private readonly screenQaNonces = new Map<string, string>();
 
   screenCheckOf(ticketId: string): ScreenCheck | null {
     const raw = this.company.store.getSetting(`screen:${ticketId}`);
@@ -298,7 +324,8 @@ export class Orchestrator {
     )
       .map((x) => (x.requirementId === '*' ? { ...x, requirementId: star } : x))
       .filter((x) => attestIds.has(x.requirementId) || x.requirementId === star);
-    const cap = await captureScreens(info.url, outDir, chrome, scenarios);
+    const project = this.company.requireProject(t.projectId);
+    const cap = await captureScreens(info.url, outDir, chrome, scenarios, { mobile: project.profile?.mobile ?? true });
     check.shots = cap.shots;
     check.errors = cap.errors;
     check.scripted = scenarios.length > 0;
@@ -320,6 +347,8 @@ export class Orchestrator {
       );
     if (qa && room) {
       const nonce = randomBytes(6).toString('hex');
+      // 빠른 답이 check.qaRunId 저장보다 먼저 올 수 있다: nonce로 먼저 표시해 둔다.
+      this.screenQaNonces.set(nonce, t.id);
       const prompt = buildScreenCheckPrompt({
         employee: qa,
         ticket: t,
@@ -337,6 +366,7 @@ export class Orchestrator {
         errors: cap.errors,
         pageText: cap.text,
         scenarios,
+        profile: project.profile,
         downloads: cap.downloads.map((d) => `${d.name} (${d.size} bytes) — ${d.verdict}${d.text ? `\n${d.text.preview}` : ''}`),
         notes:
           sub?.report?.kind === 'work'
@@ -361,6 +391,58 @@ export class Orchestrator {
       check.qaBy = qa.id;
     }
     this.saveScreenCheck(t.id, check);
+  }
+
+  /**
+   * 화면 QA가 문제(⚠)를 찾으면 대표를 거치지 않고 담당자에게 바로 돌려보낸다(대표 요청: "QA가 바로 찔러버리게").
+   * ❓(사진으로 판단 불가)는 돌려보내지 않는다. 업무당 2번까지만, 그다음은 대표에게 넘긴다.
+   */
+  private maybeQaReject(ticketId: string, run: RunRecord, opinion: string): void {
+    const c = this.screenCheckOf(ticketId);
+    const t = this.company.store.get<Ticket>('tickets', ticketId);
+    const isQa = this.screenQaNonces.get(run.nonce) === ticketId || c?.qaRunId === run.id;
+    this.screenQaNonces.delete(run.nonce);
+    if (!c || !isQa || !t || t.status !== 'awaiting_approval' || t.hold) return;
+    const project = this.company.requireProject(t.projectId);
+    if (project.qaAutoReject === false) return;
+    const warns = verdictsOf(opinion).filter((v) => v.mark === '⚠');
+    if (!warns.length) return;
+    const a = this.records.pendingApprovalFor(t.id, 'integrate');
+    if (!a || this.records.latestSubmission(t)?.headSha !== c.sha) return;
+    const room = this.chat.ensureTicketChannel(t.id);
+    const used = Number(this.company.store.getSetting(`qa_rejects:${t.id}`) || 0);
+    if (used >= 2) {
+      if (room)
+        this.chat.post(
+          room.id,
+          'system',
+          tr(
+            'QA가 또 문제를 찾았지만 자동으로 돌려보내기는 두 번까지라 대표에게 넘깁니다.',
+            'QA found problems again, but auto send-back is limited to twice; the CEO decides.',
+          ),
+          'event',
+        );
+      return;
+    }
+    const qa = this.nameOf(run.employeeId);
+    const reason = tr(
+      `화면 QA(${qa})가 문제를 찾아 자동으로 돌려보냅니다(${used + 1}/2). 아래를 고치고, 확인 순서에서 고친 모습이 보이게 하세요.\n${warns.map((w) => `- ${w.id}: ${w.line}`).join('\n')}\n\nQA 의견 전문:\n${opinion.slice(0, 3000)}`,
+      `Screen QA (${qa}) found problems and sent this back automatically (${used + 1}/2). Fix these and show the fix in your check steps.\n${warns.map((w) => `- ${w.id}: ${w.line}`).join('\n')}\n\nFull QA notes:\n${opinion.slice(0, 3000)}`,
+    );
+    this.decideIntegration(a.id, 'rejected', { reason, by: `qa:${run.employeeId}` });
+    this.company.store.setSetting(`qa_rejects:${t.id}`, String(used + 1));
+    const text = tr(
+      `🔁 ${qa}이(가) 화면에서 문제를 찾아 ${t.id}를 담당자에게 돌려보냈습니다: ${warns.map((w) => `${w.id} ${w.line}`).join(' / ')}`,
+      `🔁 ${qa} sent ${t.id} back: ${warns.map((w) => `${w.id} ${w.line}`).join(' / ')}`,
+    );
+    if (room) this.chat.post(room.id, 'system', text, 'event');
+    this.chat.ensureGeneral();
+    this.chat.post('general', 'system', text, 'event');
+    this.notice(
+      tr(`QA가 ${t.id}를 돌려보냈습니다`, `QA sent ${t.id} back`),
+      warns.map((w) => `${w.id} ${w.line}`).join(' / '),
+      `/tickets/${t.id}`,
+    );
   }
 
   /** 화면을 볼 직원: 사진을 읽을 수 있는 Claude QA를 먼저, 없으면 다른 Claude, 그다음 아무 QA·검수자. 담당자는 피한다. */
@@ -638,6 +720,7 @@ export class Orchestrator {
       await this.pollToolApprovals();
       this.checkDailyLimit();
       await this.sweepScreens().catch(() => {});
+      this.notifyNewTodos();
       // 우선순위(1 높음 → 3 낮음) 순, 같으면 먼저 만든 순: 쓰기 범위가 겹칠 때 높은 업무가 먼저 잠금을 잡는다.
       for (const t of [...this.company.tickets()].sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2))) {
         if (t.hold?.reason === 'waiting_dependency' && t.dependsOn.every((d) => this.company.requireTicket(d).status === 'done')) {
@@ -717,6 +800,7 @@ export class Orchestrator {
   private apply(ticketId: string, cmd: Parameters<Company['applyTicket']>[1], actor: Actor = ORCH): Ticket {
     const t = this.company.applyTicket(ticketId, cmd, actor);
     if (TERMINAL_STATUSES.includes(t.status)) this.records.releaseLocks(ticketId);
+    if (t.status === 'done') this.checkRequestDone(t.id);
     if (t.status === 'awaiting_approval' && !t.hold) this.ensureIntegrationApproval(t);
     this.changed('ticket', ticketId);
     return t;
@@ -1460,6 +1544,7 @@ export class Orchestrator {
   private async finishChat(run: RunRecord, finalText: string | null, errorText: string): Promise<void> {
     const parsed = parseChatReply(finalText, run.nonce);
     const failed = !parsed || (isTransient(finalText) && !finalText?.includes(run.nonce));
+    await this.finishPlaytest(run, failed || !parsed ? null : parsed.reply, errorText);
     run.endedAt = new Date().toISOString();
     run.status = failed ? 'failed' : 'succeeded';
     run.summary = parsed?.reply.slice(0, 200) ?? '';
@@ -1481,6 +1566,8 @@ export class Orchestrator {
       );
     } else {
       const msg = this.chat.post(channelId, run.employeeId, parsed.reply, 'chat', { runId: run.id });
+      const ticketId = this.chat.channel(channelId)?.ticketId;
+      if (ticketId) this.maybeQaReject(ticketId, run, parsed.reply);
       const byName = (n: string) => this.company.employees().find((e) => e.name === n.trim() && !e.removedAt)?.id;
       const called = new Set(
         [...parsed.mentions.map(byName), ...msg.mentions].filter((x): x is string => Boolean(x) && x !== 'ceo' && x !== run.employeeId),
@@ -1536,6 +1623,274 @@ export class Orchestrator {
         await git(['branch', '-D', ticketBranch(id)], paths.mirror, { allowFail: true });
       });
     }
+  }
+
+  // ======================= 대표 알림 =======================
+
+  /** 지금 대표가 할 일: 승인, 결정·허가가 필요한 보류, 확인할 초안, 실패한 초안, 하루 한도 멈춤. */
+  ceoTodos(): CeoTodo[] {
+    const out: CeoTodo[] = [];
+    for (const a of this.records.approvals('pending'))
+      out.push({ key: `appr:${a.id}`, kind: 'approval', title: a.summary, link: a.ticketId ? `/tickets/${a.ticketId}` : '/' });
+    for (const t of this.company.tickets())
+      if (t.hold && !TERMINAL_STATUSES.includes(t.status) && t.hold.reason !== 'waiting_dependency')
+        out.push({
+          key: `hold:${t.id}:${t.hold.since}`,
+          kind: t.hold.reason === 'needs_permission' ? 'permission' : 'decision',
+          title: `${t.id} ${t.title}: ${t.hold.note.split('\n')[0]!.slice(0, 120)}`,
+          link: `/tickets/${t.id}`,
+        });
+    for (const r of this.records.requests())
+      if (r.status === 'drafted')
+        out.push({
+          key: `draft:${r.id}`,
+          kind: 'draft',
+          title: tr(`초안 확인: ${r.text.slice(0, 60)}`, `Review drafts: ${r.text.slice(0, 60)}`),
+          link: '/',
+        });
+      else if (r.status === 'failed' && r.error && !/자동으로 다시|retrying automatically/.test(r.error))
+        out.push({
+          key: `failed:${r.id}`,
+          kind: 'failed',
+          title: tr(`초안 실패: ${r.text.slice(0, 60)}`, `Drafting failed: ${r.text.slice(0, 60)}`),
+          link: '/',
+        });
+    if (this.paused && (this.company.store.getSetting('paused_reason') ?? '').startsWith('daily:'))
+      out.push({
+        key: 'paused:daily',
+        kind: 'paused',
+        title: tr('하루 토큰 한도에 닿아 회사가 멈췄습니다.', 'Paused: daily token limit reached.'),
+        link: '/',
+      });
+    return out;
+  }
+
+  notices(): CeoNotice[] {
+    const raw = this.company.store.getSetting('ceo_notices');
+    return raw ? (JSON.parse(raw) as CeoNotice[]) : [];
+  }
+
+  /** 대표에게 알린다(대시보드·브라우저 알림, 켜 두면 윈도우 토스트). 최근 30개만 남긴다. */
+  notice(title: string, body: string, link = '/'): void {
+    const n: CeoNotice = { id: newId('N'), at: new Date().toISOString(), title, body: body.slice(0, 400), link };
+    this.company.store.setSetting('ceo_notices', JSON.stringify([...this.notices(), n].slice(-30)));
+    if (this.toastOn) showToast(title, body);
+    this.changed('notice', n.id);
+  }
+
+  get toastOn(): boolean {
+    return this.company.store.getSetting('toast_notifications') === '1';
+  }
+
+  setToast(on: boolean): { toast: boolean; blocked: string | null } {
+    this.company.store.setSetting('toast_notifications', on ? '1' : '');
+    // 윈도우 설정에서 알림이 꺼져 있으면 보내도 보이지 않는다(실측: 이 PC는 DisabledForUser). 대표에게 알려 켜게 한다.
+    const blocked = on ? toastBlocked() : null;
+    if (on && !blocked)
+      showToast(
+        tr('Agent Company 알림을 켰습니다', 'Agent Company alerts on'),
+        tr('대표가 할 일이 생기면 여기로 알려 드립니다.', 'You will be notified here when something needs you.'),
+      );
+    return { toast: on, blocked };
+  }
+
+  private lastTodoKeys: Set<string> | null = null;
+  private todoCheckedAt = 0;
+
+  /** 새 할 일이 생기면 토스트로 알린다(켜 둔 경우만, 5초마다, 처음 한 번은 기록만). */
+  private notifyNewTodos(): void {
+    if (Date.now() - this.todoCheckedAt < 5000) return;
+    this.todoCheckedAt = Date.now();
+    const todos = this.ceoTodos();
+    const prev = this.lastTodoKeys;
+    this.lastTodoKeys = new Set(todos.map((x) => x.key));
+    if (!prev || !this.toastOn) return;
+    const fresh = todos.filter((x) => !prev.has(x.key));
+    for (const x of fresh.slice(0, 3)) showToast(tr('대표가 할 일', 'Needs you'), x.title);
+  }
+
+  /** 요청 하나의 업무가 모두 끝나면 알린다(게임 프로젝트면 고급 QA 자동 실행의 계기). */
+  private checkRequestDone(ticketId: string): void {
+    const req = this.records.requests(200).find((r) => r.ticketIds.includes(ticketId));
+    if (!req || !req.ticketIds.length) return;
+    const tickets = req.ticketIds.map((id) => this.company.store.get<Ticket>('tickets', id)).filter((x): x is Ticket => Boolean(x));
+    if (!tickets.every((x) => TERMINAL_STATUSES.includes(x.status))) return;
+    if (this.company.store.getSetting(`request_done:${req.id}`)) return;
+    this.company.store.setSetting(`request_done:${req.id}`, new Date().toISOString());
+    const done = tickets.filter((x) => x.status === 'done').length;
+    this.notice(
+      tr(`요청이 끝났습니다 (${done}/${tickets.length} 완료)`, `Request finished (${done}/${tickets.length} done)`),
+      req.text.slice(0, 120),
+      '/',
+    );
+    this.onRequestDone?.(req, tickets);
+  }
+
+  /** 요청이 끝났을 때: 게임 프로젝트에서 켜 두었으면 고급 QA(직접 플레이)를 한 번 한다. */
+  private onRequestDone = (req: CeoRequest, tickets: Ticket[]): void => {
+    const project = this.company.store.get<Project>('projects', req.projectId);
+    if (!project?.profile?.game || !project.autoPlaytest || !tickets.some((t) => t.status === 'done')) return;
+    void this.startPlaytest({ requestId: req.id }, 'auto').catch((e: unknown) =>
+      this.notice(tr('고급 QA를 시작하지 못했습니다', 'Could not start the play test'), String((e as Error)?.message ?? e)),
+    );
+  };
+
+  // ======================= 고급 QA(직접 플레이) =======================
+
+  private readonly playtestNonces = new Map<string, string>();
+
+  playtestOf(key: string): PlaytestInfo | null {
+    const raw = this.company.store.getSetting(`playtest:${key}`);
+    return raw ? (JSON.parse(raw) as PlaytestInfo) : null;
+  }
+
+  private savePlaytest(key: string, p: PlaytestInfo): void {
+    this.company.store.setSetting(`playtest:${key}`, JSON.stringify(p));
+    this.changed('playtest', key);
+  }
+
+  /**
+   * 고급 QA: Claude QA 직원이 보이지 않는 크롬을 명령으로 조종하며 직접 플레이한다(대표 요청, 2026-09-30).
+   * 업무 하나(제출물)를 볼 수도, 요청 하나가 끝난 뒤 기준 브랜치 전체를 볼 수도 있다. 한 번에 약 100만~300만 토큰.
+   */
+  async startPlaytest(scope: { ticketId?: string; requestId?: string }, by: 'ceo' | 'auto'): Promise<PlaytestInfo> {
+    const ticket = scope.ticketId ? this.company.requireTicket(scope.ticketId) : null;
+    const req = scope.requestId ? this.records.request(scope.requestId) : null;
+    if (!ticket && !req) throw new DomainError(tr('무엇을 플레이할지 정해 주세요.', 'Choose what to play-test.'));
+    const key = ticket ? ticket.id : `Q:${req!.id}`;
+    if (this.playtestOf(key)?.state === 'running') throw new DomainError(tr('이미 플레이 중입니다.', 'Already playing.'));
+    const project = this.company.requireProject(ticket?.projectId ?? req!.projectId);
+    // 사진을 보며 명령을 쓸 수 있는 Claude만(fake는 테스트용)
+    const pool = this.company
+      .employees()
+      .filter((e) => e.active && !e.removedAt && (e.cli === 'claude' || e.cli === 'fake') && e.id !== ticket?.assigneeId);
+    const qa = pool.find((e) => e.roles.includes('qa')) ?? pool[0];
+    if (!qa)
+      throw new DomainError(tr('고급 QA는 화면을 볼 수 있는 Claude 직원이 필요합니다.', 'Play tests need an active Claude employee.'));
+    if (!findChrome()) throw new DomainError(tr('크롬이 없어 플레이할 수 없습니다.', 'Chrome not found.'));
+    const info = await this.preview(project.id, ticket?.id ?? null);
+    if (!info.url) throw new DomainError(tr('결과물을 띄우지 못했습니다.', 'Could not start the build.'));
+    const dir = path.join(this.opts.dataDir, 'playtests', key.replace(':', '_'), String(Date.now()));
+    await mkdir(dir, { recursive: true });
+    // QA는 이 폴더의 ./play 한 가지 명령만 쓸 수 있다(경로·공백 문제 없이 허용 목록에 넣으려고).
+    // 이 앱의 CLI(소스로 떠 있으면 main.ts, 빌드본이면 main.js)
+    const cli = fileURLToPath(new URL(import.meta.url.endsWith('.ts') ? '../cli/main.ts' : '../cli/main.js', import.meta.url));
+    await writeFile(
+      path.join(dir, 'play'),
+      `#!/bin/sh\nexec "${process.execPath.replaceAll('\\', '/')}" "${cli.replaceAll('\\', '/')}" play --dir "${dir.replaceAll('\\', '/')}" --url "${info.url}" "$@"\n`,
+      { mode: 0o755 },
+    );
+    const tickets = ticket
+      ? [ticket]
+      : req!.ticketIds.map((id) => this.company.store.get<Ticket>('tickets', id)).filter((x): x is Ticket => Boolean(x));
+    const goals = ticket
+      ? ticket.requirements.map((r) => ({ id: r.id, text: r.text }))
+      : [{ id: 'R1', text: req!.text.slice(0, 1500) }, ...tickets.map((t, n) => ({ id: `R${n + 2}`, text: `${t.title}: ${t.purpose}` }))];
+    const hints = tickets.flatMap((t) => {
+      const r = this.records.latestSubmission(t)?.report;
+      return r?.kind === 'work' ? r.requirements.filter((x) => x.notes).map((x) => `${t.id} ${x.id}: ${x.notes.slice(0, 600)}`) : [];
+    });
+    const nonce = randomBytes(6).toString('hex');
+    this.playtestNonces.set(nonce, key);
+    const room = ticket ? this.chat.ensureTicketChannel(ticket.id) : (this.chat.ensureGeneral(), this.chat.channel('general'));
+    const prompt = buildPlaytestPrompt({
+      employee: qa,
+      goals,
+      subject: ticket
+        ? `${ticket.id} ${ticket.title}`
+        : tr(`요청 "${req!.text.slice(0, 80)}" 전체`, `the whole request "${req!.text.slice(0, 80)}"`),
+      profile: project.profile,
+      hints: hints.slice(0, 12),
+      maxActions: MAX_STEPS,
+      nonce,
+      language: this.opts.language ?? 'ko',
+    });
+    const record: PlaytestInfo = {
+      state: 'running',
+      at: new Date().toISOString(),
+      by,
+      qaBy: qa.id,
+      dir,
+      url: info.url,
+      runId: null,
+      opinion: null,
+      note: '',
+    };
+    this.savePlaytest(key, record);
+    const runId = await this.launch({
+      ticket: { id: room!.id, round: 1, budget: { ...DEFAULT_BUDGET, runTimeoutMs: 30 * 60_000 } },
+      employee: { ...qa, allowedCommands: [['./play']] },
+      kind: 'chat',
+      cwd: dir,
+      prompt,
+      nonce,
+      accessLevel: 'write-allowlist',
+      baseSha: null,
+    });
+    this.chatDepth.set(runId, Orchestrator.CHAT_MAX_DEPTH);
+    const now = this.playtestOf(key);
+    if (now?.state === 'running') this.savePlaytest(key, { ...now, runId });
+    this.chat.post(
+      room!.id,
+      'system',
+      tr(
+        `🎮 고급 QA: ${qa.name}이(가) ${ticket ? ticket.id : '이번 요청 결과'}를 직접 플레이해 봅니다(${by === 'auto' ? '자동' : '대표 요청'}).`,
+        `🎮 Play test: ${qa.name} is playing ${ticket ? ticket.id : 'the finished request'}.`,
+      ),
+      'event',
+    );
+    return this.playtestOf(key)!;
+  }
+
+  /** 플레이 실행이 끝나면: 결과를 기록하고, 크롬 세션을 닫고, 대표에게 알린다. */
+  private async finishPlaytest(run: RunRecord, reply: string | null, errorText: string): Promise<void> {
+    const key = this.playtestNonces.get(run.nonce) ?? this.findPlaytestByRun(run.id);
+    if (!key) return;
+    this.playtestNonces.delete(run.nonce);
+    const p = this.playtestOf(key);
+    if (!p) return;
+    await stopPlay(p.dir).catch(() => {});
+    const done: PlaytestInfo = reply
+      ? { ...p, state: 'done', runId: run.id, opinion: reply }
+      : { ...p, state: 'failed', runId: run.id, note: errorText.slice(0, 500) };
+    this.savePlaytest(key, done);
+    const v = reply ? verdictsOf(reply) : [];
+    const counts = `✅${v.filter((x) => x.mark === '✅').length} ⚠${v.filter((x) => x.mark === '⚠').length} ❓${v.filter((x) => x.mark === '❓').length}`;
+    this.notice(
+      reply
+        ? tr(`고급 QA 결과 (${key}): ${counts}`, `Play test result (${key}): ${counts}`)
+        : tr(`고급 QA 실패 (${key})`, `Play test failed (${key})`),
+      reply
+        ? v
+            .filter((x) => x.mark !== '✅')
+            .map((x) => `${x.id} ${x.mark} ${x.line}`)
+            .join(' / ') || tr('문제 없음', 'No problems')
+        : errorText.slice(0, 200),
+      key.startsWith('Q:') ? '/' : `/tickets/${key}`,
+    );
+  }
+
+  private findPlaytestByRun(runId: string): string | null {
+    for (const t of this.company.tickets()) if (this.playtestOf(t.id)?.runId === runId) return t.id;
+    for (const r of this.records.requests(50)) if (this.playtestOf(`Q:${r.id}`)?.runId === runId) return `Q:${r.id}`;
+    return null;
+  }
+
+  /** 플레이 사진(마지막 몇 장): 누를 때만 불러온다. */
+  async playtestShots(key: string, limit = 8): Promise<{ name: string; dataUrl: string }[]> {
+    const p = this.playtestOf(key);
+    if (!p) return [];
+    const dir = path.join(p.dir, 'shots');
+    const names = (await readdir(dir).catch(() => [] as string[]))
+      .filter((f) => f.endsWith('.jpg'))
+      .sort()
+      .slice(-limit);
+    const out: { name: string; dataUrl: string }[] = [];
+    for (const n of names) {
+      const buf = await readFile(path.join(dir, n)).catch(() => null);
+      if (buf) out.push({ name: n, dataUrl: `data:image/jpeg;base64,${buf.toString('base64')}` });
+    }
+    return out;
   }
 
   /** 이 업무를 나눌 수 있는가: 나눈 조각이 아니고, 아직 한 번도 나누지 않은 업무만. */
@@ -2181,7 +2536,7 @@ ${failure.detail.slice(0, 400)}`,
   decideIntegration(
     approvalId: string,
     decision: 'approved' | 'rejected',
-    opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[]; auto?: boolean } = {},
+    opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[]; auto?: boolean; by?: string } = {},
   ): Ticket {
     const t = this.decideIntegrationCore(approvalId, decision, opts);
     // 확인이 끝났으니 띄워 둔 미리보기를 끈다(반려 뒤 새 제출물이 오면 새로 띄운다).
@@ -2192,7 +2547,7 @@ ${failure.detail.slice(0, 400)}`,
   private decideIntegrationCore(
     approvalId: string,
     decision: 'approved' | 'rejected',
-    opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[]; auto?: boolean },
+    opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[]; auto?: boolean; by?: string },
   ): Ticket {
     const a = this.records.approval(approvalId);
     if (!a || a.kind !== 'integrate' || a.state !== 'pending' || !a.ticketId)
@@ -2212,7 +2567,7 @@ ${failure.detail.slice(0, 400)}`,
     }
     if (decision === 'rejected') {
       return tx(() => {
-        this.records.setApprovalState(approvalId, 'rejected', 'ceo', { reason: opts.reason ?? '' });
+        this.records.setApprovalState(approvalId, 'rejected', opts.by ?? 'ceo', { reason: opts.reason ?? '' });
         return this.apply(t.id, { type: 'ceo_reject', reason: opts.reason || tr('대표가 반려했습니다.', 'Rejected by the CEO.') }, CEO);
       });
     }
@@ -2784,6 +3139,7 @@ ${failure.detail.slice(0, 400)}`,
         proposals: parsed.ok ? parsed.report.proposals : [],
         answers: parsed.ok ? parsed.report.questions.map(() => null) : [],
         verifySuggestions: parsed.ok ? parsed.report.verifySuggestions : [],
+        profile: parsed.ok ? (parsed.report.profile ?? null) : null,
         error: parsed.ok
           ? null
           : transient && !req.retriedFrom

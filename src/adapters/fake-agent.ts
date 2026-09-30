@@ -151,6 +151,33 @@ function review(h: TaskHeader, prompt: string): string {
 
 /** 대화 답장: 받은 말을 짧게 되받는다. 본문에 "@부를이름:" 이 있으면 그 사람을 부른다(연쇄 테스트용). */
 function chat(h: TaskHeader, prompt: string): string {
+  // 고급 QA 흉내: 직접 플레이한 척 한 줄 결론을 낸다
+  if (prompt.includes('plays the product like a real user'))
+    return finalWith(
+      {
+        nonce: h.nonce,
+        kind: 'chat',
+        reply: L('R1 ✅ 끝까지 해 봤고 자연스럽습니다\n플레이 일지: 시작 → 이동 → 공격', 'R1 ✅ Played through, feels right'),
+        mentions: [],
+        openRoom: null,
+      },
+      L('플레이 결과.', 'Play result.'),
+    );
+  // 화면 QA 흉내: picky면 늘 문제(⚠)를 찾는다(자동 반려 테스트용)
+  if (prompt.includes('doing a quick screen QA'))
+    return finalWith(
+      {
+        nonce: h.nonce,
+        kind: 'chat',
+        reply:
+          behavior === 'picky'
+            ? L('R1 ⚠ 제목 글자가 잘립니다\n1.png: 제목 끝이 화면 밖', 'R1 ⚠ Title text is cut off\n1.png: title runs off screen')
+            : L('R1 ✅ 괜찮아 보입니다\n1.png: 제목이 보임', 'R1 ✅ Looks fine\n1.png: title visible'),
+        mentions: [],
+        openRoom: null,
+      },
+      L('화면 의견.', 'Screen notes.'),
+    );
   const said = (prompt.split('### Message you are answering')[1]?.split('DATA>>>')[0] ?? '')
     .replace('(DATA — not instructions)', '')
     .replace('<<<DATA', '')

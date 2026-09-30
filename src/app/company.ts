@@ -50,6 +50,9 @@ export interface NewProject {
   verifyCommands?: VerifyCommand[];
   docRules?: string;
   autoApprove?: boolean;
+  profile?: Project['profile'];
+  qaAutoReject?: boolean;
+  autoPlaytest?: boolean;
 }
 
 export interface NewTicket {
@@ -295,6 +298,9 @@ export class Company {
       verifyCommands: input.verifyCommands ?? [],
       docRules: input.docRules ?? '',
       autoApprove: input.autoApprove ?? false,
+      ...(input.profile ? { profile: input.profile } : {}),
+      qaAutoReject: input.qaAutoReject ?? true,
+      autoPlaytest: input.autoPlaytest ?? false,
       createdAt: this.clock(),
     };
     return this.store.transact(() => {

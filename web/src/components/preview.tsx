@@ -238,3 +238,89 @@ function ClipButton({ ticketId, index, label, seconds }: { ticketId: string; ind
     </>
   );
 }
+
+/** 고급 QA: 직원이 직접 플레이해 보고 요구사항마다 한 줄 결론과 플레이 일지를 남긴다. 누를 때만(또는 요청 완료 때 자동) 돈다. */
+export function PlaytestPanel({ ticketId, requestId }: { ticketId?: string; requestId?: string }) {
+  const { state, reload } = useCompany();
+  const { lang } = useT();
+  const ko = lang === 'ko';
+  const { busy, run } = useAction();
+  const key = ticketId ?? `Q:${requestId}`;
+  const p = state?.playtests?.[key];
+  const [shots, setShots] = useState<{ name: string; dataUrl: string }[] | null>(null);
+  const [zoom, setZoom] = useState<string | null>(null);
+  const start = () =>
+    run(
+      () => api(ticketId ? `tickets/${ticketId}/playtest` : `requests/${requestId}/playtest`, { body: {} }),
+      ko ? '고급 QA가 플레이를 시작합니다.' : 'Play test started.',
+    ).then(reload);
+  const v = p?.opinion ? verdictsOf(p.opinion) : [];
+  return (
+    <div className="screen-check">
+      <div className="spread">
+        <b>{ko ? '🎮 고급 QA (직접 플레이)' : '🎮 Play test'}</b>
+        {p?.state !== 'running' && (
+          <button
+            className="btn small"
+            disabled={busy}
+            onClick={() => void start()}
+            title={ko ? '한 번에 약 100만~300만 토큰' : 'About 1-3M tokens'}
+          >
+            {p ? (ko ? '다시 플레이' : 'Play again') : ko ? '직접 플레이해 보기' : 'Play it'}
+          </button>
+        )}
+      </div>
+      {!p && (
+        <div className="hint">
+          {ko
+            ? 'QA 직원이 사람처럼 보고·누르며 직접 플레이하고, 손맛·흐름·버그를 적습니다. 한 번에 약 100만~300만 토큰.'
+            : 'A QA colleague plays it like a person and reports feel, flow and bugs.'}
+        </div>
+      )}
+      {p?.state === 'running' && <div className="hint">{ko ? '플레이 중… (보통 5~20분)' : 'Playing… (usually 5-20 min)'}</div>}
+      {p?.state === 'failed' && <div className="hint">{ko ? `플레이하지 못했습니다: ${p.note}` : `Failed: ${p.note}`}</div>}
+      {p?.state === 'done' && (
+        <>
+          {v.length > 0 && (
+            <div className="verdicts">
+              {v.map((x) => (
+                <div key={x.id} className={`verdict ${x.mark === '✅' ? 'ok' : x.mark === '⚠' ? 'bad' : 'unk'}`}>
+                  <b>
+                    {x.id} {x.mark}
+                  </b>{' '}
+                  {x.line}
+                </div>
+              ))}
+            </div>
+          )}
+          <details className="advanced">
+            <summary>{ko ? '플레이 일지·문제 자세히' : 'Full report'}</summary>
+            <div className="note qa-opinion">{p.opinion}</div>
+          </details>
+          {shots === null ? (
+            <button
+              className="btn small"
+              onClick={() => void api<{ name: string; dataUrl: string }[]>(`playtests/${encodeURIComponent(key)}/shots`).then(setShots)}
+            >
+              {ko ? '플레이 사진 보기' : 'Show screenshots'}
+            </button>
+          ) : (
+            <div className="shots">
+              {shots.map((s) => (
+                <button key={s.name} className="shot" onClick={() => setZoom(s.dataUrl)}>
+                  <img src={s.dataUrl} alt={s.name} />
+                  <span>{s.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+      {zoom && (
+        <Modal title={ko ? '플레이 사진' : 'Screenshot'} onClose={() => setZoom(null)}>
+          <img src={zoom} alt="" style={{ width: '100%', borderRadius: 8 }} />
+        </Modal>
+      )}
+    </div>
+  );
+}

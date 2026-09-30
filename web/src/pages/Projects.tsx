@@ -74,6 +74,8 @@ export function Projects() {
                       ? '따로 보관만 (직접 합침)'
                       : 'Branch only (manual merge)'}
                 </span>
+                {p.profile?.summary && <span className="chip">{p.profile.summary.slice(0, 40)}</span>}
+                {p.profile && !p.profile.mobile && <span className="chip">{ko ? 'PC 전용' : 'Desktop only'}</span>}
                 {p.autoApprove && (
                   <span className="chip ok" title={ko ? '내가 직접 확인할 항목이 없는 업무는 검수 통과 시 바로 반영' : ''}>
                     {ko ? '검수 통과하면 자동 반영' : 'Auto-merge after review'}
@@ -213,6 +215,11 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
   );
   const [docRules, setDocRules] = useState(project?.docRules ?? '');
   const [autoApprove, setAutoApprove] = useState(project?.autoApprove ?? false);
+  const [profileSummary, setProfileSummary] = useState(project?.profile?.summary ?? '');
+  const [profileMobile, setProfileMobile] = useState(project?.profile?.mobile ?? true);
+  const [profileGame, setProfileGame] = useState(project?.profile?.game ?? false);
+  const [qaAutoReject, setQaAutoReject] = useState(project?.qaAutoReject ?? true);
+  const [autoPlaytest, setAutoPlaytest] = useState(project?.autoPlaytest ?? false);
   const [picking, setPicking] = useState(false);
   const [info, setInfo] = useState<Inspection | null>(null);
   const [inspecting, setInspecting] = useState(false);
@@ -255,6 +262,11 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
       .map((v) => ({ label: v.label.trim() || v.command.trim(), evidenceType: v.evidenceType, argv: splitArgs(v.command) })),
     docRules,
     autoApprove,
+    qaAutoReject,
+    autoPlaytest: profileGame && autoPlaytest,
+    ...(profileSummary.trim() || project?.profile
+      ? { profile: { summary: profileSummary.trim(), mobile: profileMobile, game: profileGame } }
+      : {}),
   };
   const save = () =>
     run(
@@ -330,6 +342,47 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
             />
           </label>
         )}
+        {/* 프로젝트 성격: 모든 직원 지시에 들어가고 앱 동작에도 쓰인다(대표 요청: PC 게임이면 휴대폰을 신경 쓰지 않게). */}
+        <label>
+          {ko ? '어떤 프로젝트인가요?' : 'What is this project?'}
+          <textarea
+            value={profileSummary}
+            onChange={(e) => setProfileSummary(e.target.value)}
+            placeholder={ko ? '예: PC용 픽셀 RPG(메이플 느낌), 키보드 조작, 한국어' : 'e.g. PC pixel RPG, keyboard controls, Korean'}
+            rows={2}
+          />
+          <span className="hint">
+            {ko
+              ? '모든 직원이 이 내용을 기억합니다. 비워 두면 비서실장이 첫 초안 때 제안합니다.'
+              : 'Every employee keeps this in mind. Leave empty and the chief of staff suggests one.'}
+          </span>
+        </label>
+        <label className="check-row">
+          <input type="checkbox" checked={profileMobile} onChange={(e) => setProfileMobile(e.target.checked)} />
+          <span>{ko ? '휴대폰 화면도 신경 쓰기 (끄면 휴대폰 폭 점검·경고를 하지 않음)' : 'Also care about phone screens'}</span>
+        </label>
+        <label className="check-row">
+          <input type="checkbox" checked={profileGame} onChange={(e) => setProfileGame(e.target.checked)} />
+          <span>{ko ? '게임입니다 (손맛·플레이감도 봄)' : 'This is a game'}</span>
+        </label>
+        {profileGame && (
+          <label className="check-row">
+            <input type="checkbox" checked={autoPlaytest} onChange={(e) => setAutoPlaytest(e.target.checked)} />
+            <span>
+              {ko ? '요청 하나가 모두 끝나면 고급 QA가 직접 플레이해 보기' : 'Play-test automatically when a request is done'}{' '}
+              <span className="hint">{ko ? '— 한 번에 약 100만~300만 토큰' : '— about 1-3M tokens each'}</span>
+            </span>
+          </label>
+        )}
+        <label className="check-row">
+          <input type="checkbox" checked={qaAutoReject} onChange={(e) => setQaAutoReject(e.target.checked)} />
+          <span>
+            {ko
+              ? 'QA가 화면에서 문제를 찾으면 나를 거치지 않고 담당자에게 바로 돌려보내기'
+              : 'Send back automatically when screen QA finds a problem'}{' '}
+            <span className="hint">{ko ? '— 업무당 최대 2번, 그다음은 나에게' : '— at most twice per ticket'}</span>
+          </span>
+        </label>
         {/* 비개발자용: 핵심 두 가지만 위에 두고, 개발 용어는 "고급 설정"에 접는다(실측: 기준 브랜치·보호 경로·검증 명령이 뭔지 몰라 멈칫). */}
         <label>
           {ko ? '승인한 결과를 어떻게 넣을까요?' : 'After approval'}

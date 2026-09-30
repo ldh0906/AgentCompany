@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { findChrome } from '../../src/app/screen-check.ts';
 import { ticketChannelId } from '../../src/app/chat.ts';
 import { AGENT_IDENTITY, git } from '../../src/workspace/git.ts';
-import { driveUntil, setup } from './helpers.ts';
+import { driveUntil, newImplTicket, setup } from './helpers.ts';
 
 test('승인 대기에 오면 띄워서 세 장을 찍고, QA 직원이 의견을 업무방에 단다', { skip: !findChrome(), timeout: 180_000 }, async (t) => {
   const env = await setup(t, { screenCheck: true });
@@ -61,3 +61,92 @@ test('승인 대기에 오면 띄워서 세 장을 찍고, QA 직원이 의견�
   assert.ok(!existsSync(join(dir, sha!, 'downloads')), '내려받은 파일 폴더를 지운다');
   assert.ok(existsSync(join(dir, sha!, '1.png')), '사진은 남긴다');
 });
+
+test(
+  '화면 QA가 문제(⚠)를 찾으면 대표를 거치지 않고 돌려보낸다: 두 번까지, 그다음은 대표에게',
+  { skip: !findChrome(), timeout: 300_000 },
+  async (t) => {
+    const env = await setup(t, { screenCheck: true, reviewer: 'picky' });
+    env.company.updateProject(env.projectId, { profile: { summary: 'PC 웹 게임', mobile: false, game: true } });
+    writeFileSync(join(env.origin, 'index.html'), '<!doctype html><body><h1>데모 게임</h1></body>');
+    await git(['add', '-A'], env.origin);
+    await git([...AGENT_IDENTITY, 'commit', '-q', '-m', 'page'], env.origin);
+    const ticket = env.company.createTicket({
+      projectId: env.projectId,
+      type: 'impl',
+      title: '제목 화면',
+      purpose: '눈으로 확인',
+      requirements: [{ text: '제목이 잘리지 않는다', evidenceType: 'human_attest' }],
+      doneCriteria: '대표 확인',
+      writeScope: ['src/**'],
+    });
+    // QA가 두 번 돌려보내고(회차가 3까지 오름), 세 번째 문제는 대표에게 넘긴다.
+    const deadline = Date.now() + 240_000;
+    for (;;) {
+      await env.orch.tick();
+      const stopped = env.orch.chat.messages(`t:${ticket.id}`, 300).some((m) => /두 번까지/.test(m.text));
+      if (stopped) break;
+      if (Date.now() > deadline)
+        throw new Error(`시간 초과: ${env.company.requireTicket(ticket.id).status} r${env.company.requireTicket(ticket.id).round}`);
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    const final = env.company.requireTicket(ticket.id);
+    assert.equal(final.status, 'awaiting_approval', '세 번째는 대표에게 넘긴다');
+    assert.equal(final.round, 3, '두 번 돌려보냈다');
+    assert.equal(env.store.getSetting(`qa_rejects:${ticket.id}`), '2');
+    assert.ok(env.orch.chat.messages('general', 200).some((m) => /돌려보냈습니다/.test(m.text)));
+    // PC 전용이면 휴대폰 폭 사진이 없다
+    assert.ok(!env.orch.screenCheckView(ticket.id)!.shots.some((s) => /휴대폰/.test(s.label)));
+  },
+);
+
+test(
+  '고급 QA: 업무를 직접 플레이하게 하고 결과를 기록·알림, 게임이면 요청이 끝날 때 자동으로 한 번',
+  { skip: !findChrome(), timeout: 240_000 },
+  async (t) => {
+    const env = await setup(t);
+    env.company.updateProject(env.projectId, { profile: { summary: 'PC 게임', mobile: false, game: true }, autoPlaytest: true });
+    writeFileSync(join(env.origin, 'index.html'), '<!doctype html><meta charset="utf-8"><body><h1>데모 게임</h1></body>');
+    await git(['add', '-A'], env.origin);
+    await git([...AGENT_IDENTITY, 'commit', '-q', '-m', 'page'], env.origin);
+    const tk = newImplTicket(env);
+    await driveUntil(env, tk.id, (x) => x.status === 'awaiting_approval');
+    await env.orch.startPlaytest({ ticketId: tk.id }, 'ceo');
+    const waitDone = async (key: string) => {
+      const deadline = Date.now() + 60_000;
+      while (env.orch.playtestOf(key)?.state === 'running' || !env.orch.playtestOf(key)) {
+        if (Date.now() > deadline) throw new Error('시간 초과');
+        await env.orch.tick();
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      return env.orch.playtestOf(key)!;
+    };
+    const p = await waitDone(tk.id);
+    assert.equal(p.state, 'done');
+    assert.match(p.opinion ?? '', /R1 ✅/);
+    assert.ok(env.orch.notices().some((n) => /고급 QA 결과/.test(n.title)));
+    assert.ok(existsSync(join(p.dir, 'play')), 'QA가 쓸 ./play 명령이 있다');
+
+    // 요청이 끝나면 자동으로
+    const [emp] = env.company.employees();
+    env.orch.records.saveRequest({
+      id: 'Q-7',
+      projectId: env.projectId,
+      text: '데모',
+      status: 'accepted',
+      employeeId: emp!.id,
+      runId: null,
+      summary: '',
+      drafts: [],
+      questions: [],
+      error: null,
+      ticketIds: [tk.id],
+      createdAt: new Date().toISOString(),
+    });
+    env.orch.decideIntegration(env.orch.records.pendingApprovalFor(tk.id, 'integrate')!.id, 'approved');
+    await driveUntil(env, tk.id, (x) => x.status === 'done');
+    const auto = await waitDone('Q:Q-7');
+    assert.equal(auto.by, 'auto');
+    assert.equal(auto.state, 'done');
+  },
+);

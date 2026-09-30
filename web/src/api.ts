@@ -56,6 +56,7 @@ export interface CeoRequest {
   proposals?: (string | null)[];
   answers?: (string | null)[];
   verifySuggestions?: { label: string; argv: string[]; evidenceType: string }[];
+  profile?: { summary: string; mobile: boolean; game: boolean } | null;
   error: string | null;
   ticketIds: string[];
   createdAt: string;
@@ -93,6 +94,17 @@ export interface State {
   channels?: Channel[];
   /** 직원이 대표를 부른 최근 메시지 */
   mentions?: ChatMessage[];
+  /** 지금 대표가 할 일 */
+  ceoTodos?: { key: string; kind: string; title: string; link: string }[];
+  /** 최근 알림(QA 자동 반려, 요청 완료 등) */
+  notices?: { id: string; at: string; title: string; body: string; link: string }[];
+  /** 윈도우 토스트 알림 켬 */
+  toast?: boolean;
+  /** 고급 QA(직접 플레이) 기록: 업무 ID 또는 Q:요청 ID */
+  playtests?: Record<
+    string,
+    { state: 'running' | 'done' | 'failed'; at: string; by: string; qaBy: string; opinion: string | null; note: string }
+  >;
 }
 
 export interface ScreenCheck {

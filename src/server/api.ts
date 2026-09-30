@@ -256,6 +256,17 @@ export class Api {
           verifyCommands: verifyCommands(b) ?? [],
           docRules: str(b, 'docRules', { optional: true }),
           autoApprove: b.autoApprove === true,
+          qaAutoReject: b.qaAutoReject !== false,
+          autoPlaytest: b.autoPlaytest === true,
+          ...(b.profile && typeof b.profile === 'object' && str(b.profile as Body, 'summary', { optional: true, max: 500 })
+            ? {
+                profile: {
+                  summary: str(b.profile as Body, 'summary', { max: 500 }),
+                  mobile: (b.profile as Body).mobile === true,
+                  game: (b.profile as Body).game === true,
+                },
+              }
+            : {}),
         });
       case 'POST projects/:id/preview':
         return this.orch.preview(id!, str(b, 'ticketId', { optional: true }) || null);
@@ -273,6 +284,12 @@ export class Api {
         if (b.docRules !== undefined) patch.docRules = str(b, 'docRules', { optional: true });
         if (b.baseBranch !== undefined) patch.baseBranch = str(b, 'baseBranch');
         if (b.autoApprove !== undefined) patch.autoApprove = b.autoApprove === true;
+        if (b.qaAutoReject !== undefined) patch.qaAutoReject = b.qaAutoReject === true;
+        if (b.autoPlaytest !== undefined) patch.autoPlaytest = b.autoPlaytest === true;
+        if (b.profile !== undefined) {
+          const pr = (b.profile ?? {}) as Body;
+          patch.profile = { summary: str(pr, 'summary', { optional: true, max: 500 }), mobile: pr.mobile === true, game: pr.game === true };
+        }
         return this.company.updateProject(id!, patch);
       }
 
@@ -313,6 +330,8 @@ export class Api {
         return this.orch.reverify(id!);
       case 'POST tickets/:id/skip-review':
         return this.orch.skipReview(id!);
+      case 'POST toast':
+        return this.orch.setToast(b.on === true);
       case 'POST tickets/:id/scope-add':
         return this.orch.addWriteScope(id!, strList(b, 'paths'));
       case 'POST tickets/:id/scope':
@@ -363,6 +382,12 @@ export class Api {
           })),
         );
       }
+      case 'POST requests/:id/playtest':
+        return this.orch.startPlaytest({ requestId: id! }, 'ceo');
+      case 'POST tickets/:id/playtest':
+        return this.orch.startPlaytest({ ticketId: this.company.requireTicket(id!).id }, 'ceo');
+      case 'GET playtests/:id/shots':
+        return this.orch.playtestShots(id!);
       case 'POST requests/:id/retry':
         return this.orch.retryRequest(id!);
       case 'POST requests/:id/dismiss':
@@ -406,6 +431,17 @@ export class Api {
       permissionDelegate: this.orch.permissionDelegate()?.id ?? null,
       usage: r.usageSummary(),
       previews: this.orch.previewList(),
+      // 대표 알림: 지금 할 일, 최근 알림, 윈도우 토스트 켬 여부
+      ceoTodos: this.orch.ceoTodos(),
+      // 고급 QA(직접 플레이) 기록: 업무별·요청별(Q:요청 ID)
+      playtests: Object.fromEntries(
+        [...this.company.tickets().map((t) => t.id), ...r.requests(30).map((q) => `Q:${q.id}`)]
+          .map((k) => [k, this.orch.playtestOf(k)] as const)
+          .filter(([, v]) => v)
+          .map(([k, v]) => [k, { state: v!.state, at: v!.at, by: v!.by, qaBy: v!.qaBy, opinion: v!.opinion, note: v!.note }]),
+      ),
+      notices: this.orch.notices(),
+      toast: this.orch.toastOn,
       // 승인 대기 업무의 자동 화면 점검(사진은 tickets/:id/screens로 따로)
       screenChecks: Object.fromEntries(
         this.company

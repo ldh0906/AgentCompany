@@ -65,6 +65,8 @@ export interface CeoRequest {
   answers?: (string | null)[];
   /** 요구사항에 필요한데 프로젝트에 없는 검증 명령(비서실장 제안). */
   verifySuggestions?: VerifySuggestion[];
+  /** 비서실장이 제안한 프로젝트 프로필(프로필이 없을 때만) */
+  profile?: { summary: string; mobile: boolean; game: boolean } | null;
   /** 실패한 요청을 다시 보낸 것이면 원래 요청 ID(자동 재시도는 한 번만). */
   retriedFrom?: string;
   error: string | null;

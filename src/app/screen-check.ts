@@ -102,9 +102,9 @@ export function findChrome(): string | null {
   return candidates.find((c) => existsSync(c)) ?? null;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-class Cdp {
+export class Cdp {
   private seq = 0;
   private waiting = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private listeners: ((method: string, params: Record<string, unknown>) => void)[] = [];
@@ -176,7 +176,7 @@ const NAMED_KEYS: Record<string, [string, number]> = {
 };
 
 /** KeyboardEvent.code(예: KeyZ, Digit1, ArrowLeft)로 키를 눌렀다 뗀다. */
-async function key(cdp: Cdp, code: string, holdMs = 60): Promise<void> {
+export async function key(cdp: Cdp, code: string, holdMs = 60): Promise<void> {
   const named = NAMED_KEYS[code];
   const letter = /^Key([A-Z])$/.exec(code)?.[1];
   const digit = /^Digit([0-9])$/.exec(code)?.[1];
@@ -189,20 +189,20 @@ async function key(cdp: Cdp, code: string, holdMs = 60): Promise<void> {
 }
 
 /** 글자를 사람처럼 한 자씩 친다(한꺼번에 넣으면 "입력하는 즉시 반응"을 녹화로 볼 수 없다). */
-async function typeSlowly(cdp: Cdp, text: string): Promise<void> {
+export async function typeSlowly(cdp: Cdp, text: string): Promise<void> {
   for (const ch of [...text].slice(0, 60)) {
     await cdp.send('Input.insertText', { text: ch });
     await sleep(120);
   }
 }
 
-async function clickAt(cdp: Cdp, x: number, y: number): Promise<void> {
+export async function clickAt(cdp: Cdp, x: number, y: number): Promise<void> {
   for (const type of ['mousePressed', 'mouseReleased'])
     await cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
 }
 
 /** 글자나 선택자로 요소를 찾아 가운데 좌표를 돌려준다(없으면 null). 페이지에 넣는 코드는 우리가 쓴 것뿐이다. */
-async function findPoint(cdp: Cdp, by: { text?: string; selector?: string }): Promise<{ x: number; y: number } | null> {
+export async function findPoint(cdp: Cdp, by: { text?: string; selector?: string }): Promise<{ x: number; y: number } | null> {
   const expression = `(() => {
     const by = ${JSON.stringify(by)};
     let el = null;
@@ -236,6 +236,7 @@ export async function captureScreens(
   outDir: string,
   chrome = findChrome(),
   scenarios: ScreenScenario[] = [],
+  opts: { mobile?: boolean } = {},
 ): Promise<ScreenCapture> {
   if (!chrome) throw new Error('Chrome not found');
   await mkdir(outDir, { recursive: true });
@@ -438,14 +439,20 @@ export async function captureScreens(
     }
     // 휴대폰 폭(375px)으로도 한 장: 마지막 상태(저장된 데이터 포함)를 다시 불러 찍고, 가로로 넘치는지 잰다.
     // 실측: "모바일 폭에서도 깨지지 않게"는 QA가 1280px 사진만으로 "확인 불가"라고 했다.
-    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true });
-    await load('reload');
-    const wide = await cdp
-      .send<{ result: { value?: number } }>('Runtime.evaluate', { expression: 'document.documentElement.scrollWidth', returnByValue: true })
-      .then((r) => r.result.value ?? 0)
-      .catch(() => 0);
-    if (wide > 376) errors.push(`휴대폰 폭(375px)에서 가로로 넘침: 페이지 폭 ${wide}px`);
-    await shoot('휴대폰 폭(375px)', 375, 812);
+    // 프로젝트 프로필이 "휴대폰 대응 안 함"이면 건너뛴다(실측: PC 게임인데 점검마다 휴대폰 경고가 붙었다).
+    if (opts.mobile !== false) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true });
+      await load('reload');
+      const wide = await cdp
+        .send<{ result: { value?: number } }>('Runtime.evaluate', {
+          expression: 'document.documentElement.scrollWidth',
+          returnByValue: true,
+        })
+        .then((r) => r.result.value ?? 0)
+        .catch(() => 0);
+      if (wide > 376) errors.push(`휴대폰 폭(375px)에서 가로로 넘침: 페이지 폭 ${wide}px`);
+      await shoot('휴대폰 폭(375px)', 375, 812);
+    }
     return { shots, errors, text, downloads, clips: clips.filter((c) => c.frames.length > 0) };
   } finally {
     cdp?.close();

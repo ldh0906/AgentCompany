@@ -5,6 +5,7 @@ import { EVIDENCE, useT } from '../i18n.ts';
 import { empName, useAction, when } from '../components/ui.tsx';
 import { Segmented } from '../components/kit.tsx';
 import { fmtTokens } from '../components/usage.tsx';
+import { PlaytestPanel } from '../components/preview.tsx';
 
 /** 시스템 검증 명령만 만들 수 있는 증거. 프로젝트에 같은 종류의 명령이 없으면 아무도 채울 수 없다. */
 const COMMAND_EVIDENCE = ['unit_test', 'static_check', 'runtime'];
@@ -136,6 +137,12 @@ export function RequestBox() {
                   </Link>
                 ))}
               </div>
+              {/* 요청의 업무가 모두 끝났고 게임이면: 고급 QA(직접 플레이) 결과·버튼 */}
+              {(state.projects.find((p) => p.id === r.projectId)?.profile?.game || state.playtests?.[`Q:${r.id}`]) &&
+                r.ticketIds.length > 0 &&
+                r.ticketIds.every((id) =>
+                  ['done', 'failed', 'cancelled'].includes(state.tickets.find((t) => t.id === id)?.status ?? ''),
+                ) && <PlaytestPanel requestId={r.id} />}
             </div>
           ))}
       </div>
@@ -156,6 +163,7 @@ function DraftReview({ r }: { r: CeoRequest }) {
   const [editing, setEditing] = useState<number | null>(null);
   const [diffs, setDiffs] = useState<Record<number, 'easy' | 'normal' | 'hard'>>({});
   const [answerText, setAnswerText] = useState<Record<number, string>>({});
+  const [saveProfile, setSaveProfile] = useState(true);
   const project = state?.projects.find((p) => p.id === r.projectId);
   if (!state || !project) return null;
 
@@ -225,6 +233,9 @@ function DraftReview({ r }: { r: CeoRequest }) {
     const typed = unanswered.filter((i) => answerText[i]?.trim()).map((index) => ({ index, answer: answerText[index]!.trim() }));
     void run(
       async () => {
+        // 비서실장이 제안한 프로젝트 프로필: 대표가 확정하면 저장해 모든 직원이 기억하게 한다.
+        if (r.profile && !project.profile && saveProfile)
+          await api(`projects/${project.id}`, { method: 'PATCH', body: { profile: r.profile } });
         if (fixable)
           await api(`projects/${project.id}`, {
             method: 'PATCH',
@@ -396,6 +407,22 @@ function DraftReview({ r }: { r: CeoRequest }) {
         </div>
       )}
 
+      {r.profile && !project.profile && (
+        <div className="banner info" style={{ marginTop: 8 }}>
+          <b>{ko ? '프로젝트 프로필 제안' : 'Suggested project profile'}</b> {r.profile.summary}
+          <div className="sub">
+            {ko
+              ? `${r.profile.mobile ? '휴대폰 화면도 신경 씀' : 'PC 전용(휴대폰 신경 안 씀)'}${r.profile.game ? ' · 게임' : ''} — 모든 직원이 이 성격을 기억하고, 앱의 화면 점검도 이에 맞춥니다.`
+              : `${r.profile.mobile ? 'Phones too' : 'Desktop only'}${r.profile.game ? ' · game' : ''}`}
+          </div>
+          <label className="check-row" style={{ marginTop: 4 }}>
+            <input type="checkbox" checked={saveProfile} onChange={(e) => setSaveProfile(e.target.checked)} />
+            <span>
+              {ko ? '업무를 만들 때 이 프로필을 저장(나중에 프로젝트 설정에서 고칠 수 있음)' : 'Save this profile when creating tickets'}
+            </span>
+          </label>
+        </div>
+      )}
       {r.questions.length > 0 && (
         <div className="questions">
           <div className="spread">

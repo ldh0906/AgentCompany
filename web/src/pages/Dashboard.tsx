@@ -7,7 +7,7 @@ import { Avatar, empName, EmptyState, HoldChip, Icon, Modal, needsCeo, StatusChi
 import { useCliStatus } from '../components/kit.tsx';
 import { UsagePanel } from '../components/usage.tsx';
 import { RequestBox } from './Requests.tsx';
-import { PreviewButton, ScreenCheckPanel } from '../components/preview.tsx';
+import { PlaytestPanel, PreviewButton, ScreenCheckPanel } from '../components/preview.tsx';
 
 const ACTIVE = ['assigned', 'in_progress', 'verifying', 'in_review', 'changes_requested', 'integrating'];
 
@@ -307,6 +307,7 @@ export function ApprovalItem({ a }: { a: Approval }) {
             <PreviewButton projectId={tk.projectId} ticketId={tk.id} />
           </div>
           <ScreenCheckPanel ticketId={tk.id} />
+          <PlaytestPanel ticketId={tk.id} />
           {ceoChecks.map((r) => (
             <label key={r.id} className="check-row">
               <input

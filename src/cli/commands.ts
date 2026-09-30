@@ -412,6 +412,12 @@ export async function main(argv: string[]): Promise<void> {
       return shortcut(rest);
     case 'screen-check':
       return screenCheckCmd(rest);
+    case 'play': {
+      // 고급 QA 플레이 세션: 한 명령씩 크롬을 조종하고 새 화면 사진 경로를 출력한다.
+      const { playCommand } = await import('../app/play.ts');
+      console.log(await playCommand(rest));
+      return;
+    }
     case undefined:
     case 'help':
     case '--help':

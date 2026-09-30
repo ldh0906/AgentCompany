@@ -236,6 +236,15 @@ export interface DraftReport {
   /** questions와 같은 순서: 비서실장이 제안하는 기본 답(대표가 한 번에 받아들일 수 있게). */
   proposals: (string | null)[];
   verifySuggestions: VerifySuggestion[];
+  /** 프로젝트 프로필이 없을 때 비서실장이 제안하는 프로필 */
+  profile?: { summary: string; mobile: boolean; game: boolean } | null;
+}
+
+/** 프로필 제안: 한두 줄 요약이 있을 때만. */
+export function profileOf(v: unknown): { summary: string; mobile: boolean; game: boolean } | null {
+  const o = v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
+  if (!o || !isStr(o.summary) || !o.summary.trim()) return null;
+  return { summary: o.summary.trim().slice(0, 300), mobile: o.mobile === true, game: o.game === true };
 }
 
 const DRAFT_TYPES = ['impl', 'doc', 'review', 'research'];
@@ -304,6 +313,7 @@ export function parseDrafts(
       tickets,
       ...questionsOf(raw.questions),
       verifySuggestions: suggestionsOf(raw.verifySuggestions),
+      profile: profileOf(raw.profile),
     },
   };
 }

@@ -97,12 +97,19 @@ function Shell() {
   });
   const seen = useRef<Set<string> | null>(null);
   const seenMentions = useRef<Set<string> | null>(null);
+  const seenNotices = useRef<Set<string> | null>(null);
+  const todos = state?.ceoTodos ?? [];
   useEffect(() => {
     document.title = pending + held > 0 ? `(${pending + held}) Agent Company` : 'Agent Company';
     if (!state) return;
-    const fresh = state.approvals.filter((a) => !seen.current?.has(a.id));
+    // 새 "대표 할 일"(승인·결정·초안 확인 등)과 새 알림(QA 자동 반려·요청 완료)을 알린다.
+    const fresh = (state.ceoTodos ?? []).filter((x) => !seen.current?.has(x.key));
     const first = seen.current === null;
-    seen.current = new Set(state.approvals.map((a) => a.id));
+    seen.current = new Set((state.ceoTodos ?? []).map((x) => x.key));
+    const freshNotices = (state.notices ?? []).filter((n) => !seenNotices.current?.has(n.id));
+    const firstNotices = seenNotices.current === null;
+    seenNotices.current = new Set((state.notices ?? []).map((n) => n.id));
+    if (notify && !firstNotices) for (const n of freshNotices.slice(-3)) new Notification(n.title, { body: n.body, tag: n.id });
     // 직원이 대표를 부른 메시지도 알린다.
     const freshMentions = (state.mentions ?? []).filter((m) => !seenMentions.current?.has(m.id));
     const firstMentions = seenMentions.current === null;
@@ -117,8 +124,7 @@ function Shell() {
           },
         );
     if (first || !notify || !fresh.length) return;
-    for (const a of fresh.slice(0, 3))
-      new Notification(lang === 'ko' ? '대표 승인 필요' : 'Approval needed', { body: a.summary, tag: a.id });
+    for (const x of fresh.slice(0, 3)) new Notification(lang === 'ko' ? '대표가 할 일' : 'Needs you', { body: x.title, tag: x.key });
   }, [state, pending, held, notify, lang]);
   const toggleNotify = async () => {
     if (notify) {
@@ -225,10 +231,37 @@ function Shell() {
           <button
             className={`btn small ${notify ? 'ok' : ''}`}
             onClick={() => void toggleNotify()}
-            title={lang === 'ko' ? `승인 알림 ${notify ? '끄기' : '켜기'}` : `${notify ? 'Disable' : 'Enable'} approval alerts`}
+            title={
+              lang === 'ko'
+                ? `브라우저 알림 ${notify ? '끄기' : '켜기'} (앱 창이 열려 있을 때)`
+                : `${notify ? 'Disable' : 'Enable'} browser alerts`
+            }
             aria-pressed={notify}
           >
             <Icon name="bell" size={13} />
+          </button>
+          <button
+            className={`btn small ${state?.toast ? 'ok' : ''}`}
+            onClick={() =>
+              void api<{ toast: boolean; blocked: string | null }>('toast', { body: { on: !state?.toast } }).then((r) => {
+                // 윈도우 설정에서 알림이 꺼져 있으면 보내도 보이지 않는다: 대표가 직접 켜야 한다.
+                if (r.toast && r.blocked)
+                  alert(
+                    lang === 'ko'
+                      ? '윈도우 설정에서 알림이 꺼져 있어 토스트가 보이지 않습니다.\n설정 → 시스템 → 알림에서 알림을 켜고, 목록의 "Windows PowerShell"도 켜 주세요.'
+                      : 'Windows notifications are off. Turn them on (and "Windows PowerShell") in Settings → System → Notifications.',
+                  );
+                reload();
+              })
+            }
+            title={
+              lang === 'ko'
+                ? `윈도우 알림 ${state?.toast ? '끄기' : '켜기'} (앱 창을 닫아도 화면 구석에 알림)`
+                : `${state?.toast ? 'Disable' : 'Enable'} Windows toast alerts`
+            }
+            aria-pressed={Boolean(state?.toast)}
+          >
+            🪟
           </button>
           <select value={lang} onChange={(e) => setLang(e.target.value as Lang)}>
             <option value="ko">한국어</option>
@@ -237,6 +270,27 @@ function Shell() {
         </div>
       </aside>
       <main className="main">
+        {todos.length > 0 && (
+          // 지금 대표가 할 일: 어느 화면에 있든 위에 보인다(대표 요청: 알려 줄 게 있으면 알려 주기).
+          <details className="banner info todo-banner" style={{ marginBottom: 14 }}>
+            <summary>
+              <b>{lang === 'ko' ? `🔔 지금 대표가 할 일 ${todos.length}개` : `🔔 ${todos.length} things need you`}</b>{' '}
+              <span className="sub">
+                {todos
+                  .slice(0, 2)
+                  .map((x) => x.title)
+                  .join(' · ')}
+              </span>
+            </summary>
+            <ul>
+              {todos.map((x) => (
+                <li key={x.key}>
+                  <Link to={x.link}>{x.title}</Link>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
         {state?.paused && (
           <div className="banner warn" style={{ marginBottom: 14 }}>
             {lang === 'ko'

@@ -2241,3 +2241,14 @@ details.advanced[open] summary {
   border-left-color: var(--warn);
   background: var(--warn-soft);
 }
+
+/* 지금 대표가 할 일(모든 화면 위) */
+.todo-banner summary {
+  cursor: pointer;
+}
+.todo-banner ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}

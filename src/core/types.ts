@@ -89,8 +89,23 @@ export interface Project {
   docRules: string; // 직원 컨텍스트에 주입할 프로젝트별 문서 권한 규칙
   /** 대표 직접 확인 항목이 없는 업무는 검수를 통과하면 대표 승인 없이 반영한다(대표가 켠 경우만). */
   autoApprove?: boolean;
+  /** 프로젝트 성격: 모든 직원 지시에 들어가고 앱 동작(휴대폰 점검 등)에도 쓰인다. */
+  profile?: ProjectProfile;
+  /** 화면 QA가 문제(⚠)를 찾으면 대표를 거치지 않고 담당자에게 바로 돌려보낸다(기본 켬, 업무당 최대 2번). */
+  qaAutoReject?: boolean;
+  /** 게임이면: 요청 하나의 업무가 모두 끝났을 때 고급 QA(직접 플레이)를 자동으로 한 번 한다. */
+  autoPlaytest?: boolean;
   removedAt?: string | null; // 삭제(목록에서 숨김, 새 업무 불가). 지난 업무 기록용으로 남는다.
   createdAt: string;
+}
+
+export interface ProjectProfile {
+  /** 어떤 프로젝트인지 한두 줄(예: PC용 픽셀 RPG, 키보드 조작, 한국어) */
+  summary: string;
+  /** 휴대폰 화면도 신경 쓰는가(아니면 휴대폰 폭 점검·경고를 하지 않는다) */
+  mobile: boolean;
+  /** 게임인가(고급 QA 플레이 테스트 대상) */
+  game: boolean;
 }
 
 // ---- 티켓 상태기계 ----
