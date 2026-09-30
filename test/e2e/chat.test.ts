@@ -146,3 +146,16 @@ test('API: 인코딩된 방 ID(t%3AT-1)로도 메시지를 읽는다', { timeout
   await api.handle('POST', `/api/channels/${encodeURIComponent(id)}/messages`, new URLSearchParams(), { text: '메모' });
   assert.ok(env.orch.chat.messages(id).some((m) => m.text === '메모'));
 });
+
+test('그룹 방에서 이 업무(T-번호)를 두고 합의한 대화는 담당자의 작업 지시에 들어간다', { timeout: 120_000 }, async (t) => {
+  const env = await setup(t);
+  const [impl, qa] = env.company.employees();
+  const tk = newImplTicket(env);
+  const room = env.orch.chat.createGroup({ name: '설계 싱크', members: [impl!.id, qa!.id], createdBy: 'ceo' });
+  env.orch.chat.post(room.id, qa!.id, `${tk.id}는 버전 앞에 v를 붙이기로 합의`, 'chat');
+  await driveUntil(env, tk.id, (x) => x.status !== 'backlog' && x.status !== 'assigned' && x.status !== 'received' && x.status !== 'analyzing');
+  await env.orch.idle();
+  const run = env.orch.records.runsForTicket(tk.id).find((r) => r.kind === 'work')!;
+  const { readFileSync } = await import('node:fs');
+  assert.match(readFileSync(`${run.runDir}/prompt.md`, 'utf8'), /설계 싱크.*v를 붙이기로 합의/);
+});

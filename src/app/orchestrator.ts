@@ -611,9 +611,20 @@ export class Orchestrator {
       .messages(ticketChannelId(t.id), 200)
       .filter((m) => m.author === 'ceo' && (m.kind === 'chat' || m.kind === 'steer') && m.createdAt > since)
       .map((m) => `- ${m.text}`);
+    // 이 업무를 두고 그룹 방에서 오간 대화(계획 합의 등)도 담당자에게 전달한다.
+    const related = this.chat
+      .channels()
+      .filter((c) => c.kind === 'group')
+      .flatMap((c) => {
+        const ms = this.chat.messages(c.id, 200);
+        const about = c.ticketId === t.id || ms.some((m) => m.refs.includes(t.id));
+        return about ? ms.filter((m) => m.kind === 'chat').map((m) => `- [${c.name}] ${this.nameOf(m.author)}: ${m.text.slice(0, 1200)}`) : [];
+      })
+      .slice(-20);
     const parts = [
       review,
       notes.length ? tr(`대표가 업무방에 남긴 말:\n${notes.join('\n')}`, `CEO notes in the ticket room:\n${notes.join('\n')}`) : null,
+      related.length ? tr(`이 업무에 관한 그룹 방 대화(합의한 계획):\n${related.join('\n')}`, `Group-room discussion about this ticket (agreed plan):\n${related.join('\n')}`) : null,
     ].filter((x): x is string => Boolean(x));
     return parts.length ? parts.join('\n\n') : null;
   }

@@ -90,7 +90,7 @@ ${dataBlock('Project document rules', i.project.docRules)}
 
 ${dataBlock('Current decisions (only status=current are binding)', i.decisions.map((d) => `- [${d.id}] ${d.text}`).join('\n'))}
 
-${i.feedback ? dataBlock('Feedback from the previous round (you must address every point, or explain why not)', i.feedback) : ''}
+${i.feedback ? dataBlock('Feedback and notes (reviewer feedback, CEO notes, agreed plans) — address every point, or explain why not', i.feedback) : ''}
 
 ## Final answer format (required)
 Write your summary in language "${i.language}". End your final answer with exactly one JSON code block:
