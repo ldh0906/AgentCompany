@@ -137,9 +137,13 @@ export function ScreenCheckPanel({ ticketId }: { ticketId: string }) {
             </div>
           )}
           <div className="hint">
-            {ko
-              ? '기계가 한 조작은 클릭·Enter·방향키·스페이스·Z 정도입니다. 사진과 의견은 참고용이고, 체크는 대표가 합니다.'
-              : 'The machine only clicked and pressed Enter/arrows/Space/Z. Use this as a hint; the ticks are yours.'}
+            {c.scripted
+              ? ko
+                ? '담당 직원이 남긴 확인 순서대로 기계가 조작하고 찍었습니다. 사진과 의견은 참고용이고, 체크는 대표가 합니다.'
+                : 'The machine followed the check steps the implementer left. Use this as a hint; the ticks are yours.'
+              : ko
+                ? '담당 직원이 확인 순서를 남기지 않아, 기계가 흔한 조작(클릭·Enter·방향키·스페이스·Z)만 해 봤습니다. 사진과 의견은 참고용이고, 체크는 대표가 합니다.'
+                : 'No check steps were left, so the machine only clicked and pressed Enter/arrows/Space/Z. The ticks are yours.'}
           </div>
         </>
       )}

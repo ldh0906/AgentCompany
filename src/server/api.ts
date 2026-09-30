@@ -309,6 +309,8 @@ export class Api {
         return this.orch.reverify(id!);
       case 'POST tickets/:id/skip-review':
         return this.orch.skipReview(id!);
+      case 'POST tickets/:id/scope':
+        return this.orch.resolveScopeHold(id!, b.allow === true);
       case 'POST tickets/:id/screen-check':
         this.orch.rerunScreenCheck(id!);
         return { ok: true };

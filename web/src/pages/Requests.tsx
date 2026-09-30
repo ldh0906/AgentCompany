@@ -167,6 +167,9 @@ function DraftReview({ r }: { r: CeoRequest }) {
   const have = new Set(project.verifyCommands.map((v) => v.argv.join(' ')));
   const suggestions = (r.verifySuggestions ?? []).filter((s) => !have.has(s.argv.join(' ')));
   const unanswered = r.questions.map((_, i) => i).filter((i) => !r.answers?.[i]);
+  // 없는 검증 명령을 비서실장 제안이 모두 채우면: 확정할 때 함께 추가한다(실측: "경고 무시하고"만 보여 비개발자가 막혔다).
+  const needed = suggestions.filter((sg) => mismatches.some((m) => m.type === sg.evidenceType));
+  const fixable = mismatches.length > 0 && mismatches.every((m) => needed.some((sg) => sg.evidenceType === m.type));
   const estimateOf = (i: number) => state.estimates?.[diffs[i] ?? r.drafts[i]!.difficulty ?? 'normal']?.tokens ?? 0;
   // 어려움 업무는 팀장만 맡는다: 구현 담당 팀장이 없으면 비서실장·검수 팀장이 떠맡거나 보류된다.
   const leads = state.employees.filter((e) => e.active && e.rank === 'lead');
@@ -198,7 +201,7 @@ function DraftReview({ r }: { r: CeoRequest }) {
       ko ? `검증 명령 "${s.label}"을(를) 프로젝트에 추가했습니다.` : `Added verify command "${s.label}".`,
     ).then(reload);
   const answer = (items: { index: number; answer: string | null }[]) =>
-    run(() => api(`requests/${r.id}/answer`, { body: { items } }), ko ? '답을 결정으로 기록했습니다.' : 'Recorded as a decision.').then(
+    run(() => api(`requests/${r.id}/answer`, { body: { items } }), ko ? '답을 규칙으로 남겼습니다.' : 'Recorded as a decision.').then(
       reload,
     );
   const confirm = () => {
@@ -214,7 +217,25 @@ function DraftReview({ r }: { r: CeoRequest }) {
         dependsOn: d.dependsOn.filter((x) => remap.has(x)).map((x) => remap.get(x)!),
       };
     });
-    void run(() => api(`requests/${r.id}/accept`, { body: { drafts } }), ko ? '업무를 만들었습니다.' : 'Tickets created.').then(reload);
+    // 칸에 적어 두고 "답하기"를 안 누른 답도 함께 보낸다. 빈 질문은 서버가 제안대로 처리한다.
+    const typed = unanswered.filter((i) => answerText[i]?.trim()).map((index) => ({ index, answer: answerText[index]!.trim() }));
+    void run(
+      async () => {
+        if (fixable)
+          await api(`projects/${project.id}`, {
+            method: 'PATCH',
+            body: {
+              verifyCommands: [
+                ...project.verifyCommands.map(({ label, argv, evidenceType }) => ({ label, argv, evidenceType })),
+                ...needed,
+              ],
+            },
+          });
+        if (typed.length) await api(`requests/${r.id}/answer`, { body: { items: typed } });
+        return api(`requests/${r.id}/accept`, { body: { drafts } });
+      },
+      ko ? '업무를 만들었습니다.' : 'Tickets created.',
+    ).then(reload);
   };
 
   return (
@@ -342,13 +363,21 @@ function DraftReview({ r }: { r: CeoRequest }) {
         </div>
       )}
       {(mismatches.length > 0 || suggestions.length > 0) && (
-        <div className={`banner ${mismatches.length ? 'bad' : 'warn'}`} style={{ marginTop: 8 }}>
-          {mismatches.length > 0 && (
+        <div className={`banner ${mismatches.length && !fixable ? 'bad' : 'warn'}`} style={{ marginTop: 8 }}>
+          {fixable ? (
             <div>
               {ko
-                ? `요구사항 ${mismatches.length}개가 이 프로젝트에 없는 검증 명령의 증거(${[...new Set(mismatches.map((m) => evidence(m.type)))].join(', ')})를 요구합니다. 그대로 두면 아무도 증거를 만들 수 없어 수정 요청이 반복됩니다. 검증 명령을 추가하거나, 요구사항의 증거 종류를 바꾸세요.`
-                : `${mismatches.length} requirement(s) need evidence from a verify command this project doesn't have (${[...new Set(mismatches.map((m) => m.type))].join(', ')}). Nobody can produce it, so reviews will keep failing. Add a verify command or change the evidence type.`}
+                ? `요구사항 ${mismatches.length}개가 아직 없는 검증 명령을 필요로 합니다. 업무를 만들 때 비서실장이 제안한 명령을 함께 추가합니다.`
+                : `${mismatches.length} requirement(s) need a verify command the project lacks. The suggested command is added when you create the tickets.`}
             </div>
+          ) : (
+            mismatches.length > 0 && (
+              <div>
+                {ko
+                  ? `요구사항 ${mismatches.length}개가 이 프로젝트에 없는 검증 명령의 증거(${[...new Set(mismatches.map((m) => evidence(m.type)))].join(', ')})를 요구합니다. 그대로 두면 아무도 증거를 만들 수 없어 수정 요청이 반복됩니다. 검증 명령을 추가하거나, 요구사항의 증거 종류를 바꾸세요.`
+                  : `${mismatches.length} requirement(s) need evidence from a verify command this project doesn't have (${[...new Set(mismatches.map((m) => m.type))].join(', ')}). Nobody can produce it, so reviews will keep failing. Add a verify command or change the evidence type.`}
+              </div>
+            )
           )}
           {suggestions.map((s) => (
             <div key={s.argv.join(' ')} className="row" style={{ marginTop: 6 }}>
@@ -380,6 +409,11 @@ function DraftReview({ r }: { r: CeoRequest }) {
           {r.questions.map((q, i) => (
             <div key={i} className="question">
               <div>❓ {q}</div>
+              {!r.answers?.[i] && r.proposals?.[i] && (
+                <div className="sub">
+                  {ko ? '제안' : 'Proposal'}: {r.proposals[i]}
+                </div>
+              )}
               {r.answers?.[i] ? (
                 <div className="sub">✓ {r.answers[i]}</div>
               ) : (
@@ -387,7 +421,15 @@ function DraftReview({ r }: { r: CeoRequest }) {
                   <input
                     value={answerText[i] ?? ''}
                     onChange={(e) => setAnswerText({ ...answerText, [i]: e.target.value })}
-                    placeholder={r.proposals?.[i] ? `${ko ? '제안' : 'Proposal'}: ${r.proposals[i]}` : ko ? '답을 적으세요' : 'Your answer'}
+                    placeholder={
+                      r.proposals?.[i]
+                        ? ko
+                          ? '제안과 다르게 하려면 적으세요'
+                          : 'Type to answer differently'
+                        : ko
+                          ? '답을 적으세요'
+                          : 'Your answer'
+                    }
                   />
                   {answerText[i]?.trim() ? (
                     <button className="btn small" disabled={busy} onClick={() => void answer([{ index: i, answer: answerText[i]! }])}>
@@ -406,15 +448,23 @@ function DraftReview({ r }: { r: CeoRequest }) {
           ))}
           <div className="hint">
             {ko
-              ? '답은 이 프로젝트의 현재 결정으로 기록되어 모든 직원에게 전달됩니다.'
-              : 'Answers are recorded as current decisions and sent to every employee.'}
+              ? '비워 두면 제안대로 진행합니다. 답은 프로젝트의 규칙으로 남아 모든 직원이 따릅니다.'
+              : 'Leave blank to go with the proposal. Answers become project rules every employee follows.'}
           </div>
         </div>
       )}
 
       <div className="row" style={{ marginTop: 8, justifyContent: 'flex-end' }}>
         {unanswered.length > 0 && (
-          <span className="sub">{ko ? `답하지 않은 질문 ${unanswered.length}개` : `${unanswered.length} unanswered`}</span>
+          <span className="sub">
+            {unanswered.every((i) => r.proposals?.[i] || answerText[i]?.trim())
+              ? ko
+                ? `질문 ${unanswered.length}개는 제안대로 진행`
+                : `${unanswered.length} question(s) will follow the proposal`
+              : ko
+                ? `답하지 않은 질문 ${unanswered.length}개 (직원이 판단)`
+                : `${unanswered.length} unanswered (employee decides)`}
+          </span>
         )}
         <span className="sub">
           {ko ? '예상 합계' : 'Estimated total'} ~
@@ -429,14 +479,18 @@ function DraftReview({ r }: { r: CeoRequest }) {
         <button className="btn" disabled={busy} onClick={() => run(() => api(`requests/${r.id}/dismiss`, { body: {} })).then(reload)}>
           {ko ? '버리기' : 'Dismiss'}
         </button>
-        <button className={`btn ${mismatches.length ? 'danger' : 'ok'}`} disabled={busy || kept.length === 0} onClick={confirm}>
-          {mismatches.length
+        <button className={`btn ${mismatches.length && !fixable ? 'danger' : 'ok'}`} disabled={busy || kept.length === 0} onClick={confirm}>
+          {fixable
             ? ko
-              ? `경고 무시하고 ${project.name} 업무 ${kept.length}개 만들기`
-              : `Create ${kept.length} anyway in ${project.name}`
-            : ko
-              ? `${project.name} 업무 ${kept.length}개 만들기`
-              : `Create ${kept.length} tickets in ${project.name}`}
+              ? `검증 명령(${needed.map((sg) => sg.argv.join(' ')).join(', ')}) 추가하고 업무 ${kept.length}개 만들기`
+              : `Add verify command and create ${kept.length} tickets`
+            : mismatches.length
+              ? ko
+                ? `경고 무시하고 ${project.name} 업무 ${kept.length}개 만들기`
+                : `Create ${kept.length} anyway in ${project.name}`
+              : ko
+                ? `${project.name} 업무 ${kept.length}개 만들기`
+                : `Create ${kept.length} tickets in ${project.name}`}
         </button>
       </div>
     </>

@@ -1,5 +1,6 @@
 import { setLanguage, tr } from '../core/i18n.ts';
 import { execFile } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
@@ -171,7 +172,13 @@ async function start(argv: string[], demo: boolean): Promise<void> {
   if (demo) await seedDemo(company, orch, dataDir, language);
 
   const api = new Api(orch, dataDir);
-  const server = await startServer({ api, port: Number(values.port ?? (demo ? 4778 : 4777)), webRoot: webRoot() });
+  // 접속 토큰은 한 번 만들어 계속 쓴다: 다시 켤 때마다 바뀌면 열어 둔 창이 끊겨 "고장났나?"로 보인다(실측 2026-09-30).
+  let token = store.getSetting('server_token');
+  if (!token) {
+    token = randomBytes(24).toString('base64url');
+    store.setSetting('server_token', token);
+  }
+  const server = await startServer({ api, port: Number(values.port ?? (demo ? 4778 : 4777)), webRoot: webRoot(), token });
   broadcast = server.broadcast;
   writeFileSync(
     path.join(dataDir, 'daemon.lock'),

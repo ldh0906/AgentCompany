@@ -122,9 +122,16 @@ function norm(p: string, caseInsensitive: boolean): string {
   return caseInsensitive ? posix.toLowerCase() : posix;
 }
 
+/**
+ * path.posix.matchesGlob은 점으로 시작하는 이름(.gitignore, .env)을 *·**에 맞추지 않는다.
+ * 실측(2026-09-30): 쓰기 범위 src/ui/** 안의 src/ui/.gitignore가 "범위 밖"으로 막혔고, 거꾸로 보호 경로 docs/**는 docs/.env를 지키지 못했다.
+ * 경로와 패턴 양쪽에서 이름 첫 글자 점을 같은 보통 글자로 바꿔 맞춘다(패턴에 적은 .github 같은 이름도 그대로 맞는다).
+ */
+const undot = (s: string) => s.replace(/(^|\/)\./g, '$1\u0001');
+
 function matches(p: string, globs: string[], caseInsensitive: boolean): boolean {
-  const target = norm(p, caseInsensitive);
-  return globs.some((g) => path.posix.matchesGlob(target, norm(g, caseInsensitive)));
+  const target = undot(norm(p, caseInsensitive));
+  return globs.some((g) => path.posix.matchesGlob(target, undot(norm(g, caseInsensitive))));
 }
 
 /** 변경 경로가 쓰기 범위 안에 있고 보호 경로를 건드리지 않았는지. */

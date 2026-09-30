@@ -10,6 +10,9 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import type { ScreenScenario } from '../agents/report.ts';
+
+const MAX_SHOTS = 12;
 
 export interface ScreenShot {
   label: string;
@@ -99,28 +102,74 @@ class Cdp {
   }
 }
 
-async function key(cdp: Cdp, code: string, keyName: string, holdMs = 60): Promise<void> {
-  const vk: Record<string, number> = {
-    Enter: 13,
-    Space: 32,
-    ArrowLeft: 37,
-    ArrowUp: 38,
-    ArrowRight: 39,
-    ArrowDown: 40,
-    KeyZ: 90,
-    KeyX: 88,
-  };
-  const base = { code, key: keyName, windowsVirtualKeyCode: vk[code] ?? 0, nativeVirtualKeyCode: vk[code] ?? 0 };
+const NAMED_KEYS: Record<string, [string, number]> = {
+  Enter: ['Enter', 13],
+  Space: [' ', 32],
+  Escape: ['Escape', 27],
+  Tab: ['Tab', 9],
+  Backspace: ['Backspace', 8],
+  ArrowLeft: ['ArrowLeft', 37],
+  ArrowUp: ['ArrowUp', 38],
+  ArrowRight: ['ArrowRight', 39],
+  ArrowDown: ['ArrowDown', 40],
+  ShiftLeft: ['Shift', 16],
+  ControlLeft: ['Control', 17],
+};
+
+/** KeyboardEvent.code(예: KeyZ, Digit1, ArrowLeft)로 키를 눌렀다 뗀다. */
+async function key(cdp: Cdp, code: string, holdMs = 60): Promise<void> {
+  const named = NAMED_KEYS[code];
+  const letter = /^Key([A-Z])$/.exec(code)?.[1];
+  const digit = /^Digit([0-9])$/.exec(code)?.[1];
+  const keyName = named?.[0] ?? letter?.toLowerCase() ?? digit ?? code;
+  const vk = named?.[1] ?? (letter ? letter.charCodeAt(0) : digit ? 48 + Number(digit) : 0);
+  const base = { code, key: keyName, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk };
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...base, ...(keyName.length === 1 ? { text: keyName } : {}) });
   await sleep(holdMs);
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
 }
 
+async function clickAt(cdp: Cdp, x: number, y: number): Promise<void> {
+  for (const type of ['mousePressed', 'mouseReleased'])
+    await cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
+}
+
+/** 글자나 선택자로 요소를 찾아 가운데 좌표를 돌려준다(없으면 null). 페이지에 넣는 코드는 우리가 쓴 것뿐이다. */
+async function findPoint(cdp: Cdp, by: { text?: string; selector?: string }): Promise<{ x: number; y: number } | null> {
+  const expression = `(() => {
+    const by = ${JSON.stringify(by)};
+    let el = null;
+    if (by.selector) { try { el = document.querySelector(by.selector); } catch { el = null; } }
+    if (!el && by.text) {
+      const want = by.text.trim().toLowerCase();
+      const all = [...document.querySelectorAll('button, a, [role=button], input[type=button], input[type=submit], label, li, div, span')];
+      el = all.filter((e) => (e.innerText || e.value || '').trim().toLowerCase().includes(want))
+        .sort((a, b) => (a.innerText || '').length - (b.innerText || '').length)[0] || null;
+    }
+    if (!el) return null;
+    el.scrollIntoView({ block: 'center' });
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  })()`;
+  const res = await cdp.send<{ result: { value?: { x: number; y: number } | null } }>('Runtime.evaluate', {
+    expression,
+    returnByValue: true,
+  });
+  return res.result.value ?? null;
+}
+
 /**
- * url을 보이지 않는 크롬으로 열어 세 장을 찍는다: 첫 화면 → 가운데 클릭·Enter 뒤 → 방향키·스페이스·Z 뒤.
- * 흔한 게임·웹앱이 "시작 화면 → 진입 → 조작" 순서라 이 정도면 "뜨는지, 반응하는지"는 보인다.
+ * url을 보이지 않는 크롬으로 열어 화면을 찍는다. 첫 화면은 늘 찍는다.
+ * - 담당 직원이 요구사항별 점검 순서(scenarios)를 남겼으면 그대로 따라 한다(각 순서는 저장소를 비우고 새로 연 페이지에서 시작).
+ * - 없으면 흔한 조작(가운데 클릭·Enter → 방향키·스페이스·Z)을 해 보고 두 장 더 찍는다.
+ * 실측(2026-09-30): 흔한 조작만으로는 "새로고침해도 최고 점수 유지" 같은 요구를 보여 줄 수 없었다.
  */
-export async function captureScreens(url: string, outDir: string, chrome = findChrome()): Promise<ScreenCapture> {
+export async function captureScreens(
+  url: string,
+  outDir: string,
+  chrome = findChrome(),
+  scenarios: ScreenScenario[] = [],
+): Promise<ScreenCapture> {
   if (!chrome) throw new Error('Chrome not found');
   await mkdir(outDir, { recursive: true });
   const profile = await mkdtemp(path.join(os.tmpdir(), 'ac-screen-'));
@@ -178,19 +227,24 @@ export async function captureScreens(url: string, outDir: string, chrome = findC
     await cdp.send('Runtime.enable');
     await cdp.send('Log.enable');
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
-    await cdp.send('Page.navigate', { url });
-    for (let i = 0; i < 100 && !loaded; i++) await sleep(200);
-    await sleep(2500); // 첫 그림이 그려질 시간
+    const load = async (how: 'navigate' | 'reload') => {
+      loaded = false;
+      if (how === 'navigate') await cdp!.send('Page.navigate', { url });
+      else await cdp!.send('Page.reload', {});
+      for (let i = 0; i < 100 && !loaded; i++) await sleep(200);
+      await sleep(2000); // 첫 그림이 그려질 시간
+    };
+    await load('navigate');
 
     const shots: ScreenShot[] = [];
-    const shoot = async (label: string) => {
+    const shoot = async (label: string, width = 1280, minHeight = 800) => {
       // 화면보다 긴 페이지는 아래까지(최대 2000px). 실측: 스네이크 보드 아래쪽이 잘렸다.
       const { cssContentSize: size } = await cdp!.send<{ cssContentSize: { width: number; height: number } }>('Page.getLayoutMetrics');
-      const height = Math.min(Math.max(800, Math.ceil(size.height)), 2000);
+      const height = Math.min(Math.max(minHeight, Math.ceil(size.height)), 2000);
       const { data } = await cdp!.send<{ data: string }>('Page.captureScreenshot', {
         format: 'png',
-        captureBeyondViewport: height > 800,
-        clip: { x: 0, y: 0, width: 1280, height, scale: 1 },
+        captureBeyondViewport: height > minHeight,
+        clip: { x: 0, y: 0, width, height, scale: 1 },
       });
       const file = path.join(outDir, `${shots.length + 1}.png`);
       await writeFile(file, Buffer.from(data, 'base64'));
@@ -205,20 +259,61 @@ export async function captureScreens(url: string, outDir: string, chrome = findC
       .catch(() => '');
     await shoot('첫 화면');
 
-    for (const type of ['mousePressed', 'mouseReleased'])
-      await cdp.send('Input.dispatchMouseEvent', { type, x: 640, y: 400, button: 'left', clickCount: 1 });
-    await sleep(300);
-    await key(cdp, 'Enter', 'Enter');
-    await sleep(1500);
-    await shoot('가운데 클릭·Enter 뒤');
-
-    await key(cdp, 'ArrowRight', 'ArrowRight', 900);
-    await key(cdp, 'Space', ' ');
-    await sleep(300);
-    await key(cdp, 'KeyZ', 'z');
-    await key(cdp, 'ArrowLeft', 'ArrowLeft', 400);
-    await sleep(1200);
-    await shoot('방향키·스페이스·Z 뒤');
+    if (!scenarios.length) {
+      await clickAt(cdp, 640, 400);
+      await sleep(300);
+      await key(cdp, 'Enter');
+      await sleep(1500);
+      await shoot('가운데 클릭·Enter 뒤');
+      await key(cdp, 'ArrowRight', 900);
+      await key(cdp, 'Space');
+      await sleep(300);
+      await key(cdp, 'KeyZ');
+      await key(cdp, 'ArrowLeft', 400);
+      await sleep(1200);
+      await shoot('방향키·스페이스·Z 뒤');
+    }
+    const deadline = Date.now() + 120_000;
+    for (const sc of scenarios) {
+      if (shots.length >= MAX_SHOTS || Date.now() > deadline) break;
+      // 각 순서는 깨끗한 상태에서: 저장소를 비우고 새로 연다.
+      await cdp.send('Storage.clearDataForOrigin', {
+        origin: new URL(url).origin,
+        storageTypes: 'local_storage,session_storage,indexeddb,cookies',
+      });
+      await load('navigate');
+      for (const st of sc.steps) {
+        if (shots.length >= MAX_SHOTS || Date.now() > deadline) break;
+        const fail = (why: string) => errors.push(`[${sc.requirementId}] ${why}`);
+        if (st.do === 'key') for (let n = 0; n < (st.times ?? 1); n++) await key(cdp, st.key, st.holdMs ?? 60);
+        else if (st.do === 'click') {
+          const pt =
+            st.text || st.selector
+              ? await findPoint(cdp, { text: st.text, selector: st.selector })
+              : { x: (st.x ?? 0.5) * 1280, y: (st.y ?? 0.5) * 800 };
+          if (pt) await clickAt(cdp, pt.x, pt.y);
+          else fail(`클릭할 곳을 찾지 못함: ${st.text ?? st.selector}`);
+          await sleep(300);
+        } else if (st.do === 'type') await cdp.send('Input.insertText', { text: st.text });
+        else if (st.do === 'wait') await sleep(st.ms);
+        else if (st.do === 'reload') await load('reload');
+        else if (st.do === 'setStorage')
+          await cdp.send('Runtime.evaluate', {
+            expression: `localStorage.setItem(${JSON.stringify(st.key)}, ${JSON.stringify(st.value)})`,
+          });
+        else if (st.do === 'shot') await shoot(`${sc.requirementId}: ${st.label || '화면'}`);
+      }
+    }
+    // 휴대폰 폭(375px)으로도 한 장: 마지막 상태(저장된 데이터 포함)를 다시 불러 찍고, 가로로 넘치는지 잰다.
+    // 실측: "모바일 폭에서도 깨지지 않게"는 QA가 1280px 사진만으로 "확인 불가"라고 했다.
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true });
+    await load('reload');
+    const wide = await cdp
+      .send<{ result: { value?: number } }>('Runtime.evaluate', { expression: 'document.documentElement.scrollWidth', returnByValue: true })
+      .then((r) => r.result.value ?? 0)
+      .catch(() => 0);
+    if (wide > 376) errors.push(`휴대폰 폭(375px)에서 가로로 넘침: 페이지 폭 ${wide}px`);
+    await shoot('휴대폰 폭(375px)', 375, 812);
     return { shots, errors, text };
   } finally {
     cdp?.close();

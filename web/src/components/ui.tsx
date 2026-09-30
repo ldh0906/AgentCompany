@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { Employee, Ticket } from '../api.ts';
 import { useT } from '../i18n.ts';
 
@@ -142,7 +143,8 @@ export function Modal({
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [onClose]);
-  return (
+  // body로 띄운다: 카드의 backdrop-filter 안에서는 fixed가 카드 기준이 되어 창이 카드 안에 갇히고 버튼이 화면 밖으로 잘렸다(실측).
+  return createPortal(
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" role="dialog" aria-label={title}>
         <div className="head">
@@ -154,7 +156,8 @@ export function Modal({
         <div className="content">{children}</div>
         {actions && <div className="actions">{actions}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

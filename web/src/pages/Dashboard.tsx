@@ -11,6 +11,17 @@ import { PreviewButton, ScreenCheckPanel } from '../components/preview.tsx';
 
 const ACTIVE = ['assigned', 'in_progress', 'verifying', 'in_review', 'changes_requested', 'integrating'];
 
+/**
+ * 활동 기록에서 뺄 잡음: 권한 요청을 대신 처리하는 직원이 있으면 요청·허용이 "…이 허용: 명령" 한 줄(approval.delegated)과 겹친다.
+ * 실측: 명령 하나에 "승인 요청 / 대표 승인 / 허용" 세 줄이 떠 대표가 한 적 없는 승인처럼 보였다.
+ */
+export function isNoiseEvent(e: DomainEvent, s: State | null): boolean {
+  const p = (e.payload ?? {}) as Record<string, unknown>;
+  if (!e.type.startsWith('approval.') || p.kind !== 'tool_permission') return false;
+  if (e.type === 'approval.requested') return Boolean(s?.permissionDelegate);
+  return (e.type === 'approval.approved' || e.type === 'approval.rejected') && e.actor !== 'ceo';
+}
+
 export function describeEvent(e: DomainEvent, s: State | null, lang: string): string {
   const p = (e.payload ?? {}) as Record<string, unknown>;
   const who = (id: unknown) => (s ? empName(s.employees, String(id)) : String(id));
@@ -95,6 +106,9 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
           ? `⛔ ${josa(who(e.actor), '이/가')} 차단: ${p.reason ?? ''}`
           : `⛔ ${who(e.actor)} blocked: ${p.reason ?? ''}`;
     case 'approval.approved':
+      // 권한 요청을 대신 처리하는 직원의 허용은 "대표 승인"이 아니다(실측: 대표가 한 적 없는 승인이 줄줄이 보였다).
+      if (e.actor !== 'ceo')
+        return ko ? `${josa(who(e.actor), '이/가')} 대신 허용: ${p.ticketId ?? ''}` : `${who(e.actor)} allowed for ${p.ticketId ?? ''}`;
       return ko ? `대표 승인: ${p.ticketId ?? ''}` : `CEO approved ${p.ticketId ?? ''}`;
     case 'approval.rejected':
       return ko ? `대표 반려: ${p.ticketId ?? ''}` : `CEO rejected ${p.ticketId ?? ''}`;
@@ -107,7 +121,7 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
         ? `${e.entityId} 원본 반영: ${p.kind === 'merged' ? '병합' : '브랜치 ' + String(p.branch ?? '')}`
         : `${e.entityId} integrated: ${p.kind === 'merged' ? 'merged' : 'branch ' + String(p.branch ?? '')}`;
     case 'decision.recorded':
-      return ko ? `결정 기록: ${String(p.text ?? '').slice(0, 60)}` : `Decision: ${String(p.text ?? '').slice(0, 60)}`;
+      return ko ? `규칙 추가: ${String(p.text ?? '').slice(0, 60)}` : `Decision: ${String(p.text ?? '').slice(0, 60)}`;
     case 'project.registered':
       return ko ? `프로젝트 등록: ${p.name}` : `Project registered: ${p.name}`;
     case 'project.updated':
@@ -145,11 +159,23 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
         return `${e.entityId} ${who(e.actor)} ${e.type.split('.')[1]} ${p.summary ?? ''}${p.error ? ` ✗ ${p.error}` : ''}`;
       if (e.type.startsWith('run.')) {
         const [, kind, st] = e.type.split('.');
-        const kindLabel = ko ? (({ work: '작업', review: '검수', analysis: '분석' } as Record<string, string>)[kind!] ?? kind) : kind;
+        const kindLabel = ko
+          ? (({ work: '작업', review: '검수', analysis: '분석', chat: '대화 답장' } as Record<string, string>)[kind!] ?? kind)
+          : kind;
         const stLabel = ko
           ? (({ prepared: '시작', succeeded: '성공', failed: '실패', orphaned: '고아' } as Record<string, string>)[st!] ?? st)
           : st;
-        return `${e.entityId} ${who(e.actor)} ${kindLabel} ${stLabel}${p.failureClass ? ` (${p.failureClass})` : ''}`;
+        // 대화방 ID(t:T-17, dm:…, g:…)는 사람이 읽는 이름으로
+        const where = e.entityId.startsWith('t:')
+          ? ko
+            ? `${e.entityId.slice(2)} 업무방`
+            : `${e.entityId.slice(2)} room`
+          : e.entityId.includes(':') || e.entityId === 'general'
+            ? ko
+              ? '대화방'
+              : 'chat'
+            : e.entityId;
+        return `${where} ${who(e.actor)} ${kindLabel} ${stLabel}${p.failureClass ? ` (${p.failureClass})` : ''}`;
       }
       return `${e.type} ${e.entityId}`;
   }
@@ -259,10 +285,20 @@ export function ApprovalItem({ a }: { a: Approval }) {
               </span>
             </label>
           ))}
-          <div className="hint">
-            {lang === 'ko'
-              ? '실행해 보고 확인한 항목을 체크하세요. 모두 체크해야 승인할 수 있습니다.'
-              : 'Run it, then tick what you confirmed. All items must be ticked to approve.'}
+          <div className="spread">
+            <span className="hint">
+              {lang === 'ko'
+                ? '실행해 보고 확인한 항목을 체크하세요. 모두 체크해야 승인할 수 있습니다.'
+                : 'Run it, then tick what you confirmed. All items must be ticked to approve.'}
+            </span>
+            {/* 체크한 바로 옆에서 승인(실측: 체크는 카드 맨 아래, 승인 버튼은 맨 위라 다시 올라가야 했다) */}
+            <button
+              className="btn ok small"
+              disabled={busy || unchecked}
+              onClick={() => (d.mode === 'auto_after_approval' ? decide('approved', 'auto_after_approval') : decide('approved'))}
+            >
+              {d.mode === 'auto_after_approval' ? t('approveMerge') : t('approve')}
+            </button>
           </div>
         </div>
       )}
@@ -285,7 +321,13 @@ export function ApprovalItem({ a }: { a: Approval }) {
                   disabled={busy || recorded.includes(c.id)}
                   onClick={() => setDeciding({ id: c.id, text: c.text })}
                 >
-                  {recorded.includes(c.id) ? (lang === 'ko' ? '기록함' : 'Recorded') : lang === 'ko' ? '결정으로 기록' : 'Record decision'}
+                  {recorded.includes(c.id)
+                    ? lang === 'ko'
+                      ? '기록함'
+                      : 'Recorded'
+                    : lang === 'ko'
+                      ? '규칙으로 남기기'
+                      : 'Record decision'}
                 </button>
               )}
             </div>
@@ -294,7 +336,7 @@ export function ApprovalItem({ a }: { a: Approval }) {
       )}
       {deciding && tk && (
         <Modal
-          title={lang === 'ko' ? '결정으로 기록' : 'Record a decision'}
+          title={lang === 'ko' ? '규칙으로 남기기' : 'Record a decision'}
           onClose={() => setDeciding(null)}
           actions={
             <button
@@ -306,7 +348,7 @@ export function ApprovalItem({ a }: { a: Approval }) {
                     api('decisions', {
                       body: { projectId: tk.projectId, text: deciding.text.trim(), sourceRefs: [deciding.id, tk.id] },
                     }),
-                  lang === 'ko' ? '결정을 기록했습니다.' : 'Decision recorded.',
+                  lang === 'ko' ? '규칙으로 남겼습니다.' : 'Decision recorded.',
                 ).then((ok) => ok && (setRecorded([...recorded, deciding.id]), setDeciding(null), reload()))
               }
             >
@@ -316,7 +358,7 @@ export function ApprovalItem({ a }: { a: Approval }) {
         >
           <div className="form">
             <label>
-              {lang === 'ko' ? '대표 결정 (이후 업무에 현재 결정으로 전달됩니다)' : 'Your decision (sent to later tickets as current)'}
+              {lang === 'ko' ? '규칙 (이후 모든 업무의 직원이 따릅니다)' : 'Your decision (sent to later tickets as current)'}
               <textarea value={deciding.text} onChange={(e) => setDeciding({ ...deciding, text: e.target.value })} autoFocus />
             </label>
           </div>
@@ -445,15 +487,22 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
                           <StatusChip status={x.status} /> <span className="chip bad">{hold(x.hold!.reason)}</span> {when(x.hold!.since)}
                         </div>
                       </div>
-                      <button
-                        className="btn small"
-                        disabled={busy}
-                        onClick={() =>
-                          run(() => api(`tickets/${x.id}/release`, { body: {} }), ko ? '보류를 해제했습니다.' : 'Released.').then(reload)
-                        }
-                      >
-                        {t('release')}
-                      </button>
+                      {x.hold!.reason === 'needs_permission' && x.status === 'verifying' ? (
+                        // 범위 밖 수정은 "허용/되돌리기"를 골라야 한다: 업무 화면에서 고른다.
+                        <Link to={`/tickets/${x.id}`} className="btn small primary">
+                          {ko ? '허용·되돌리기 고르기' : 'Allow or revert'}
+                        </Link>
+                      ) : (
+                        <button
+                          className="btn small"
+                          disabled={busy}
+                          onClick={() =>
+                            run(() => api(`tickets/${x.id}/release`, { body: {} }), ko ? '보류를 해제했습니다.' : 'Released.').then(reload)
+                          }
+                        >
+                          {t('release')}
+                        </button>
+                      )}
                     </div>
                     {x.hold!.note && <div className="note">{x.hold!.note}</div>}
                   </div>
@@ -502,7 +551,6 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
             </div>
           </div>
           <ProjectsPanel />
-          <DecisionsPanel />
           <div className="card">
             <h2>
               <span className="row">
@@ -513,6 +561,7 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
             <ul className="timeline">
               {[...state.events]
                 .reverse()
+                .filter((e) => !isNoiseEvent(e, state))
                 .slice(0, 25)
                 .map((e) => (
                   <li key={e.seq}>
@@ -650,47 +699,6 @@ function ProjectsPanel() {
           );
         })}
       </div>
-    </div>
-  );
-}
-
-/** 최근 결정(직원이 따라야 하는 현재 결정). */
-function DecisionsPanel() {
-  const { state } = useCompany();
-  const { lang } = useT();
-  const { go } = useRoute();
-  if (!state || state.projects.length === 0) return null;
-  const ko = lang === 'ko';
-  const current = state.decisions
-    .filter((d) => d.status === 'current')
-    .slice(-4)
-    .reverse();
-  return (
-    <div className="card">
-      <h2>
-        <span className="row">
-          <Icon name="book" /> {ko ? '현재 결정' : 'Current decisions'}
-        </span>
-        <button className="btn small" onClick={() => go('/decisions')}>
-          {ko ? '전체' : 'All'}
-        </button>
-      </h2>
-      {current.length === 0 ? (
-        <EmptyState icon="book">
-          {ko
-            ? '기록된 결정이 없습니다. 정한 규칙을 남겨 두면 모든 직원이 따릅니다.'
-            : 'No decisions yet. Recorded rules bind every employee.'}
-        </EmptyState>
-      ) : (
-        <div className="list">
-          {current.map((d) => (
-            <div className="item" key={d.id}>
-              <div style={{ fontSize: 13 }}>{d.text}</div>
-              <div className="meta">{when(d.createdAt)}</div>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

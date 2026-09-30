@@ -158,3 +158,13 @@ test('쓰기 범위 겹침 판정', () => {
   assert.equal(scopesOverlap(['src/auth/**'], ['docs/**']), false);
   assert.equal(scopesOverlap(['README.md'], ['README.md']), true);
 });
+
+test('범위·보호 경로는 점으로 시작하는 이름도 맞춘다', () => {
+  // 실측: src/ui/** 안의 src/ui/.gitignore가 범위 밖으로 막혔다
+  assert.equal(checkScope(['src/ui/.gitignore', 'src/.cache/a.js'], ['src/**'], []).ok, true);
+  // 보호 경로 docs/**는 docs/.env도 지킨다
+  assert.deepEqual(checkScope(['docs/.env'], ['**'], ['docs/**']).protectedTouched, ['docs/.env']);
+  // 패턴에 적은 점 이름은 그대로
+  assert.equal(checkScope(['.github/workflows/ci.yml'], ['.github/**'], []).ok, true);
+  assert.equal(checkScope(['.github/workflows/ci.yml'], ['src/**'], []).ok, false);
+});

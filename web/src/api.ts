@@ -106,6 +106,7 @@ export interface ScreenCheck {
   qaBy: string | null;
   opinion: string | null;
   qaState: string | null;
+  scripted?: boolean;
 }
 
 export interface Channel {

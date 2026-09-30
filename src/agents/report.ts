@@ -14,6 +14,24 @@ export interface WorkReport {
   followUps?: { title: string; reason: string }[];
   /** 다른 직원에게 묻는 말(이름). 업무방에 올라가고 그 직원이 답한다. */
   ask?: { to: string; text: string }[];
+  /** 대표 직접 확인 요구사항을 기계가 화면에서 보여 줄 순서(자동 화면 점검이 그대로 따라 한다). */
+  screenSteps?: ScreenScenario[];
+}
+
+/** 자동 화면 점검 한 단계. 좌표 대신 글자·선택자로 누를 수 있게 한다(직원은 화면 픽셀을 모른다). */
+export type ScreenStep =
+  | { do: 'key'; key: string; holdMs?: number; times?: number }
+  | { do: 'click'; text?: string; selector?: string; x?: number; y?: number }
+  | { do: 'type'; text: string }
+  | { do: 'wait'; ms: number }
+  | { do: 'reload' }
+  /** 저장된 데이터가 필요한 확인(예: 새로고침 뒤 최고 점수)을 위해 localStorage에 값을 넣는다. */
+  | { do: 'setStorage'; key: string; value: string }
+  | { do: 'shot'; label: string };
+
+export interface ScreenScenario {
+  requirementId: string;
+  steps: ScreenStep[];
 }
 
 export interface ReviewReport {
@@ -140,6 +158,7 @@ export function parseReport(
           .filter((a) => isStr(a?.to) && isStr(a?.text) && a.text.trim())
           .slice(0, 3)
           .map((a) => ({ to: String(a.to).replace(/^@/, '').slice(0, 60), text: String(a.text).slice(0, 2000) })),
+        screenSteps: screenStepsOf(r.screenSteps, expected.requirementIds),
       },
     };
   }
@@ -308,6 +327,41 @@ function suggestionsOf(v: unknown): VerifySuggestion[] {
     });
   }
   return out.slice(0, 5);
+}
+
+const num = (v: unknown, min: number, max: number): number | undefined =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : undefined;
+
+/** 화면 점검 순서: 너그럽게 읽되 모르는 단계는 버리고, 길이·시간에 상한을 둔다. */
+export function screenStepsOf(v: unknown, requirementIds: string[]): ScreenScenario[] {
+  const out: ScreenScenario[] = [];
+  let list = isArr(v) ? (v as Record<string, unknown>[]) : [];
+  // 실측(2026-09-30, Codex): 요구사항 없이 단계만 나열했다. 한 순서로 받아 '*'(어느 요구사항인지 모름)로 둔다.
+  if (list.length && list.every((x) => isStr(x?.do))) list = [{ requirementId: '*', steps: list }];
+  for (const x of list) {
+    if (!isStr(x?.requirementId) || !(x.requirementId === '*' || requirementIds.includes(x.requirementId)) || !isArr(x.steps)) continue;
+    const steps: ScreenStep[] = [];
+    for (const s of x.steps as Record<string, unknown>[]) {
+      const d = s?.do;
+      if (d === 'key' && isStr(s.key) && /^[A-Za-z0-9]{1,20}$/.test(s.key))
+        steps.push({ do: 'key', key: s.key, holdMs: num(s.holdMs, 0, 5000), times: num(s.times, 1, 50) });
+      else if (d === 'click' && (isStr(s.text) || isStr(s.selector) || (typeof s.x === 'number' && typeof s.y === 'number')))
+        steps.push({
+          do: 'click',
+          ...(isStr(s.text) ? { text: s.text.slice(0, 100) } : {}),
+          ...(isStr(s.selector) ? { selector: s.selector.slice(0, 200) } : {}),
+          ...(typeof s.x === 'number' ? { x: num(s.x, 0, 1)!, y: num(s.y, 0, 1)! } : {}),
+        });
+      else if (d === 'type' && isStr(s.text)) steps.push({ do: 'type', text: s.text.slice(0, 200) });
+      else if (d === 'wait') steps.push({ do: 'wait', ms: num(s.ms, 0, 10_000) ?? 500 });
+      else if (d === 'reload') steps.push({ do: 'reload' });
+      else if (d === 'setStorage' && isStr(s.key) && isStr(s.value))
+        steps.push({ do: 'setStorage', key: s.key.slice(0, 200), value: s.value.slice(0, 5000) });
+      else if (d === 'shot') steps.push({ do: 'shot', label: isStr(s.label) ? s.label.slice(0, 80) : '' });
+    }
+    if (steps.some((s) => s.do === 'shot')) out.push({ requirementId: x.requirementId, steps: steps.slice(0, 30) });
+  }
+  return out.slice(0, 6);
 }
 
 function followUpsOf(v: unknown): { title: string; reason: string }[] {

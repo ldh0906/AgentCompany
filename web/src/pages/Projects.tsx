@@ -122,6 +122,7 @@ export function Projects() {
                   </div>
                 ) : null;
               })()}
+              <ProjectRules projectId={p.id} />
               <div style={{ marginTop: 10 }}>
                 <b>{ko ? '보호 경로' : 'Protected paths'}</b>
                 <div className="row">
@@ -304,8 +305,8 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
             {info?.empty && !project && (
               <span className="hint">
                 {ko
-                  ? '빈 저장소입니다. 첫 업무가 만들 테스트 명령(예: npm test, node --test)을 아래 검증 명령에 미리 적어 두세요. 뒤 업무가 앞 업무 결과를 이어받도록 반영 방식은 자동 병합으로 두었습니다.'
-                  : 'Empty repository. Add the test command the first ticket will create (e.g. npm test, node --test) below. Merge mode is set to auto so later tickets build on earlier ones.'}
+                  ? '빈 저장소입니다. 검증 명령은 비워 두어도 됩니다: 업무 초안을 확정할 때 비서실장이 제안한 명령이 함께 추가되고, 나중에 생기는 테스트도 자동으로 추가됩니다. 뒤 업무가 앞 업무 결과를 이어받도록 반영 방식은 자동 병합으로 두었습니다.'
+                  : 'Empty repository. You can leave verify commands empty: confirming a draft adds the suggested commands, and tests added later are picked up automatically. Merge mode is set to auto so later tickets build on earlier ones.'}
               </span>
             )}
           </label>
@@ -460,5 +461,67 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
       </div>
       {picking && <FolderPicker initial={originPath || pickerStart} onPick={setOriginPath} onClose={() => setPicking(false)} />}
     </Modal>
+  );
+}
+
+/**
+ * 정해 둔 규칙(현재 결정): 대표가 질문에 답하거나 대화에서 정한 것이 자동으로 쌓이고 모든 직원이 따른다.
+ * 따로 관리할 일이 드물어 메뉴에서 빼고 여기 접어 둔다(대표 의견, 2026-09-30). 틀린 규칙만 거두면 된다.
+ */
+function ProjectRules({ projectId }: { projectId: string }) {
+  const { state, reload } = useCompany();
+  const { lang } = useT();
+  const ko = lang === 'ko';
+  const { busy, run } = useAction();
+  const [text, setText] = useState('');
+  const rules = (state?.decisions ?? []).filter((d) => d.projectId === projectId && d.status === 'current');
+  return (
+    <details className="advanced" style={{ marginTop: 10 }}>
+      <summary>
+        <b>{ko ? `정해 둔 규칙 ${rules.length}개` : `${rules.length} agreed rules`}</b>{' '}
+        <span className="sub">
+          {ko ? '— 질문에 답한 내용이 자동으로 쌓이고, 모든 직원이 따릅니다' : '— your answers, followed by every employee'}
+        </span>
+      </summary>
+      <div className="list" style={{ marginTop: 6 }}>
+        {rules.map((d) => (
+          <div className="item spread" key={d.id} style={{ gap: 8 }}>
+            <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{d.text}</div>
+            <button
+              className="btn small"
+              disabled={busy}
+              title={ko ? '더 이상 따르지 않게 합니다(기록은 남음)' : 'Stop applying it (kept in history)'}
+              onClick={() =>
+                run(
+                  () => api(`decisions/${d.id}/status`, { body: { status: 'withdrawn' } }),
+                  ko ? '규칙을 거뒀습니다.' : 'Withdrawn.',
+                ).then(reload)
+              }
+            >
+              {ko ? '거두기' : 'Withdraw'}
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="row" style={{ marginTop: 6 }}>
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={ko ? '새 규칙 (예: 파티 최대 인원은 4명)' : 'New rule'}
+          style={{ flex: 1 }}
+        />
+        <button
+          className="btn small"
+          disabled={busy || !text.trim()}
+          onClick={() =>
+            run(() => api('decisions', { body: { projectId, text } }), ko ? '규칙을 추가했습니다.' : 'Added.').then(
+              (ok) => ok && (setText(''), reload()),
+            )
+          }
+        >
+          {ko ? '추가' : 'Add'}
+        </button>
+      </div>
+    </details>
   );
 }

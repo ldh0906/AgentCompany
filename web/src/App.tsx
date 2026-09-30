@@ -7,7 +7,6 @@ import { Board } from './pages/Board.tsx';
 import { TicketPage } from './pages/TicketPage.tsx';
 import { Org } from './pages/Org.tsx';
 import { Projects } from './pages/Projects.tsx';
-import { Decisions } from './pages/Decisions.tsx';
 import { System } from './pages/System.tsx';
 import { NewTicket } from './pages/NewTicket.tsx';
 import { ChatPage } from './pages/Chat.tsx';
@@ -145,7 +144,8 @@ function Shell() {
   else if (path.startsWith('/live')) page = <Live runId={path.length > 6 ? decodeURIComponent(path.slice('/live/'.length)) : null} />;
   else if (path.startsWith('/org')) page = <Org />;
   else if (path.startsWith('/projects')) page = <Projects />;
-  else if (path.startsWith('/decisions')) page = <Decisions />;
+  else if (path.startsWith('/decisions'))
+    page = <Projects />; // 옛 결정 기록 주소: 규칙은 프로젝트 화면에 있다
   else if (path.startsWith('/system')) page = <System />;
   else page = <Dashboard onNewTicket={() => setNewTicket(true)} />;
 
@@ -178,9 +178,6 @@ function Shell() {
           <Link to="/live">
             <Icon name="activity" /> {lang === 'ko' ? '작업 현황' : 'Live work'}
             {runningNow > 0 && <span className="count info">{runningNow}</span>}
-          </Link>
-          <Link to="/decisions">
-            <Icon name="book" /> {t('nav_decisions')}
           </Link>
         </nav>
         <div className="nav-label">{lang === 'ko' ? '회사' : 'Company'}</div>

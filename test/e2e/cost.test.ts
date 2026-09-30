@@ -66,6 +66,15 @@ test(
       env.orch.verifySuggestions(env.projectId).map((v) => v.argv.join(' ')),
       ['npm run typecheck'],
     );
+    // 스크립트 본문과 같은 명령이 이미 있으면 겹치는 추천을 하지 않는다(실측: node --test tests가 있는데 npm test 추천)
+    env.company.updateProject(env.projectId, {
+      verifyCommands: [
+        { label: 'unit', argv: ['vitest', 'run'], evidenceType: 'unit_test' },
+        { label: 'tc', argv: ['tsc', '--noEmit'], evidenceType: 'static_check' },
+      ],
+    });
+    await env.orch.autoVerifyCommands(env.projectId);
+    assert.deepEqual(env.orch.verifySuggestions(env.projectId), []);
   },
 );
 

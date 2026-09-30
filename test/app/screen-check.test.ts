@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { captureScreens, findChrome } from '../../src/app/screen-check.ts';
 
-const PAGE = `<!doctype html><body style="margin:0;background:#123"><h1 id="h">시작 화면</h1><script>
+const PAGE = `<!doctype html><body style="margin:0;background:#123"><h1 id="h">시작 화면</h1><div style="width:600px;height:10px"></div><script>
 console.error('boom from page');
 addEventListener('keydown', (e) => { if (e.code === 'Enter') document.getElementById('h').textContent = '게임 시작'; });
 </script></body>`;
@@ -19,7 +19,12 @@ test('크롬으로 열어 세 장을 찍고 콘솔 오류와 첫 화면 글자�
   try {
     const out = await mkdtemp(path.join(os.tmpdir(), 'ac-shots-'));
     const cap = await captureScreens(`http://127.0.0.1:${port}/`, out);
-    assert.equal(cap.shots.length, 3);
+    assert.equal(cap.shots.length, 4, '흔한 조작 3장 + 휴대폰 폭 1장');
+    assert.equal(cap.shots.at(-1)!.label, '휴대폰 폭(375px)');
+    assert.ok(
+      cap.errors.some((e) => /가로로 넘침/.test(e)),
+      '넓은 요소는 휴대폰 폭에서 넘친다고 알린다',
+    );
     for (const s of cap.shots) assert.ok((await stat(s.file)).size > 1000, s.file);
     assert.match(cap.text, /시작 화면/);
     assert.ok(

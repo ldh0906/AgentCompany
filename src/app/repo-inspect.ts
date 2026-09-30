@@ -135,18 +135,21 @@ async function suggestVerify(repo: string): Promise<VerifySuggestion[]> {
   return out;
 }
 
-/** 브랜치(ref)의 내용으로 검증 명령을 추천한다(작업 트리가 아니라 git에서 읽는다: "브랜치만" 반영에서도 동작). */
-export async function suggestVerifyAt(repo: string, ref: string): Promise<VerifySuggestion[]> {
+/**
+ * 브랜치(ref)의 내용으로 검증 명령을 추천한다(작업 트리가 아니라 git에서 읽는다: "브랜치만" 반영에서도 동작).
+ * npm 스크립트는 실제로 도는 명령(runs)도 알려 준다: 이미 같은 명령이 있으면 겹치는 추천을 하지 않게.
+ */
+export async function suggestVerifyAt(repo: string, ref: string): Promise<(VerifySuggestion & { runs?: string })[]> {
   const show = async (f: string) => {
     const r = await git(['show', `${ref}:${f}`], repo, { allowFail: true });
     return r.code === 0 ? r.stdout : null;
   };
-  const out: VerifySuggestion[] = [];
+  const out: (VerifySuggestion & { runs?: string })[] = [];
   const pkgText = await show('package.json');
   const scripts = (pkgText ? (JSON.parse(pkgText) as { scripts?: Record<string, string> }).scripts : null) ?? {};
-  if (scripts.test) out.push({ label: 'Unit tests', evidenceType: 'unit_test', argv: ['npm', 'test'] });
+  if (scripts.test) out.push({ label: 'Unit tests', evidenceType: 'unit_test', argv: ['npm', 'test'], runs: scripts.test.trim() });
   for (const s of ['typecheck', 'lint', 'build'])
-    if (scripts[s]) out.push({ label: s, evidenceType: 'static_check', argv: ['npm', 'run', s] });
+    if (scripts[s]) out.push({ label: s, evidenceType: 'static_check', argv: ['npm', 'run', s], runs: scripts[s]!.trim() });
   if (await show('Cargo.toml')) out.push({ label: 'cargo test', evidenceType: 'unit_test', argv: ['cargo', 'test'] });
   if (await show('go.mod')) out.push({ label: 'go test', evidenceType: 'unit_test', argv: ['go', 'test', './...'] });
   if ((await show('pyproject.toml')) || (await show('pytest.ini')))

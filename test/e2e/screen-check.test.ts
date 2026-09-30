@@ -32,11 +32,11 @@ test('승인 대기에 오면 띄워서 세 장을 찍고, QA 직원이 의견�
     view = env.orch.screenCheckView(ticket.id);
   }
   assert.equal(view?.state, 'done', view?.note ?? '');
-  assert.equal(view!.shots.length, 3);
+  assert.equal(view!.shots.length, 4);
   assert.ok(view!.opinion, 'QA 의견이 승인 카드에 붙는다');
   assert.equal(view!.qaBy, env.company.employees().find((e) => e.name === 'QA 직원')!.id, '담당자가 아닌 QA가 본다');
   const imgs = await env.orch.screenImages(ticket.id);
-  assert.equal(imgs.length, 3);
+  assert.equal(imgs.length, 4);
   assert.match(imgs[0]!.dataUrl, /^data:image\/png;base64,/);
   const room = env.orch.chat.messages(ticketChannelId(ticket.id), 100);
   assert.ok(room.some((m) => /자동 화면 점검/.test(m.text)));

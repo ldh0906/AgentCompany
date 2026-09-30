@@ -403,6 +403,18 @@ export class Company {
     return next;
   }
 
+  /** 대표가 범위 밖 수정을 허용할 때: 그 경로를 이 업무의 쓰기 범위에 더한다. */
+  extendWriteScope(id: string, paths: string[]): Ticket {
+    const t = this.requireTicket(id);
+    const add = paths.filter((p) => !t.writeScope.includes(p));
+    const next = { ...t, writeScope: [...t.writeScope, ...add], updatedAt: this.clock() };
+    this.store.transact(() => {
+      this.saveTicket(next);
+      this.store.appendEvent('ceo', 'ticket.scope_extended', id, { paths: add }, this.clock());
+    });
+    return next;
+  }
+
   private saveTicket(t: Ticket): void {
     this.store.put('tickets', t.id, t, { project_id: t.projectId, status: t.status, created_at: t.createdAt, updated_at: t.updatedAt });
   }

@@ -19,7 +19,16 @@ import {
   synthesize,
   type DeliberationPhase,
 } from '../agents/deliberation.ts';
-import { followUpsFromSummary, parseChatReply, parseDrafts, parseReport, type TicketDraft, type WorkReport } from '../agents/report.ts';
+import {
+  extractLastJson,
+  followUpsFromSummary,
+  parseChatReply,
+  parseDrafts,
+  parseReport,
+  screenStepsOf,
+  type TicketDraft,
+  type WorkReport,
+} from '../agents/report.ts';
 import { Chat, ticketChannelId, type ChatMessage } from './chat.ts';
 import { writeDecision } from '../approvals/file-queue.ts';
 import type { Actor } from '../core/ticket-machine.ts';
@@ -82,6 +91,8 @@ export interface ScreenCheck {
   errors: string[];
   qaRunId: string | null;
   qaBy: string | null;
+  /** 담당 직원이 남긴 점검 순서를 따랐는지(아니면 흔한 조작만) */
+  scripted?: boolean;
 }
 
 export interface RecoveryReport {
@@ -265,9 +276,23 @@ export class Orchestrator {
           info.log.trim().split('\n').slice(-4).join(' ').slice(0, 400),
       );
     const outDir = path.join(this.opts.dataDir, 'screens', t.id, sha.slice(0, 12));
-    const cap = await captureScreens(info.url, outDir, chrome);
+    // 담당 직원이 남긴 점검 순서(대표 직접 확인 요구사항별)를 따라 한다. 없으면 흔한 조작만.
+    const attestIds = new Set(t.requirements.filter((r) => r.evidenceType === 'human_attest').map((r) => r.id));
+    // 저장된 보고서가 아니라 원문에서 다시 읽는다: 읽는 규칙이 나아지면 "다시 찍기"만으로 반영된다.
+    const sub = this.records.latestSubmission(t);
+    const raw = sub?.finalText ? (extractLastJson(sub.finalText) as Record<string, unknown> | null) : null;
+    // 어느 요구사항인지 모르는 순서('*')는 확인할 요구사항이 하나면 그것으로, 아니면 "화면"으로 붙인다.
+    const star = attestIds.size === 1 ? [...attestIds][0]! : tr('화면', 'screen');
+    const scenarios = screenStepsOf(
+      raw?.screenSteps,
+      t.requirements.map((r) => r.id),
+    )
+      .map((x) => (x.requirementId === '*' ? { ...x, requirementId: star } : x))
+      .filter((x) => attestIds.has(x.requirementId) || x.requirementId === star);
+    const cap = await captureScreens(info.url, outDir, chrome, scenarios);
     check.shots = cap.shots;
     check.errors = cap.errors;
+    check.scripted = scenarios.length > 0;
     check.state = 'done';
     check.note = info.url;
     const room = this.chat.ensureTicketChannel(t.id);
@@ -291,6 +316,7 @@ export class Orchestrator {
         shots: cap.shots.map((s) => ({ file: path.basename(s.file), label: s.label })),
         errors: cap.errors,
         pageText: cap.text,
+        scenarios,
         nonce,
         language: this.opts.language ?? 'ko',
       });
@@ -1008,7 +1034,10 @@ export class Orchestrator {
     const project = this.company.requireProject(projectId);
     const found = await suggestVerifyAt(project.originPath, project.baseBranch);
     const have = new Set(project.verifyCommands.map((v) => v.argv.join(' ')));
-    const missing = found.filter((f) => !have.has(f.argv.join(' ')));
+    // 실측: node --test tests가 있는데 같은 일을 하는 npm test를 또 추천했다. 스크립트 본문이 이미 있으면 뺀다.
+    const missing = found
+      .filter((f) => !have.has(f.argv.join(' ')) && !(f.runs && have.has(f.runs)))
+      .map(({ label, argv, evidenceType }) => ({ label, argv, evidenceType }));
     if (!missing.length) {
       this.company.store.setSetting(`verify_suggest:${projectId}`, '');
       return;
@@ -2537,6 +2566,13 @@ ${failure.detail.slice(0, 400)}`,
   acceptRequest(requestId: string, drafts?: TicketDraft[]): Ticket[] {
     const req = this.records.request(requestId);
     if (!req || req.status !== 'drafted') throw new DomainError(tr('확정할 수 있는 초안이 없습니다.', 'No draft available to confirm.'));
+    // 답하지 않은 질문은 비서실장 제안대로 간다(실측: "기록이 없으면 0을 보여 줄까요?"처럼 뻔한 질문에 대표가 매번 멈췄다).
+    const pending = req.questions.map((_, i) => i).filter((i) => !req.answers?.[i] && req.proposals?.[i]?.trim());
+    if (pending.length)
+      this.answerQuestions(
+        requestId,
+        pending.map((index) => ({ index, answer: null })),
+      );
     const list = drafts ?? req.drafts;
     const created: Ticket[] = [];
     this.company.store.transact(() => {
@@ -2560,7 +2596,7 @@ ${failure.detail.slice(0, 400)}`,
           ),
         );
       }
-      this.records.saveRequest({ ...req, status: 'accepted', ticketIds: created.map((t) => t.id) });
+      this.records.saveRequest({ ...this.records.request(requestId)!, status: 'accepted', ticketIds: created.map((t) => t.id) });
       this.company.store.appendEvent('ceo', 'request.accepted', req.id, { tickets: created.map((t) => t.id) });
     });
     this.changed('request', requestId);
@@ -2713,6 +2749,40 @@ ${failure.detail.slice(0, 400)}`,
 
   releaseHold(ticketId: string): Ticket {
     return this.apply(ticketId, { type: 'release_hold' }, CEO);
+  }
+
+  /**
+   * 범위 밖 수정으로 멈춘 업무를 대표가 정리한다(실측: "보류 해제"만 있어 누르면 같은 검사로 다시 멈췄다).
+   * allow: 그 파일들을 쓰기 범위에 더하고 검증을 이어간다(보호 경로·git 조작은 허용할 수 없다).
+   * revert: 직원에게 그 변경을 되돌리라고 수정 요청한다.
+   */
+  resolveScopeHold(ticketId: string, allow: boolean): Ticket {
+    const t = this.company.requireTicket(ticketId);
+    if (t.hold?.reason !== 'needs_permission' || t.status !== 'verifying')
+      throw new DomainError(tr('범위 밖 수정으로 멈춘 업무가 아닙니다.', 'This ticket is not held for out-of-scope changes.'));
+    const sub = this.records.latestSubmission(t);
+    const project = this.company.requireProject(t.projectId);
+    const scope = checkScope(sub?.changedPaths ?? [], t.writeScope, project.protectedPaths);
+    if (allow) {
+      if (sub?.refViolations.length || sub?.originChanged || scope.protectedTouched.length)
+        throw new DomainError(
+          tr(
+            '보호 경로나 원본 저장소·git 기록을 건드린 변경은 허용할 수 없습니다. 되돌리게 하세요.',
+            'Changes to protected paths, the original repo or git refs cannot be allowed. Ask for a revert.',
+          ),
+        );
+      if (scope.outOfScope.length) this.company.extendWriteScope(t.id, scope.outOfScope);
+      return this.releaseHold(t.id);
+    }
+    const files = [...scope.outOfScope, ...scope.protectedTouched];
+    this.releaseHold(t.id);
+    return this.apply(t.id, {
+      type: 'verification_failed',
+      reason: tr(
+        `대표 지시: 쓰기 범위 밖 변경을 되돌리세요${files.length ? `: ${files.join(', ')}` : ''}. 허용된 범위(${t.writeScope.join(', ')}) 안에서만 고치세요.`,
+        `CEO: revert the out-of-scope changes${files.length ? `: ${files.join(', ')}` : ''}. Only change files within ${t.writeScope.join(', ')}.`,
+      ),
+    });
   }
 
   /** 직원 삭제: 실행 중인 작업이나 작성 중인 초안이 있으면 거부한다(업무 확인은 Company가 한다). */

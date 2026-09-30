@@ -18,7 +18,7 @@ const KIND_LABEL: Record<string, [string, string]> = {
 };
 
 const SLASH: { cmd: string; ko: string; en: string }[] = [
-  { cmd: '/결정 ', ko: '/결정 내용 — 현재 결정으로 기록(모든 직원에게 전달)', en: '/결정 text — record a decision' },
+  { cmd: '/결정 ', ko: '/결정 내용 — 프로젝트 규칙으로 남김(모든 직원이 따름)', en: '/결정 text — record a decision' },
   { cmd: '/요청 ', ko: '/요청 내용 — 비서실장에게 업무 초안 요청', en: '/요청 text — ask the chief of staff for drafts' },
   { cmd: '/방 ', ko: '/방 이름 @직원 @직원 — 그룹 방 열기', en: '/방 name @a @b — open a group room' },
   { cmd: '/지시 ', ko: '/지시 @직원 내용 — 작업 중인 직원에게 지시', en: '/지시 @name text — steer a working employee' },
@@ -316,7 +316,7 @@ function inline(text: string, names: string[]): React.ReactNode[] {
           {tok}
         </Link>
       ) : (
-        <Link key={m.index} to="/decisions">
+        <Link key={m.index} to="/projects">
           {tok}
         </Link>
       ),
@@ -393,7 +393,7 @@ function Message({
         )}
         <div className="msg-actions">
           <button onClick={onQuote}>{ko ? '답장' : 'Reply'}</button>
-          <button onClick={onDecide}>{ko ? '결정으로 기록' : 'Record decision'}</button>
+          <button onClick={onDecide}>{ko ? '규칙으로 남기기' : 'Record decision'}</button>
           <button onClick={() => void navigator.clipboard?.writeText(m.text)}>{ko ? '복사' : 'Copy'}</button>
         </div>
       </div>
@@ -463,7 +463,7 @@ function Composer({ channel, quote, onSent }: { channel: Channel; quote: string;
       if (!projectId) return;
       return void run(
         () => api('decisions', { body: { projectId, text: body.slice(4).trim(), sourceRefs: [channel.id] } }),
-        ko ? '결정을 기록했습니다.' : 'Decision recorded.',
+        ko ? '규칙으로 남겼습니다.' : 'Decision recorded.',
       ).then(done);
     }
     if (body.startsWith('/요청 ')) {
@@ -566,7 +566,7 @@ function DecisionModal({
   const [value, setValue] = useState(text);
   return (
     <Modal
-      title={ko ? '결정으로 기록' : 'Record a decision'}
+      title={ko ? '규칙으로 남기기' : 'Record a decision'}
       onClose={onClose}
       actions={
         <button
@@ -575,7 +575,7 @@ function DecisionModal({
           onClick={() =>
             run(
               () => api('decisions', { body: { projectId, text: value.trim(), sourceRefs: [source] } }),
-              ko ? '결정을 기록했습니다.' : 'Recorded.',
+              ko ? '규칙으로 남겼습니다.' : 'Recorded.',
             ).then((ok) => ok && onClose())
           }
         >
@@ -586,7 +586,9 @@ function DecisionModal({
       <div className="form">
         <textarea value={value} onChange={(e) => setValue(e.target.value)} autoFocus />
         <div className="hint">
-          {ko ? '현재 결정은 이후 모든 직원(검수자 포함)에게 전달됩니다.' : 'Current decisions reach every employee, reviewers included.'}
+          {ko
+            ? '규칙은 프로젝트 화면에 모이고, 이후 모든 직원(검수자 포함)이 따릅니다.'
+            : 'Current decisions reach every employee, reviewers included.'}
         </div>
       </div>
     </Modal>

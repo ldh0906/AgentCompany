@@ -4,7 +4,7 @@ import { Link, useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
 import { fmtTokens } from '../components/usage.tsx';
 import { CliChip, DiffView, empName, HoldChip, Icon, Modal, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
-import { ApprovalItem, describeEvent } from './Dashboard.tsx';
+import { ApprovalItem, describeEvent, isNoiseEvent } from './Dashboard.tsx';
 import { PreviewButton } from '../components/preview.tsx';
 
 interface Detail {
@@ -132,7 +132,7 @@ export function TicketPage({ id }: { id: string }) {
               {ko ? '검수 건너뛰고 승인 단계로' : 'Skip review → approval'}
             </button>
           )}
-          {tk.hold && (
+          {tk.hold && !(tk.hold.reason === 'needs_permission' && tk.status === 'verifying') && (
             <button
               className="btn"
               disabled={busy}
@@ -172,6 +172,40 @@ export function TicketPage({ id }: { id: string }) {
             <Icon name="pause" size={14} /> {holdLabel(tk.hold.reason)}
           </b>
           <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{tk.hold.note}</div>
+          {tk.hold.reason === 'needs_permission' && tk.status === 'verifying' && (
+            <div style={{ marginTop: 8 }}>
+              <div className="sub">
+                {ko
+                  ? '직원이 이 업무에 허락된 파일 밖을 고쳤습니다. 괜찮은 변경이면 허용하고, 아니면 되돌리게 하세요.'
+                  : 'The employee changed files outside this ticket’s allowed area. Allow it if fine, otherwise ask for a revert.'}
+              </div>
+              <div className="row" style={{ marginTop: 6 }}>
+                <button
+                  className="btn small primary"
+                  disabled={busy}
+                  onClick={() =>
+                    run(() => api(`tickets/${tk.id}/scope`, { body: { allow: true } }), ko ? '허용하고 계속합니다.' : 'Allowed.').then(
+                      reload,
+                    )
+                  }
+                >
+                  {ko ? '이 파일 변경 허용하고 계속' : 'Allow and continue'}
+                </button>
+                <button
+                  className="btn small"
+                  disabled={busy}
+                  onClick={() =>
+                    run(
+                      () => api(`tickets/${tk.id}/scope`, { body: { allow: false } }),
+                      ko ? '되돌리라고 했습니다.' : 'Revert requested.',
+                    ).then(reload)
+                  }
+                >
+                  {ko ? '직원에게 되돌리게 하기' : 'Ask to revert'}
+                </button>
+              </div>
+            </div>
+          )}
           {/토큰 예산|Token budget/.test(tk.hold.note) && (
             <div className="row" style={{ marginTop: 10, justifyContent: 'flex-end' }}>
               <button
@@ -195,7 +229,7 @@ export function TicketPage({ id }: { id: string }) {
                 onChange={(e) => setAnswer(e.target.value)}
                 placeholder={
                   ko
-                    ? '직원의 질문에 답하세요. 답은 결정으로 기록되어 모든 직원에게 전달됩니다.'
+                    ? '직원의 질문에 답하세요. 답은 프로젝트 규칙으로 남아 모든 직원이 따릅니다.'
                     : 'Answer the questions. Recorded as a decision for everyone.'
                 }
               />
@@ -378,17 +412,19 @@ export function TicketPage({ id }: { id: string }) {
         {tab === 'claims' && <ClaimLedger claims={detail.claims} />}
         {tab === 'timeline' && (
           <ul className="timeline">
-            {detail.events.map((e) => (
-              <li key={e.seq}>
-                <span className="when">{new Date(e.ts).toLocaleString()}</span>
-                <span>
-                  {describeEvent(e, state, lang)}
-                  {e.type === 'ticket.changes_requested' && (
-                    <div className="note">{String((e.payload as { reason?: string }).reason ?? '')}</div>
-                  )}
-                </span>
-              </li>
-            ))}
+            {detail.events
+              .filter((e) => !isNoiseEvent(e, state))
+              .map((e) => (
+                <li key={e.seq}>
+                  <span className="when">{new Date(e.ts).toLocaleString()}</span>
+                  <span>
+                    {describeEvent(e, state, lang)}
+                    {e.type === 'ticket.changes_requested' && (
+                      <div className="note">{String((e.payload as { reason?: string }).reason ?? '')}</div>
+                    )}
+                  </span>
+                </li>
+              ))}
           </ul>
         )}
         {tab === 'runs' && (
