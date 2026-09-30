@@ -1,7 +1,7 @@
 // 자동 화면 점검: 대표 직접 확인 요구가 있는 업무가 승인 대기에 오면, 앱이 결과물을 띄워 화면을 찍고 QA 직원 의견을 받는다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { findChrome } from '../../src/app/screen-check.ts';
 import { ticketChannelId } from '../../src/app/chat.ts';
@@ -49,4 +49,15 @@ test('승인 대기에 오면 띄워서 세 장을 찍고, QA 직원이 의견�
   const at = view!.at;
   await env.orch.tick();
   assert.equal(env.orch.screenCheckView(ticket.id)!.at, at);
+
+  // 끝나면 정리: 내려받은 파일·녹화 폴더는 지우고 사진은 남긴다
+  const approval = env.orch.records.pendingApprovalFor(ticket.id, 'integrate')!;
+  env.orch.decideIntegration(approval.id, 'approved', { attested: ['R1'] });
+  await driveUntil(env, ticket.id, (x) => x.status === 'done');
+  (env.orch as unknown as { lastScreenSweep: number }).lastScreenSweep = 0;
+  await env.orch.tick();
+  const dir = join(env.dataDir, 'screens', ticket.id);
+  const [sha] = readdirSync(dir);
+  assert.ok(!existsSync(join(dir, sha!, 'downloads')), '내려받은 파일 폴더를 지운다');
+  assert.ok(existsSync(join(dir, sha!, '1.png')), '사진은 남긴다');
 });

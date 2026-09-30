@@ -115,6 +115,19 @@ export function ScreenCheckPanel({ ticketId }: { ticketId: string }) {
               </button>
             ))}
           </div>
+          {(c.clips ?? []).length > 0 && (
+            <div className="row" style={{ flexWrap: 'wrap' }}>
+              {(c.clips ?? []).map((x, i) => (
+                <ClipButton
+                  key={`${c.at}-${i}`}
+                  ticketId={ticketId}
+                  index={i}
+                  label={x.label}
+                  seconds={Math.max(1, Math.round(x.count / x.fps))}
+                />
+              ))}
+            </div>
+          )}
           {(c.downloads ?? []).map((f) => (
             <details key={f.name} className="advanced">
               <summary>
@@ -162,5 +175,44 @@ export function ScreenCheckPanel({ ticketId }: { ticketId: string }) {
         </Modal>
       )}
     </div>
+  );
+}
+
+/** 녹화 재생: 누를 때만 불러와(대시보드를 무겁게 하지 않게) 초당 몇 장으로 되풀이해 보여 준다. */
+function ClipButton({ ticketId, index, label, seconds }: { ticketId: string; index: number; label: string; seconds: number }) {
+  const { lang } = useT();
+  const ko = lang === 'ko';
+  const [clip, setClip] = useState<{ label: string; fps: number; frames: string[] } | null>(null);
+  const [error, setError] = useState('');
+  const [i, setI] = useState(0);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!clip) return;
+    const t = setInterval(() => setI((n) => (n + 1) % clip.frames.length), 1000 / clip.fps);
+    return () => clearInterval(t);
+  }, [clip]);
+  const open = () => {
+    setLoading(true);
+    api<{ label: string; fps: number; frames: string[] }>(`tickets/${ticketId}/clips?n=${index}`)
+      .then((x) => (setI(0), setClip(x)))
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
+  };
+  return (
+    <>
+      <button className="btn small" disabled={loading} onClick={open} title={error || undefined}>
+        ▶ {ko ? `${label} 움직임 보기 (${seconds}초)` : `${label} motion (${seconds}s)`}
+      </button>
+      {clip && (
+        <Modal title={ko ? `${clip.label} 움직임 (${i + 1}/${clip.frames.length})` : `${clip.label} motion`} onClose={() => setClip(null)}>
+          <img src={clip.frames[i]} alt="" style={{ width: '100%', borderRadius: 8 }} />
+          <div className="hint">
+            {ko
+              ? '기계가 조작하는 동안과 그 직후 몇 초만, 초당 4장으로 찍었습니다. 끊겨 보이는 건 정상입니다.'
+              : 'Recorded at 4 frames per second during and right after each action.'}
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }

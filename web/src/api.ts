@@ -108,6 +108,7 @@ export interface ScreenCheck {
   qaState: string | null;
   scripted?: boolean;
   downloads?: { name: string; size: number; verdict: string; text?: { preview: string } }[];
+  clips?: { label: string; fps: number; count: number }[];
 }
 
 export interface Channel {

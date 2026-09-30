@@ -13,6 +13,17 @@ import path from 'node:path';
 import type { ScreenScenario } from '../agents/report.ts';
 
 const MAX_SHOTS = 12;
+/** 녹화: 초당 몇 장, 조작 뒤 최대 몇 ms 더 찍는지, 순서 하나에 최대 몇 장 */
+const CLIP_FPS = 4;
+const CLIP_SETTLE_MAX_MS = 3000;
+const CLIP_MAX_FRAMES = 40;
+
+export interface ScreenClip {
+  /** 요구사항 ID(어느 확인 순서의 움직임인지) */
+  label: string;
+  fps: number;
+  frames: string[];
+}
 
 export interface ScreenShot {
   label: string;
@@ -27,6 +38,8 @@ export interface ScreenCapture {
   text: string;
   /** 조작 중 내려받은 파일(예: CSV 내보내기)과 글자 인코딩 점검 */
   downloads: DownloadedFile[];
+  /** 확인 순서의 조작 직후 몇 초 녹화(움직임·반응 속도를 보려고) */
+  clips: ScreenClip[];
 }
 
 export interface DownloadedFile {
@@ -169,6 +182,14 @@ async function key(cdp: Cdp, code: string, holdMs = 60): Promise<void> {
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...base, ...(keyName.length === 1 ? { text: keyName } : {}) });
   await sleep(holdMs);
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+}
+
+/** 글자를 사람처럼 한 자씩 친다(한꺼번에 넣으면 "입력하는 즉시 반응"을 녹화로 볼 수 없다). */
+async function typeSlowly(cdp: Cdp, text: string): Promise<void> {
+  for (const ch of [...text].slice(0, 60)) {
+    await cdp.send('Input.insertText', { text: ch });
+    await sleep(120);
+  }
 }
 
 async function clickAt(cdp: Cdp, x: number, y: number): Promise<void> {
@@ -320,6 +341,48 @@ export async function captureScreens(
       await sleep(1200);
       await shoot('방향키·스페이스·Z 뒤');
     }
+    // 녹화(대표 선택, 2026-09-30): 조작하는 동안과 그 직후 화면이 멈출 때까지만(최대 3초) 초당 4장.
+    // 멈춘 사진으로는 "입력하면 바로 걸러지는지" 같은 반응을 볼 수 없었다. 같은 장면이 이어져도 버리지 않는다(느린 반응도 보이게).
+    const clipDir = path.join(outDir, 'clips');
+    await rm(clipDir, { recursive: true, force: true }).catch(() => undefined);
+    const clips: ScreenClip[] = [];
+    const recorded = async (clip: ScreenClip, act: () => Promise<void>) => {
+      const frames: string[] = [];
+      let running = true;
+      const grab = async () => {
+        const r = await cdp!
+          .send<{ data: string }>('Page.captureScreenshot', {
+            format: 'jpeg',
+            quality: 60,
+            clip: { x: 0, y: 0, width: 1280, height: 800, scale: 1 },
+          })
+          .catch(() => null);
+        return r?.data ?? '';
+      };
+      const loop = (async () => {
+        while (running && clip.frames.length + frames.length < CLIP_MAX_FRAMES) {
+          const d = await grab();
+          if (d) frames.push(d);
+          await sleep(1000 / CLIP_FPS);
+        }
+      })();
+      await act();
+      // 조작이 끝난 뒤: 두 장 연속 같으면(화면이 멈춤) 끝, 아니면 최대 3초까지
+      const until = Date.now() + CLIP_SETTLE_MAX_MS;
+      while (Date.now() < until && clip.frames.length + frames.length < CLIP_MAX_FRAMES) {
+        await sleep(1000 / CLIP_FPS);
+        if (frames.length >= 2 && frames.at(-1) === frames.at(-2)) break;
+      }
+      running = false;
+      await loop;
+      const dir = path.join(clipDir, String(clips.indexOf(clip)));
+      await mkdir(dir, { recursive: true });
+      for (const d of frames) {
+        const file = path.join(dir, `${String(clip.frames.length + 1).padStart(3, '0')}.jpg`);
+        await writeFile(file, Buffer.from(d, 'base64'));
+        clip.frames.push(file);
+      }
+    };
     const deadline = Date.now() + 120_000;
     for (const sc of scenarios) {
       if (shots.length >= MAX_SHOTS || Date.now() > deadline) break;
@@ -329,19 +392,23 @@ export async function captureScreens(
         storageTypes: 'local_storage,session_storage,indexeddb,cookies',
       });
       await load('navigate');
+      const clip: ScreenClip = { label: sc.requirementId, fps: CLIP_FPS, frames: [] };
+      clips.push(clip);
       for (const st of sc.steps) {
         if (shots.length >= MAX_SHOTS || Date.now() > deadline) break;
         const fail = (why: string) => errors.push(`[${sc.requirementId}] ${why}`);
-        if (st.do === 'key') for (let n = 0; n < (st.times ?? 1); n++) await key(cdp, st.key, st.holdMs ?? 60);
+        if (st.do === 'key')
+          await recorded(clip, async () => {
+            for (let n = 0; n < (st.times ?? 1); n++) await key(cdp!, st.key, st.holdMs ?? 60);
+          });
         else if (st.do === 'click') {
           const pt =
             st.text || st.selector
               ? await findPoint(cdp, { text: st.text, selector: st.selector })
               : { x: (st.x ?? 0.5) * 1280, y: (st.y ?? 0.5) * 800 };
-          if (pt) await clickAt(cdp, pt.x, pt.y);
+          if (pt) await recorded(clip, () => clickAt(cdp!, pt.x, pt.y));
           else fail(`클릭할 곳을 찾지 못함: ${st.text ?? st.selector}`);
-          await sleep(300);
-        } else if (st.do === 'type') await cdp.send('Input.insertText', { text: st.text });
+        } else if (st.do === 'type') await recorded(clip, () => typeSlowly(cdp!, st.text));
         else if (st.do === 'wait') await sleep(st.ms);
         else if (st.do === 'reload') await load('reload');
         else if (st.do === 'setStorage')
@@ -367,7 +434,7 @@ export async function captureScreens(
       .catch(() => 0);
     if (wide > 376) errors.push(`휴대폰 폭(375px)에서 가로로 넘침: 페이지 폭 ${wide}px`);
     await shoot('휴대폰 폭(375px)', 375, 812);
-    return { shots, errors, text, downloads };
+    return { shots, errors, text, downloads, clips: clips.filter((c) => c.frames.length > 0) };
   } finally {
     cdp?.close();
     // 크롬은 자식 프로세스를 여럿 띄우므로 트리째 끈다.

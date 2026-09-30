@@ -109,6 +109,8 @@ export class Api {
         return this.ticketDetail(id!);
       case 'GET tickets/:id/diff':
         return this.ticketDiff(id!);
+      case 'GET tickets/:id/clips':
+        return this.orch.screenClip(this.company.requireTicket(id!).id, Number(query.get('n') ?? 0));
       case 'GET tickets/:id/screens':
         return this.orch.screenImages(this.company.requireTicket(id!).id);
       case 'GET runs/:id/log':

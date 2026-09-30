@@ -3,7 +3,7 @@
 import { tr } from '../core/i18n.ts';
 
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { adapterFor } from '../adapters/index.ts';
@@ -64,7 +64,7 @@ import { dependencySetup, installDependencies } from './verify-setup.ts';
 import { estimates, ticketTokens, tokenBudget } from './cost.ts';
 import { suggestVerifyAt } from './repo-inspect.ts';
 import { PreviewManager, type PreviewInfo } from './preview.ts';
-import { captureScreens, findChrome, type DownloadedFile } from './screen-check.ts';
+import { captureScreens, findChrome, type DownloadedFile, type ScreenClip } from './screen-check.ts';
 
 const ORCH: Actor = { kind: 'orchestrator' };
 const CEO: Actor = { kind: 'ceo' };
@@ -95,6 +95,8 @@ export interface ScreenCheck {
   scripted?: boolean;
   /** 조작 중 내려받은 파일과 인코딩 판정 */
   downloads?: DownloadedFile[];
+  /** 확인 순서의 조작 직후 몇 초 녹화(사진 파일 목록) */
+  clips?: ScreenClip[];
 }
 
 export interface RecoveryReport {
@@ -278,6 +280,9 @@ export class Orchestrator {
           info.log.trim().split('\n').slice(-4).join(' ').slice(0, 400),
       );
     const outDir = path.join(this.opts.dataDir, 'screens', t.id, sha.slice(0, 12));
+    // 새 제출물을 찍으면 옛 제출물의 사진·녹화는 지운다(용량: 최신 것만 남긴다).
+    for (const old of await readdir(path.dirname(outDir)).catch(() => [] as string[]))
+      if (old !== path.basename(outDir)) await rm(path.join(path.dirname(outDir), old), { recursive: true, force: true }).catch(() => {});
     // 담당 직원이 남긴 점검 순서(대표 직접 확인 요구사항별)를 따라 한다. 없으면 흔한 조작만.
     const attestIds = new Set(t.requirements.filter((r) => r.evidenceType === 'human_attest').map((r) => r.id));
     // 저장된 보고서가 아니라 원문에서 다시 읽는다: 읽는 규칙이 나아지면 "다시 찍기"만으로 반영된다.
@@ -296,6 +301,7 @@ export class Orchestrator {
     check.errors = cap.errors;
     check.scripted = scenarios.length > 0;
     check.downloads = cap.downloads;
+    check.clips = cap.clips;
     check.state = 'done';
     check.note = info.url;
     const room = this.chat.ensureTicketChannel(t.id);
@@ -316,7 +322,16 @@ export class Orchestrator {
         employee: qa,
         ticket: t,
         checks: t.requirements.filter((r) => r.evidenceType === 'human_attest').map((r) => ({ id: r.id, text: r.text })),
-        shots: cap.shots.map((s) => ({ file: path.basename(s.file), label: s.label })),
+        // QA는 녹화에서 처음·가운데·끝 세 장만 본다(토큰 절약). 녹화 전체는 대표가 본다.
+        shots: [
+          ...cap.shots.map((s) => ({ file: path.basename(s.file), label: s.label })),
+          ...cap.clips.flatMap((c) =>
+            [...new Set([0, Math.floor((c.frames.length - 1) / 2), c.frames.length - 1])].map((i, n, all) => ({
+              file: path.relative(outDir, c.frames[i]!).replaceAll('\\', '/'),
+              label: tr(`${c.label} 움직임 ${n + 1}/${all.length} (녹화 중 한 장)`, `${c.label} motion ${n + 1}/${all.length}`),
+            })),
+          ),
+        ],
         errors: cap.errors,
         pageText: cap.text,
         scenarios,
@@ -364,7 +379,50 @@ export class Orchestrator {
     const opinion = c.qaRunId
       ? (this.chat.messages(ticketChannelId(ticketId), 300).find((m) => m.runId === c.qaRunId)?.text ?? null)
       : null;
-    return { ...c, shots: c.shots.map((s) => ({ label: s.label })), opinion, qaState: run?.status ?? null };
+    return {
+      ...c,
+      shots: c.shots.map((s) => ({ label: s.label })),
+      clips: (c.clips ?? []).map((x) => ({ label: x.label, fps: x.fps, frames: [] as string[], count: x.frames.length })),
+      opinion,
+      qaState: run?.status ?? null,
+    };
+  }
+
+  /** 녹화 한 편을 불러온다(재생을 누를 때만: 대시보드를 무겁게 하지 않는다). */
+  async screenClip(ticketId: string, index: number): Promise<{ label: string; fps: number; frames: string[] }> {
+    const clip = this.screenCheckOf(ticketId)?.clips?.[index];
+    if (!clip)
+      throw new DomainError(tr('녹화가 없습니다(업무가 끝나 정리되었을 수 있습니다).', 'No recording (it may have been cleaned up).'));
+    const root = path.resolve(this.opts.dataDir, 'screens') + path.sep;
+    const frames: string[] = [];
+    for (const f of clip.frames) {
+      if (!path.resolve(f).startsWith(root)) continue;
+      const buf = await readFile(f).catch(() => null);
+      if (buf) frames.push(`data:image/jpeg;base64,${buf.toString('base64')}`);
+    }
+    if (!frames.length) throw new DomainError(tr('녹화가 정리되었습니다.', 'The recording was cleaned up.'));
+    return { label: clip.label, fps: clip.fps, frames };
+  }
+
+  private lastScreenSweep = 0;
+
+  /**
+   * 끝난 업무의 녹화·내려받은 파일을 지운다(대표 선택: 끝나면 지우기). 사진은 기록용으로 남긴다.
+   * 10분에 한 번, 재시작해도 빠짐없이 돌도록 폴더를 훑는다.
+   */
+  private async sweepScreens(): Promise<void> {
+    if (Date.now() - this.lastScreenSweep < 10 * 60_000) return;
+    this.lastScreenSweep = Date.now();
+    const root = path.join(this.opts.dataDir, 'screens');
+    for (const ticketId of await readdir(root).catch(() => [] as string[])) {
+      const t = this.company.store.get<Ticket>('tickets', ticketId);
+      if (t && !TERMINAL_STATUSES.includes(t.status)) continue;
+      for (const sha of await readdir(path.join(root, ticketId)).catch(() => [] as string[]))
+        for (const sub of ['clips', 'downloads'])
+          await rm(path.join(root, ticketId, sha, sub), { recursive: true, force: true }).catch(() => {});
+      const c = t ? this.screenCheckOf(ticketId) : null;
+      if (c?.clips?.length) this.saveScreenCheck(ticketId, { ...c, clips: [] });
+    }
   }
 
   async screenImages(ticketId: string): Promise<{ label: string; dataUrl: string }[]> {
@@ -573,6 +631,7 @@ export class Orchestrator {
     try {
       await this.pollToolApprovals();
       this.checkDailyLimit();
+      await this.sweepScreens().catch(() => {});
       // 우선순위(1 높음 → 3 낮음) 순, 같으면 먼저 만든 순: 쓰기 범위가 겹칠 때 높은 업무가 먼저 잠금을 잡는다.
       for (const t of [...this.company.tickets()].sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2))) {
         if (t.hold?.reason === 'waiting_dependency' && t.dependsOn.every((d) => this.company.requireTicket(d).status === 'done')) {

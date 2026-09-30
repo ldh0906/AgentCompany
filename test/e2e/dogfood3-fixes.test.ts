@@ -136,6 +136,12 @@ test(
       assert.ok(csv, `내려받은 파일을 모은다: ${JSON.stringify(cap.downloads)}`);
       assert.equal(csv!.text?.bom, true);
       assert.match(csv!.verdict, /엑셀에서 한글이 정상/);
+      // 녹화: 조작이 있는 순서마다 한 편, 조작 직후 몇 초만(순서당 최대 40장)
+      assert.deepEqual(
+        cap.clips.map((c) => c.label),
+        ['R1', 'R2'],
+      );
+      for (const c of cap.clips) assert.ok(c.frames.length > 0 && c.frames.length <= 40, `${c.label}: ${c.frames.length}장`);
     } finally {
       server.close();
     }
