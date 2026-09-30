@@ -25,17 +25,17 @@ test('승인 대기에 오면 띄워서 세 장을 찍고, QA 직원이 의견�
   const waiting = await driveUntil(env, ticket.id, (x) => x.hold !== null || x.status === 'awaiting_approval');
   assert.equal(waiting.status, 'awaiting_approval', `보류: ${waiting.hold?.note}`);
   const deadline = Date.now() + 90_000;
-  let view = env.orch.screenCheckView(ticket.id);
+  let view = env.orch.screens.screenCheckView(ticket.id);
   while (Date.now() < deadline && !(view?.state === 'failed' || view?.opinion)) {
     await env.orch.tick();
     await new Promise((r) => setTimeout(r, 300));
-    view = env.orch.screenCheckView(ticket.id);
+    view = env.orch.screens.screenCheckView(ticket.id);
   }
   assert.equal(view?.state, 'done', view?.note ?? '');
   assert.equal(view!.shots.length, 4);
   assert.ok(view!.opinion, 'QA 의견이 승인 카드에 붙는다');
   assert.equal(view!.qaBy, env.company.employees().find((e) => e.name === 'QA 직원')!.id, '담당자가 아닌 QA가 본다');
-  const imgs = await env.orch.screenImages(ticket.id);
+  const imgs = await env.orch.screens.screenImages(ticket.id);
   assert.equal(imgs.length, 4);
   assert.match(imgs[0]!.dataUrl, /^data:image\/png;base64,/);
   const room = env.orch.chat.messages(ticketChannelId(ticket.id), 100);
@@ -48,13 +48,13 @@ test('승인 대기에 오면 띄워서 세 장을 찍고, QA 직원이 의견�
   // 같은 제출물로는 다시 찍지 않는다
   const at = view!.at;
   await env.orch.tick();
-  assert.equal(env.orch.screenCheckView(ticket.id)!.at, at);
+  assert.equal(env.orch.screens.screenCheckView(ticket.id)!.at, at);
 
   // 끝나면 정리: 내려받은 파일·녹화 폴더는 지우고 사진은 남긴다
   const approval = env.orch.records.pendingApprovalFor(ticket.id, 'integrate')!;
   env.orch.decideIntegration(approval.id, 'approved', { attested: ['R1'] });
   await driveUntil(env, ticket.id, (x) => x.status === 'done');
-  (env.orch as unknown as { lastScreenSweep: number }).lastScreenSweep = 0;
+  (env.orch.screens as unknown as { lastScreenSweep: number }).lastScreenSweep = 0;
   await env.orch.tick();
   const dir = join(env.dataDir, 'screens', ticket.id);
   const [sha] = readdirSync(dir);
@@ -96,7 +96,7 @@ test(
     assert.equal(env.store.getSetting(`qa_rejects:${ticket.id}`), '2');
     assert.ok(env.orch.chat.messages('general', 200).some((m) => /돌려보냈습니다/.test(m.text)));
     // PC 전용이면 휴대폰 폭 사진이 없다
-    assert.ok(!env.orch.screenCheckView(ticket.id)!.shots.some((s) => /휴대폰/.test(s.label)));
+    assert.ok(!env.orch.screens.screenCheckView(ticket.id)!.shots.some((s) => /휴대폰/.test(s.label)));
   },
 );
 
@@ -111,20 +111,20 @@ test(
     await git([...AGENT_IDENTITY, 'commit', '-q', '-m', 'page'], env.origin);
     const tk = newImplTicket(env);
     await driveUntil(env, tk.id, (x) => x.status === 'awaiting_approval');
-    await env.orch.startPlaytest({ ticketId: tk.id }, 'ceo');
+    await env.orch.playtests.startPlaytest({ ticketId: tk.id }, 'ceo');
     const waitDone = async (key: string) => {
       const deadline = Date.now() + 60_000;
-      while (env.orch.playtestOf(key)?.state === 'running' || !env.orch.playtestOf(key)) {
+      while (env.orch.playtests.playtestOf(key)?.state === 'running' || !env.orch.playtests.playtestOf(key)) {
         if (Date.now() > deadline) throw new Error('시간 초과');
         await env.orch.tick();
         await new Promise((r) => setTimeout(r, 300));
       }
-      return env.orch.playtestOf(key)!;
+      return env.orch.playtests.playtestOf(key)!;
     };
     const p = await waitDone(tk.id);
     assert.equal(p.state, 'done');
     assert.match(p.opinion ?? '', /R1 ✅/);
-    assert.ok(env.orch.notices().some((n) => /고급 QA 결과/.test(n.title)));
+    assert.ok(env.orch.desk.notices().some((n) => /고급 QA 결과/.test(n.title)));
     assert.ok(existsSync(join(p.dir, 'play')), 'QA가 쓸 ./play 명령이 있다');
 
     // 요청이 끝나면 자동으로

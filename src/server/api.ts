@@ -110,9 +110,9 @@ export class Api {
       case 'GET tickets/:id/diff':
         return this.ticketDiff(id!);
       case 'GET tickets/:id/clips':
-        return this.orch.screenClip(this.company.requireTicket(id!).id, Number(query.get('n') ?? 0));
+        return this.orch.screens.screenClip(this.company.requireTicket(id!).id, Number(query.get('n') ?? 0));
       case 'GET tickets/:id/screens':
-        return this.orch.screenImages(this.company.requireTicket(id!).id);
+        return this.orch.screens.screenImages(this.company.requireTicket(id!).id);
       case 'GET runs/:id/log':
         return this.runLog(id!, query.get('stream') === 'stderr' ? 'stderr' : 'stdout');
       case 'GET runs/:id/activity':
@@ -338,13 +338,13 @@ export class Api {
       case 'POST tickets/:id/skip-review':
         return this.orch.skipReview(id!);
       case 'POST toast':
-        return this.orch.setToast(b.on === true);
+        return this.orch.desk.setToast(b.on === true);
       case 'POST tickets/:id/scope-add':
         return this.orch.addWriteScope(id!, strList(b, 'paths'));
       case 'POST tickets/:id/scope':
         return this.orch.resolveScopeHold(id!, b.allow === true);
       case 'POST tickets/:id/screen-check':
-        this.orch.rerunScreenCheck(id!);
+        this.orch.screens.rerunScreenCheck(id!);
         return { ok: true };
       case 'POST tickets/:id/attest':
         return this.orch.attest(id!, str(b, 'requirementId'), str(b, 'note', { optional: true, max: 2000 }));
@@ -390,11 +390,11 @@ export class Api {
         );
       }
       case 'POST requests/:id/playtest':
-        return this.orch.startPlaytest({ requestId: id! }, 'ceo');
+        return this.orch.playtests.startPlaytest({ requestId: id! }, 'ceo');
       case 'POST tickets/:id/playtest':
-        return this.orch.startPlaytest({ ticketId: this.company.requireTicket(id!).id }, 'ceo');
+        return this.orch.playtests.startPlaytest({ ticketId: this.company.requireTicket(id!).id }, 'ceo');
       case 'GET playtests/:id/shots':
-        return this.orch.playtestShots(id!);
+        return this.orch.playtests.playtestShots(id!);
       case 'POST requests/:id/retry':
         return this.orch.retryRequest(id!);
       case 'POST requests/:id/dismiss':
@@ -439,22 +439,22 @@ export class Api {
       usage: r.usageSummary(),
       previews: this.orch.previewList(),
       // 대표 알림: 지금 할 일, 최근 알림, 윈도우 토스트 켬 여부
-      ceoTodos: this.orch.ceoTodos(),
+      ceoTodos: this.orch.desk.ceoTodos(),
       // 고급 QA(직접 플레이) 기록: 업무별·요청별(Q:요청 ID)
       playtests: Object.fromEntries(
         [...this.company.tickets().map((t) => t.id), ...r.requests(30).map((q) => `Q:${q.id}`)]
-          .map((k) => [k, this.orch.playtestOf(k)] as const)
+          .map((k) => [k, this.orch.playtests.playtestOf(k)] as const)
           .filter(([, v]) => v)
           .map(([k, v]) => [k, { state: v!.state, at: v!.at, by: v!.by, qaBy: v!.qaBy, opinion: v!.opinion, note: v!.note }]),
       ),
-      notices: this.orch.notices(),
-      toast: this.orch.toastOn,
+      notices: this.orch.desk.notices(),
+      toast: this.orch.desk.toastOn,
       // 승인 대기 업무의 자동 화면 점검(사진은 tickets/:id/screens로 따로)
       screenChecks: Object.fromEntries(
         this.company
           .tickets()
           .filter((t) => t.status === 'awaiting_approval')
-          .map((t) => [t.id, this.orch.screenCheckView(t.id)])
+          .map((t) => [t.id, this.orch.screens.screenCheckView(t.id)])
           .filter(([, v]) => v),
       ),
       paused: this.orch.paused,

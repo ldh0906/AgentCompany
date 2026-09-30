@@ -256,15 +256,15 @@ test('대표 알림: 할 일 목록(승인·결정)과 요청이 모두 끝났�
   });
   await driveUntil(env, tk.id, (x) => x.status === 'awaiting_approval');
   assert.ok(
-    env.orch.ceoTodos().some((x) => x.kind === 'approval' && x.link === `/tickets/${tk.id}`),
+    env.orch.desk.ceoTodos().some((x) => x.kind === 'approval' && x.link === `/tickets/${tk.id}`),
     '승인이 할 일에 뜬다',
   );
   const a = env.orch.records.pendingApprovalFor(tk.id, 'integrate')!;
   env.orch.decideIntegration(a.id, 'approved');
   await driveUntil(env, tk.id, (x) => x.status === 'done');
-  assert.equal(env.orch.ceoTodos().length, 0, '처리하면 할 일에서 빠진다');
+  assert.equal(env.orch.desk.ceoTodos().length, 0, '처리하면 할 일에서 빠진다');
   assert.ok(
-    env.orch.notices().some((n) => /요청이 끝났습니다/.test(n.title)),
+    env.orch.desk.notices().some((n) => /요청이 끝났습니다/.test(n.title)),
     '요청의 업무가 모두 끝나면 알린다',
   );
 });
