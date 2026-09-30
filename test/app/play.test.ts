@@ -24,6 +24,9 @@ test('play: 시작 → 글자로 클릭 → 키 → 멈춤, 명령마다 사진 
     const k = await playCommand(['key', 'KeyZ', '--times', '2', '--dir', dir]);
     assert.match(k, /page errors: z z \| z z/);
     assert.match(k, /actions used: 3\//);
+    // 여러 키를 함께, 저장 데이터를 넣고 새로고침
+    assert.match(await playCommand(['key', 'ArrowRight+KeyZ', '--hold', '200', '--dir', dir]), /page errors: z z/);
+    assert.match(await playCommand(['storage', 'hs', '42', '--dir', dir]), /0005\.jpg/);
     assert.match(await playCommand(['bogus', '--dir', dir]), /unknown command/);
     assert.equal(await playCommand(['stop', '--dir', dir]), 'stopped');
     assert.ok(!existsSync(path.join(dir, 'session.json')));

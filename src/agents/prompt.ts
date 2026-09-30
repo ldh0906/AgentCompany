@@ -470,7 +470,8 @@ Play the current build of: ${i.subject}. Judge whether each goal below works and
 How to play (only these commands; you cannot change any code):
 - Start: ./play start   (opens the build in a hidden browser and prints the path of a screenshot)
 - Then, one action per command, each printing a new screenshot path: ./play key ArrowRight --hold 800 | ./play key KeyZ --times 3 | ./play click --text "시작" | ./play click --x 0.5 --y 0.4 | ./play type "abc" | ./play wait 1500 | ./play look
-  Keys are KeyboardEvent.code names (ArrowLeft, Space, Enter, Escape, KeyZ, KeyJ, Digit1, ...).
+  Keys are KeyboardEvent.code names (ArrowLeft, Space, Enter, Escape, KeyZ, KeyJ, Digit1, ...). Press several at once with "+": ./play key ArrowRight+Space --hold 600 (e.g. jump while moving).
+- To reach later content without grinding from the start, seed saved data: ./play storage <localStorage key> <value> (reloads the page). Use the save/debug keys in the hints below when there are any; say in your report when you did.
 - Open each screenshot path with your file-reading tool to see the screen before deciding the next action. Page errors are printed too.
 - You have ${i.maxActions} actions in total; plan them. Finish with ./play stop.
 - Play like a person: go through the main flow, try each goal, repeat actions, try odd inputs (mashing keys, going back and forth), and note anything confusing, slow, ugly, or broken. Do not read the source code.

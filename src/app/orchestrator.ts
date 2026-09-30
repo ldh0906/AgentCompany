@@ -1751,7 +1751,7 @@ export class Orchestrator {
 
   /**
    * 고급 QA: Claude QA 직원이 보이지 않는 크롬을 명령으로 조종하며 직접 플레이한다(대표 요청, 2026-09-30).
-   * 업무 하나(제출물)를 볼 수도, 요청 하나가 끝난 뒤 기준 브랜치 전체를 볼 수도 있다. 한 번에 약 100만~300만 토큰.
+   * 업무 하나(제출물)를 볼 수도, 요청 하나가 끝난 뒤 기준 브랜치 전체를 볼 수도 있다. 한 번에 약 300만~700만 토큰(실측 637만, 56번 조작).
    */
   async startPlaytest(scope: { ticketId?: string; requestId?: string }, by: 'ceo' | 'auto'): Promise<PlaytestInfo> {
     const ticket = scope.ticketId ? this.company.requireTicket(scope.ticketId) : null;

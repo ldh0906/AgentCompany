@@ -264,7 +264,7 @@ export function PlaytestPanel({ ticketId, requestId }: { ticketId?: string; requ
             className="btn small"
             disabled={busy}
             onClick={() => void start()}
-            title={ko ? '한 번에 약 100만~300만 토큰' : 'About 1-3M tokens'}
+            title={ko ? '한 번에 약 300만~700만 토큰(실측 637만, 약 $2.4)' : 'About 3-7M tokens'}
           >
             {p ? (ko ? '다시 플레이' : 'Play again') : ko ? '직접 플레이해 보기' : 'Play it'}
           </button>
@@ -273,7 +273,7 @@ export function PlaytestPanel({ ticketId, requestId }: { ticketId?: string; requ
       {!p && (
         <div className="hint">
           {ko
-            ? 'QA 직원이 사람처럼 보고·누르며 직접 플레이하고, 손맛·흐름·버그를 적습니다. 한 번에 약 100만~300만 토큰.'
+            ? 'QA 직원이 사람처럼 보고·누르며 직접 플레이하고, 손맛·흐름·버그를 적습니다. 한 번에 약 300만~700만 토큰(실측 637만, 약 $2.4).'
             : 'A QA colleague plays it like a person and reports feel, flow and bugs.'}
         </div>
       )}

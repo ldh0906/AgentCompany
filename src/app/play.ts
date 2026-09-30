@@ -79,7 +79,7 @@ export async function stopPlay(dir: string): Promise<void> {
 
 /**
  * play <명령> [값] [--hold ms] [--times n] [--text 글자] [--x 0.5 --y 0.5] [--url 주소] [--dir 폴더]
- * 명령: start | look | key <코드> | click | type <글자> | wait <ms> | stop
+ * 명령: start | look | key <코드>[+<코드>] | click | type <글자> | wait <ms> | storage <키> <값> | stop
  */
 export async function playCommand(argv: string[]): Promise<string> {
   const opt = (name: string) => {
@@ -142,10 +142,24 @@ export async function playCommand(argv: string[]): Promise<string> {
       await cdp.send('Page.navigate', { url: session.url });
       await sleep(3000);
     } else if (cmd === 'key') {
-      if (!value) return 'usage: play key <KeyboardEvent.code> [--hold ms] [--times n]';
+      if (!value) return 'usage: play key <KeyboardEvent.code>[+<code>...] [--hold ms] [--times n]';
       const times = Math.min(Number(opt('times') ?? 1) || 1, 30);
-      for (let n = 0; n < times; n++) await key(cdp, value, Math.min(Number(opt('hold') ?? 80) || 80, 5000));
+      const hold = Math.min(Number(opt('hold') ?? 80) || 80, 5000);
+      // "ArrowRight+Space": 여러 키를 함께 누른다(실측: 점프하며 이동해야 넘는 턱을 못 넘어 보스까지 못 갔다).
+      const codes = value.split('+').filter(Boolean);
+      for (let n = 0; n < times; n++) {
+        if (codes.length === 1) await key(cdp, codes[0]!, hold);
+        else await Promise.all(codes.map((c, i) => sleep(i * 30).then(() => key(cdp, c, hold))));
+      }
       await sleep(400);
+    } else if (cmd === 'storage') {
+      // 저장 데이터를 넣고 새로고침: 뒤쪽 내용(보스·강화 등)을 처음부터 키우지 않고 보려고(담당자가 남긴 확인용 값 등).
+      const k = value;
+      const v = positional[2];
+      if (!k || v === undefined) return 'usage: play storage <localStorage key> <value>';
+      await cdp.send('Runtime.evaluate', { expression: `localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(v)})` });
+      await cdp.send('Page.reload', {});
+      await sleep(2500);
     } else if (cmd === 'click') {
       const text = opt('text') ?? value;
       const pt =
@@ -162,7 +176,7 @@ export async function playCommand(argv: string[]): Promise<string> {
     } else if (cmd === 'wait') {
       await sleep(Math.min(Number(value ?? 1000) || 1000, 10_000));
     } else if (cmd !== 'look') {
-      return `unknown command "${cmd}". Commands: start, look, key, click, type, wait, stop`;
+      return `unknown command "${cmd}". Commands: start, look, key, click, type, wait, storage, stop`;
     }
     session.steps++;
     await writeFile(sessionFile, JSON.stringify(session));

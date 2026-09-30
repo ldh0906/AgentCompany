@@ -370,7 +370,7 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
             <input type="checkbox" checked={autoPlaytest} onChange={(e) => setAutoPlaytest(e.target.checked)} />
             <span>
               {ko ? '요청 하나가 모두 끝나면 고급 QA가 직접 플레이해 보기' : 'Play-test automatically when a request is done'}{' '}
-              <span className="hint">{ko ? '— 한 번에 약 100만~300만 토큰' : '— about 1-3M tokens each'}</span>
+              <span className="hint">{ko ? '— 한 번에 약 300만~700만 토큰(실측 637만, 약 $2.4)' : '— about 3-7M tokens each'}</span>
             </span>
           </label>
         )}
