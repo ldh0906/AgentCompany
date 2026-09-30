@@ -1733,6 +1733,23 @@ ${failure.detail.slice(0, 400)}`,
       }
       const wr = run.report as WorkReport;
       if (wr.status !== 'done' && wr.split?.length && this.splitTicket(ticket, run, wr)) return;
+      if (wr.needScope?.paths.length) {
+        // 범위 밖 파일이 필요하다는 요청: 헛되이 다시 내지 않고 대표에게 한 번에 묻는다.
+        // 실측(2026-09-30, T-27): 기존 보스 테스트 한 줄이 범위 밖이라 같은 실패로 세 번 제출하고 멈췄다.
+        this.company.store.setSetting(`scope_request:${ticket.id}`, JSON.stringify(wr.needScope));
+        this.apply(ticket.id, {
+          type: 'run_aborted',
+          reason: tr('범위 밖 파일 수정 허가 요청', 'Asked to edit files outside the write scope'),
+          hold: {
+            reason: 'needs_decision',
+            note: tr(
+              `이 파일도 고쳐야 한다고 요청했습니다: ${wr.needScope.paths.join(', ')}\n이유: ${wr.needScope.reason}`,
+              `Asked to also edit: ${wr.needScope.paths.join(', ')}\nReason: ${wr.needScope.reason}`,
+            ),
+          },
+        });
+        return;
+      }
       if (wr.status !== 'done') {
         this.apply(ticket.id, {
           type: 'run_aborted',
@@ -3015,6 +3032,32 @@ ${failure.detail.slice(0, 400)}`,
 
   releaseHold(ticketId: string): Ticket {
     return this.apply(ticketId, { type: 'release_hold' }, CEO);
+  }
+
+  /** 대표가 쓰기 범위에 파일을 더한다(요청 받은 파일 허용 포함). 범위 요청으로 멈춘 업무면 바로 다시 돌린다. */
+  addWriteScope(ticketId: string, paths: string[]): Ticket {
+    const t = this.company.requireTicket(ticketId);
+    const clean = paths.map((p) => p.trim().replaceAll('\\', '/')).filter((p) => p && !p.startsWith('/') && !p.split('/').includes('..'));
+    if (!clean.length) throw new DomainError(tr('추가할 경로가 없습니다.', 'No path to add.'));
+    const project = this.company.requireProject(t.projectId);
+    const protectedHit = checkScope(clean, clean, project.protectedPaths).protectedTouched;
+    if (protectedHit.length)
+      throw new DomainError(
+        tr(`보호된 파일은 더할 수 없습니다: ${protectedHit.join(', ')}`, `Protected paths cannot be added: ${protectedHit.join(', ')}`),
+      );
+    let out = this.company.extendWriteScope(t.id, clean);
+    const requested = this.company.store.getSetting(`scope_request:${t.id}`);
+    if (requested && out.hold?.reason === 'needs_decision') {
+      this.company.store.setSetting(`scope_request:${t.id}`, '');
+      out = this.releaseHold(t.id);
+    }
+    this.changed('ticket', t.id);
+    return out;
+  }
+
+  scopeRequestOf(ticketId: string): { paths: string[]; reason: string } | null {
+    const raw = this.company.store.getSetting(`scope_request:${ticketId}`);
+    return raw ? (JSON.parse(raw) as { paths: string[]; reason: string }) : null;
   }
 
   /**

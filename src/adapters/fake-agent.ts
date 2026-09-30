@@ -72,6 +72,20 @@ async function work(h: TaskHeader, prompt: string): Promise<string> {
       L('나눴습니다.', 'Split.'),
     );
   }
+  // 범위 밖 파일이 필요하다고 요청한다(허용되면 평소처럼 일한다)
+  if (behavior === 'scoper' && !h.writeScope.includes('extra/fix.md'))
+    return finalWith(
+      {
+        nonce: h.nonce,
+        kind: 'work',
+        status: 'blocked',
+        summary: L('범위 밖 파일이 필요합니다.', 'Needs a file outside the scope.'),
+        requirements: h.requirementIds.map((id) => ({ id, claim: 'not_met', notes: '' })),
+        questions: [],
+        needScope: { paths: ['extra/fix.md'], reason: 'old test expects old behavior' },
+      },
+      L('허가 요청.', 'Asking.'),
+    );
   const lazyNow = behavior === 'lazy' && h.round === 1;
   const rebut = behavior === 'stubborn' && h.round > 1;
   if (!lazyNow && !rebut) {

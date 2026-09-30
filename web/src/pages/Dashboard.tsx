@@ -154,6 +154,14 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
       return ko ? '대표 요청 초안을 버렸습니다' : 'Request drafts dismissed';
     case 'request.failed':
       return ko ? '비서실장 초안 작성 실패' : 'Chief of staff drafting failed';
+    case 'ticket.scope_extended':
+      return ko
+        ? `${e.entityId} 대표가 파일을 더 허락: ${((p.paths as string[] | undefined) ?? []).join(', ')}`
+        : `${e.entityId} write scope extended: ${((p.paths as string[] | undefined) ?? []).join(', ')}`;
+    case 'ticket.split':
+      return ko
+        ? `${e.entityId} 담당자가 일을 나눔 → ${((p.parts as string[] | undefined) ?? []).join(', ')}`
+        : `${e.entityId} split into ${((p.parts as string[] | undefined) ?? []).join(', ')}`;
     case 'ticket.review_skipped':
       return ko ? `${e.entityId} 대표가 검수를 건너뛰고 승인 단계로` : `${e.entityId} review skipped by the CEO`;
     case 'ticket.reverify':

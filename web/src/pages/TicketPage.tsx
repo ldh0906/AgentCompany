@@ -14,6 +14,8 @@ interface Detail {
   claims: Claim[];
   approvals: Approval[];
   events: DomainEvent[];
+  /** 담당자가 범위 밖 파일 수정 허가를 요청했으면 */
+  scopeRequest?: { paths: string[]; reason: string } | null;
 }
 
 export function TicketPage({ id }: { id: string }) {
@@ -28,6 +30,7 @@ export function TicketPage({ id }: { id: string }) {
   const [log, setLog] = useState<{ id: string; text: string; reportError: string | null } | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [answer, setAnswer] = useState('');
+  const [scopeAdd, setScopeAdd] = useState('');
   const { busy, run } = useAction();
   const ko = lang === 'ko';
 
@@ -172,6 +175,29 @@ export function TicketPage({ id }: { id: string }) {
             <Icon name="pause" size={14} /> {holdLabel(tk.hold.reason)}
           </b>
           <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{tk.hold.note}</div>
+          {detail.scopeRequest && tk.hold.reason === 'needs_decision' && (
+            <div style={{ marginTop: 8 }}>
+              <div className="sub">
+                {ko
+                  ? '담당자가 이 업무에 허락된 파일 밖의 파일도 고쳐야 한다고 요청했습니다. 허용하면 바로 이어서 작업합니다.'
+                  : 'The assignee asks to also edit files outside this ticket’s area. Allowing resumes the work.'}
+              </div>
+              <div className="row" style={{ marginTop: 6 }}>
+                <button
+                  className="btn small primary"
+                  disabled={busy}
+                  onClick={() =>
+                    run(
+                      () => api(`tickets/${tk.id}/scope-add`, { body: { paths: detail.scopeRequest!.paths } }),
+                      ko ? '허용하고 계속합니다.' : 'Allowed.',
+                    ).then(reload)
+                  }
+                >
+                  {ko ? `${detail.scopeRequest.paths.join(', ')} 허용하고 계속` : 'Allow and continue'}
+                </button>
+              </div>
+            </div>
+          )}
           {tk.hold.reason === 'needs_permission' && tk.status === 'verifying' && (
             <div style={{ marginTop: 8 }}>
               <div className="sub">
@@ -385,6 +411,30 @@ export function TicketPage({ id }: { id: string }) {
                   </code>
                 ))}
               </div>
+              {!['done', 'failed', 'cancelled'].includes(tk.status) && (
+                // 대표가 파일을 더 허락한다(예: 담당자가 "이 테스트도 고쳐야 한다"고 할 때)
+                <div className="row" style={{ marginTop: 6 }}>
+                  <input
+                    className="mono"
+                    value={scopeAdd}
+                    onChange={(e) => setScopeAdd(e.target.value)}
+                    placeholder={ko ? '허락할 파일 경로 (예: tests/game/boss.test.ts)' : 'Path to allow'}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    className="btn small"
+                    disabled={busy || !scopeAdd.trim()}
+                    onClick={() =>
+                      run(
+                        () => api(`tickets/${tk.id}/scope-add`, { body: { paths: [scopeAdd.trim()] } }),
+                        ko ? '허락했습니다.' : 'Added.',
+                      ).then((ok) => ok && (setScopeAdd(''), reload()))
+                    }
+                  >
+                    {ko ? '허락' : 'Allow'}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

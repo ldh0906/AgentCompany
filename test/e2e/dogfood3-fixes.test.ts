@@ -220,3 +220,18 @@ test('혼자 하기엔 크면 담당자가 나눈다: 조각은 다른 직원이
   // 조각은 다시 나누지 않는다(조각 업무의 지시에는 나누기 규칙이 없다)
   assert.equal(env.company.tickets().length, 3);
 });
+
+test('범위 밖 파일이 필요하면 담당자가 허가를 요청하고, 대표가 한 번에 허용하면 이어서 한다', { timeout: 180_000 }, async (t) => {
+  const env = await setup(t, { implementer: 'scoper' });
+  const tk = newImplTicket(env);
+  const held = await driveUntil(env, tk.id, (x) => x.hold !== null);
+  assert.equal(held.hold?.reason, 'needs_decision');
+  assert.match(held.hold!.note, /extra\/fix\.md/);
+  assert.deepEqual(env.orch.scopeRequestOf(tk.id)?.paths, ['extra/fix.md']);
+  assert.throws(() => env.orch.addWriteScope(tk.id, ['README.md']), /보호/, '보호된 파일은 허용 불가');
+  const next = env.orch.addWriteScope(tk.id, ['extra/fix.md']);
+  assert.equal(next.hold, null, '요청한 파일을 허용하면 바로 다시 돈다');
+  assert.ok(next.writeScope.includes('extra/fix.md'));
+  const waiting = await driveUntil(env, tk.id, (x) => x.hold !== null || x.status === 'awaiting_approval');
+  assert.equal(waiting.status, 'awaiting_approval', `보류: ${waiting.hold?.note}`);
+});

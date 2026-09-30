@@ -18,6 +18,8 @@ export interface WorkReport {
   screenSteps?: ScreenScenario[];
   /** 혼자 하기엔 크다고 판단하면: 나눌 부분(2~4개). 다른 직원이 나눠 맡고, 끝나면 이 업무가 돌아와 마무리한다. */
   split?: SplitPart[];
+  /** 범위 밖 파일을 꼭 고쳐야 할 때(예: 옛 동작을 기대하는 기존 테스트): 대표가 한 번에 허용할 수 있게 요청한다. */
+  needScope?: { paths: string[]; reason: string } | null;
 }
 
 export interface SplitPart {
@@ -170,6 +172,7 @@ export function parseReport(
           .map((a) => ({ to: String(a.to).replace(/^@/, '').slice(0, 60), text: String(a.text).slice(0, 2000) })),
         screenSteps: screenStepsOf(r.screenSteps, expected.requirementIds),
         split: splitOf(r.split),
+        needScope: needScopeOf(r.needScope),
       },
     };
   }
@@ -373,6 +376,17 @@ export function screenStepsOf(v: unknown, requirementIds: string[]): ScreenScena
     if (steps.some((s) => s.do === 'shot')) out.push({ requirementId: x.requirementId, steps: steps.slice(0, 30) });
   }
   return out.slice(0, 6);
+}
+
+/** 범위 요청: 상대 경로만(절대 경로·상위 폴더·와일드카드 전체는 거부), 최대 5개. */
+export function needScopeOf(v: unknown): { paths: string[]; reason: string } | null {
+  const o = v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
+  const paths = (isArr(o?.paths) ? (o!.paths as unknown[]) : [])
+    .filter(isStr)
+    .map((p) => p.trim().replaceAll('\\', '/'))
+    .filter((p) => p && !p.startsWith('/') && !/^[A-Za-z]:/.test(p) && !p.split('/').includes('..') && p !== '**' && p !== '*')
+    .slice(0, 5);
+  return paths.length ? { paths, reason: isStr(o?.reason) ? o!.reason.slice(0, 1000) : '' } : null;
 }
 
 const EVIDENCE_TYPES = ['mockup', 'inspection', 'static_check', 'unit_test', 'runtime', 'human_attest'];

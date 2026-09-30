@@ -136,3 +136,13 @@ test('교차 검토 패널(최대 4명): 서로 다른 AI를 먼저, 그다음 �
     ['c-senior', 'c-junior'],
   );
 });
+
+test('일이 몰리지 않게: 같은 역할이면 직급보다 일이 적은 사람이 먼저(실측: 보통 업무 셋이 선임 한 명에게 몰림)', () => {
+  const lead = emp('lead', ['implementer'], 'claude', 'lead2');
+  const senior = emp('senior', ['implementer'], 'codex', 'senior2');
+  const qa = emp('lead', ['qa'], 'claude', 'qa2');
+  const busy = (e: Employee) => (e.id === 'senior2' ? 2 : 0);
+  const r = pickStaff({ type: 'impl', difficulty: 'normal' }, [lead, senior, qa], busy);
+  assert.ok(r.ok);
+  assert.equal(r.assigneeId, 'lead2', '선임이 이미 두 개를 하고 있으면 놀고 있는 팀장이 맡는다');
+});

@@ -313,6 +313,8 @@ export class Api {
         return this.orch.reverify(id!);
       case 'POST tickets/:id/skip-review':
         return this.orch.skipReview(id!);
+      case 'POST tickets/:id/scope-add':
+        return this.orch.addWriteScope(id!, strList(b, 'paths'));
       case 'POST tickets/:id/scope':
         return this.orch.resolveScopeHold(id!, b.allow === true);
       case 'POST tickets/:id/screen-check':
@@ -436,6 +438,7 @@ export class Api {
       evidence: r.evidenceFor(id),
       claims: r.claimsFor(id),
       approvals: r.approvals().filter((a) => a.ticketId === id),
+      scopeRequest: this.orch.scopeRequestOf(id),
       events: this.company.store.events(id, 500),
     };
   }

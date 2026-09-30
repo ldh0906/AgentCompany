@@ -39,7 +39,9 @@ export function pickStaff(
   // 하위 직급 검수로 진행하고, 대표가 최종 확인에서 더 꼼꼼히 보도록 표시한다.
   const reviewable = eligible.filter((e) => active.some((o) => o.id !== e.id && r(o) >= r(e)));
   const pool = reviewable.length ? reviewable : eligible;
-  const assignee = [...pool].sort((a, b) => Number(fits(b)) - Number(fits(a)) || r(a) - r(b) || load(a) - load(b))[0]!;
+  // 역할이 맞는 사람 중 일이 적은 사람부터, 같으면 낮은 직급부터(팀장은 어려운 일을 위해 아낀다).
+  // 실측(2026-09-30, 메이플 4차): 직급을 먼저 보니 보통 업무 셋이 모두 선임 한 명에게 가고 팀장은 놀았다.
+  const assignee = [...pool].sort((a, b) => Number(fits(b)) - Number(fits(a)) || load(a) - load(b) || r(a) - r(b))[0]!;
 
   const others = active.filter((e) => e.id !== assignee.id);
   const owner = [...others].sort(

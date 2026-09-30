@@ -79,6 +79,7 @@ ${
 - Everything left in your directory is committed. Put temporary files (screenshots, browser profiles, downloads, logs) in the OS temp directory, never in the worktree.
 - Do not override the CEO's decisions or invent product rules the ticket does not ask for. When the ticket itself asks you to define values or content (for example balance numbers or item lists), propose sensible values, implement them, and write down the reasoning; you are not blocked by the absence of a decision. Use status "needs_decision" only when you truly cannot proceed without the CEO, and put those items in "questions".
 - Requirements that need "human_attest" (the CEO playing or looking at the result) are checked by the CEO at approval. Do not stop for them: finish the work and submit with status "done", noting in "notes" how the CEO can check it by hand. For each of them also write a screen-check scenario (see "Screen check guide").
+- If your own change can only pass by also editing a file outside your write scope (for example an existing test that encodes the old behavior), do not resubmit hoping it passes: return status "blocked" with "needScope": {"paths":["tests/game/boss.test.ts"],"reason":"one line: why"}. The CEO can allow it in one click and you continue in the next run.
 - Problems you notice outside your write scope (another ticket's area) are not blockers: finish your part, submit "done", and add them to "followUps" (title + reason) so the CEO can turn them into tickets with one click.
 ${
   i.canSplit
@@ -251,7 +252,7 @@ Rules:
 - Do not decide product rules or numbers the CEO has not decided. Put them in "questions", each with your recommended default as "proposal" so the CEO can accept it in one click. Ask only what really matters; small tuning values can simply be proposed.
 - Prefer 1-5 tickets. Fewer is better, but do not bundle unrelated work: independent parts should be separate tickets so different employees can work at the same time.
 - Give each ticket a "difficulty": "easy" (small, local, low risk), "normal" (a typical feature or fix), or "hard" (cross-cutting, risky, or design-heavy). Difficulty decides the minimum rank: easy = junior+, normal = senior+, hard = lead.
-- Plan for parallel work with the team below: only leads can take "hard", and one employee works on one ticket at a time, so several hard tickets (or a dependsOn chain) run one after another. Measured: three chained hard tickets went to the single implementer lead and took 1.5 hours while two seniors sat idle. Prefer "normal" tickets with disjoint write scopes (for example data/logic, UI, and each feature separately) and use dependsOn only where files really overlap or one part truly needs the other's code. Keep "hard" for work that really needs it.
+- Plan for parallel work with the team below: only leads can take "hard", and a dependsOn chain runs one ticket after another. Measured: three chained hard tickets went to the single implementer lead and took 1.5 hours while two seniors sat idle. Prefer "normal" tickets with disjoint write scopes (for example data/logic, UI, and each feature separately) and use dependsOn only where files really overlap or one part truly needs the other's code. Keep "hard" for work that really needs it.
 
 ${dataBlock('Team (name, rank, roles) — who can work in parallel', (i.team ?? []).join('\n') || '(unknown)')}
 
