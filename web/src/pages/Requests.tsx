@@ -4,6 +4,7 @@ import { Link, useCompany } from '../App.tsx';
 import { EVIDENCE, useT } from '../i18n.ts';
 import { empName, useAction, when } from '../components/ui.tsx';
 import { Segmented } from '../components/kit.tsx';
+import { fmtTokens } from '../components/usage.tsx';
 
 /** 시스템 검증 명령만 만들 수 있는 증거. 프로젝트에 같은 종류의 명령이 없으면 아무도 채울 수 없다. */
 const COMMAND_EVIDENCE = ['unit_test', 'static_check', 'runtime'];
@@ -166,9 +167,14 @@ function DraftReview({ r }: { r: CeoRequest }) {
   const have = new Set(project.verifyCommands.map((v) => v.argv.join(' ')));
   const suggestions = (r.verifySuggestions ?? []).filter((s) => !have.has(s.argv.join(' ')));
   const unanswered = r.questions.map((_, i) => i).filter((i) => !r.answers?.[i]);
+  const estimateOf = (i: number) => state.estimates?.[diffs[i] ?? r.drafts[i]!.difficulty ?? 'normal']?.tokens ?? 0;
   // 어려움 업무는 팀장만 맡는다: 구현 담당 팀장이 없으면 비서실장·검수 팀장이 떠맡거나 보류된다.
   const leads = state.employees.filter((e) => e.active && e.rank === 'lead');
   const hardImpl = kept.filter((i) => (diffs[i] ?? r.drafts[i]!.difficulty) === 'hard' && ['impl', 'doc'].includes(r.drafts[i]!.type));
+  // 어려운 업무를 맡길 구현 팀장이 없으면: 가장 높은 직급의 구현 직원을 한 번에 올릴 수 있게.
+  const promotable = state.employees
+    .filter((e) => e.active && !e.removedAt && e.roles.includes('implementer') && e.rank !== 'lead')
+    .sort((a, b) => (b.rank === 'senior' ? 1 : 0) - (a.rank === 'senior' ? 1 : 0))[0];
   const hardWarning =
     hardImpl.length === 0
       ? null
@@ -294,6 +300,12 @@ function DraftReview({ r }: { r: CeoRequest }) {
                         {ko ? `비서실장 제안: ${difficulty(d.difficulty)}` : `Proposed: ${difficulty(d.difficulty)}`}
                       </span>
                     )}
+                    <span
+                      className="chip"
+                      title={ko ? '같은 난이도 업무의 실제 평균(기록이 적으면 기본 예상치)' : 'Average of past tickets of this difficulty'}
+                    >
+                      {ko ? '예상' : 'est.'} ~{fmtTokens(estimateOf(i), lang)} {ko ? '토큰' : 'tokens'}
+                    </span>
                   </div>
                   <div className="row" style={{ marginTop: 4 }}>
                     {d.writeScope.map((g) => (
@@ -312,6 +324,21 @@ function DraftReview({ r }: { r: CeoRequest }) {
       {hardWarning && (
         <div className="banner warn" style={{ marginTop: 8 }}>
           {hardWarning}
+          {promotable && (
+            <button
+              className="btn small primary"
+              style={{ marginLeft: 8 }}
+              disabled={busy}
+              onClick={() =>
+                run(
+                  () => api(`employees/${promotable.id}/rank`, { body: { rank: 'lead' } }),
+                  ko ? `${promotable.name}을(를) 팀장으로 올렸습니다.` : `Promoted ${promotable.name}.`,
+                ).then(reload)
+              }
+            >
+              {ko ? `${promotable.name}을(를) 팀장으로 올리기` : `Promote ${promotable.name} to lead`}
+            </button>
+          )}
         </div>
       )}
       {(mismatches.length > 0 || suggestions.length > 0) && (
@@ -389,6 +416,16 @@ function DraftReview({ r }: { r: CeoRequest }) {
         {unanswered.length > 0 && (
           <span className="sub">{ko ? `답하지 않은 질문 ${unanswered.length}개` : `${unanswered.length} unanswered`}</span>
         )}
+        <span className="sub">
+          {ko ? '예상 합계' : 'Estimated total'} ~
+          <b>
+            {fmtTokens(
+              kept.reduce((a, i) => a + estimateOf(i), 0),
+              lang,
+            )}
+          </b>{' '}
+          {ko ? '토큰' : 'tokens'}
+        </span>
         <button className="btn" disabled={busy} onClick={() => run(() => api(`requests/${r.id}/dismiss`, { body: {} })).then(reload)}>
           {ko ? '버리기' : 'Dismiss'}
         </button>

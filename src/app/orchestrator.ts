@@ -8,7 +8,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { adapterFor } from '../adapters/index.ts';
 import { isTransient } from '../adapters/types.ts';
-import { buildChatPrompt, buildDraftPrompt, buildReviewPrompt, buildWorkPrompt } from '../agents/prompt.ts';
+import { buildChatPrompt, buildDraftPrompt, buildReviewPrompt, buildScreenCheckPrompt, buildWorkPrompt } from '../agents/prompt.ts';
 import {
   blindPrompt,
   crossPrompt,
@@ -19,11 +19,11 @@ import {
   synthesize,
   type DeliberationPhase,
 } from '../agents/deliberation.ts';
-import { parseChatReply, parseDrafts, parseReport, type TicketDraft, type WorkReport } from '../agents/report.ts';
+import { followUpsFromSummary, parseChatReply, parseDrafts, parseReport, type TicketDraft, type WorkReport } from '../agents/report.ts';
 import { Chat, ticketChannelId, type ChatMessage } from './chat.ts';
 import { writeDecision } from '../approvals/file-queue.ts';
 import type { Actor } from '../core/ticket-machine.ts';
-import type { Claim, Employee, Evidence, FailureClass, Project, Ticket, TicketStatus } from '../core/types.ts';
+import type { Claim, Employee, Evidence, FailureClass, Project, Ticket, TicketStatus, VerifyCommand } from '../core/types.ts';
 import { DEFAULT_BUDGET, DIFFICULTIES, DIFFICULTY_RANK, RANK_ORDER, TERMINAL_STATUSES, difficultyOf, rankOf } from '../core/types.ts';
 import { pickPanel, pickStaff } from '../core/staffing.ts';
 import { commandOf, judgeToolRequest } from '../core/guard.ts';
@@ -52,7 +52,10 @@ import { Company, DomainError } from './company.ts';
 import { newId, Records, sha256, type CeoRequest, type RunRecord } from './records.ts';
 import { appProfileDir } from './doctor.ts';
 import { dependencySetup, installDependencies } from './verify-setup.ts';
+import { estimates, ticketTokens, tokenBudget } from './cost.ts';
+import { suggestVerifyAt } from './repo-inspect.ts';
 import { PreviewManager, type PreviewInfo } from './preview.ts';
+import { captureScreens, findChrome } from './screen-check.ts';
 
 const ORCH: Actor = { kind: 'orchestrator' };
 const CEO: Actor = { kind: 'ceo' };
@@ -65,6 +68,20 @@ export interface OrchestratorOptions {
   concurrency?: Partial<Record<string, number>>;
   /** 저장된 상태 변경 알림(대시보드 실시간 갱신용). */
   onChange?: (kind: string, id: string) => void;
+  /** 승인 대기에 오면 결과물을 띄워 화면을 찍고 QA 직원 의견을 받는다(기본 켬). */
+  screenCheck?: boolean;
+}
+
+/** 자동 화면 점검 기록(설정 screen:<업무 ID>에 JSON으로 저장). */
+export interface ScreenCheck {
+  sha: string;
+  state: 'running' | 'done' | 'failed';
+  at: string;
+  note: string;
+  shots: { label: string; file: string }[];
+  errors: string[];
+  qaRunId: string | null;
+  qaBy: string | null;
 }
 
 export interface RecoveryReport {
@@ -112,6 +129,7 @@ export class Orchestrator {
       // CLI별 동시 실행 수: 실제 CLI는 제한 없음(대표 결정, 2026-09-30). 사용량 한도에 닿으면 usage_limit 보류로 멈춘다.
       concurrency: { claude: Infinity, codex: Infinity, agy: Infinity, fake: 4, ...opts.concurrency },
       onChange: opts.onChange,
+      screenCheck: opts.screenCheck ?? true,
     };
   }
 
@@ -189,6 +207,156 @@ export class Orchestrator {
       return { sha, dir: await ensureDetachedWorktree(paths, 'preview', 'base', sha) };
     });
     return this.previews.start({ projectId, ticketId, sha, dir });
+  }
+
+  // ======================= 자동 화면 점검 =======================
+
+  private screenBusy = new Set<string>();
+
+  screenCheckOf(ticketId: string): ScreenCheck | null {
+    const raw = this.company.store.getSetting(`screen:${ticketId}`);
+    return raw ? (JSON.parse(raw) as ScreenCheck) : null;
+  }
+
+  private saveScreenCheck(ticketId: string, c: ScreenCheck): void {
+    this.company.store.setSetting(`screen:${ticketId}`, JSON.stringify(c));
+    this.changed('ticket', ticketId);
+  }
+
+  /** 승인 대기 업무에 대표 직접 확인 요구가 있으면, 이번 제출물로 한 번 화면을 찍고 QA 의견을 받는다. */
+  private maybeScreenCheck(t: Ticket): void {
+    if (this.opts.screenCheck === false || this.paused || t.type === 'review' || t.hold) return;
+    if (!t.requirements.some((r) => r.evidenceType === 'human_attest')) return;
+    const sha = this.records.latestSubmission(t)?.headSha;
+    if (!sha || this.screenBusy.has(t.id)) return;
+    const prev = this.screenCheckOf(t.id);
+    if (prev && prev.sha === sha && prev.state !== 'running') return; // running인데 busy가 아니면 재시작으로 끊긴 것: 다시 한다
+    this.screenBusy.add(t.id);
+    this.track(
+      `screen:${t.id}`,
+      this.screenCheck(t, sha)
+        .catch((e: unknown) => {
+          this.saveScreenCheck(t.id, { ...this.blankCheck(sha), state: 'failed', note: String((e as Error)?.message ?? e).slice(0, 500) });
+        })
+        .finally(() => this.screenBusy.delete(t.id)),
+    );
+  }
+
+  private blankCheck(sha: string): ScreenCheck {
+    return { sha, state: 'running', at: new Date().toISOString(), note: '', shots: [], errors: [], qaRunId: null, qaBy: null };
+  }
+
+  private async screenCheck(t: Ticket, sha: string): Promise<void> {
+    const check = this.blankCheck(sha);
+    const fail = (note: string) => this.saveScreenCheck(t.id, { ...check, state: 'failed', note });
+    const chrome = findChrome();
+    if (!chrome)
+      return fail(
+        tr(
+          '크롬을 찾지 못해 자동 화면 점검을 건너뜁니다. 실행해 보기로 직접 확인해 주세요.',
+          'Chrome not found, so the automatic screen check was skipped.',
+        ),
+      );
+    this.saveScreenCheck(t.id, check);
+    const info = await this.preview(t.projectId, t.id);
+    if (!info.url)
+      return fail(
+        tr('결과물을 띄우지 못했습니다: ', 'Could not start the submission: ') +
+          info.log.trim().split('\n').slice(-4).join(' ').slice(0, 400),
+      );
+    const outDir = path.join(this.opts.dataDir, 'screens', t.id, sha.slice(0, 12));
+    const cap = await captureScreens(info.url, outDir, chrome);
+    check.shots = cap.shots;
+    check.errors = cap.errors;
+    check.state = 'done';
+    check.note = info.url;
+    const room = this.chat.ensureTicketChannel(t.id);
+    const qa = this.pickScreenQa(t);
+    if (room)
+      this.chat.post(
+        room.id,
+        'system',
+        tr(
+          `자동 화면 점검: 결과물을 띄워 ${cap.shots.length}장 찍었습니다(콘솔 오류 ${cap.errors.length}개).${qa ? ` ${qa.name}이(가) 화면을 보고 의견을 답니다.` : ''} 승인 카드에서 사진을 볼 수 있습니다.`,
+          `Automatic screen check: ran the submission and took ${cap.shots.length} screenshots (${cap.errors.length} console errors).${qa ? ` ${qa.name} will comment.` : ''}`,
+        ),
+        'event',
+      );
+    if (qa && room) {
+      const nonce = randomBytes(6).toString('hex');
+      const prompt = buildScreenCheckPrompt({
+        employee: qa,
+        ticket: t,
+        checks: t.requirements.filter((r) => r.evidenceType === 'human_attest').map((r) => ({ id: r.id, text: r.text })),
+        shots: cap.shots.map((s) => ({ file: path.basename(s.file), label: s.label })),
+        errors: cap.errors,
+        pageText: cap.text,
+        nonce,
+        language: this.opts.language ?? 'ko',
+      });
+      const runId = await this.launch({
+        ticket: { id: room.id, round: 1, budget: { ...DEFAULT_BUDGET, runTimeoutMs: 10 * 60_000 } },
+        employee: qa,
+        kind: 'chat',
+        cwd: outDir,
+        prompt,
+        nonce,
+        accessLevel: 'read-only',
+        baseSha: null,
+      });
+      // 의견에서 누구를 불러도 연쇄 대화로 번지지 않게 최대 깊이로 둔다.
+      this.chatDepth.set(runId, Orchestrator.CHAT_MAX_DEPTH);
+      check.qaRunId = runId;
+      check.qaBy = qa.id;
+    }
+    this.saveScreenCheck(t.id, check);
+  }
+
+  /** 화면을 볼 직원: 사진을 읽을 수 있는 Claude QA를 먼저, 없으면 다른 Claude, 그다음 아무 QA·검수자. 담당자는 피한다. */
+  private pickScreenQa(t: Ticket): Employee | null {
+    const pool = this.company.employees().filter((e) => e.active && !e.removedAt && e.id !== t.assigneeId);
+    return (
+      pool.find((e) => e.cli === 'claude' && e.roles.includes('qa')) ??
+      pool.find((e) => e.cli === 'claude') ??
+      pool.find((e) => e.roles.includes('qa')) ??
+      pool.find((e) => e.id === t.reviewerId) ??
+      null
+    );
+  }
+
+  /** 승인 카드용: 점검 기록 + QA 의견(업무방에 올라온 답). 사진은 따로 받는다(screenImages). */
+  screenCheckView(
+    ticketId: string,
+  ): (Omit<ScreenCheck, 'shots'> & { shots: { label: string }[]; opinion: string | null; qaState: string | null }) | null {
+    const c = this.screenCheckOf(ticketId);
+    if (!c) return null;
+    const run = c.qaRunId ? this.records.run(c.qaRunId) : null;
+    const opinion = c.qaRunId
+      ? (this.chat.messages(ticketChannelId(ticketId), 300).find((m) => m.runId === c.qaRunId)?.text ?? null)
+      : null;
+    return { ...c, shots: c.shots.map((s) => ({ label: s.label })), opinion, qaState: run?.status ?? null };
+  }
+
+  async screenImages(ticketId: string): Promise<{ label: string; dataUrl: string }[]> {
+    const c = this.screenCheckOf(ticketId);
+    if (!c) return [];
+    const root = path.resolve(this.opts.dataDir, 'screens') + path.sep;
+    const out: { label: string; dataUrl: string }[] = [];
+    for (const s of c.shots) {
+      if (!path.resolve(s.file).startsWith(root)) continue;
+      const buf = await readFile(s.file).catch(() => null);
+      if (buf) out.push({ label: s.label, dataUrl: `data:image/png;base64,${buf.toString('base64')}` });
+    }
+    return out;
+  }
+
+  /** 대표가 다시 찍게 한다(예: 크롬을 새로 깔았거나 띄우기에 실패했을 때). */
+  rerunScreenCheck(ticketId: string): void {
+    const t = this.company.requireTicket(ticketId);
+    if (t.status !== 'awaiting_approval')
+      throw new DomainError(tr('승인 대기 중인 업무만 다시 찍을 수 있습니다.', 'Only tickets awaiting approval can be re-checked.'));
+    this.company.store.setSetting(`screen:${ticketId}`, '');
+    this.maybeScreenCheck(t);
   }
 
   /** 모든 진행 중 비동기 작업이 끝날 때까지 기다린다(테스트용). */
@@ -370,6 +538,7 @@ export class Orchestrator {
     this.ticking = true;
     try {
       await this.pollToolApprovals();
+      this.checkDailyLimit();
       // 우선순위(1 높음 → 3 낮음) 순, 같으면 먼저 만든 순: 쓰기 범위가 겹칠 때 높은 업무가 먼저 잠금을 잡는다.
       for (const t of [...this.company.tickets()].sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2))) {
         if (t.hold?.reason === 'waiting_dependency' && t.dependsOn.every((d) => this.company.requireTicket(d).status === 'done')) {
@@ -821,6 +990,126 @@ export class Orchestrator {
     // 실행 결과·이벤트·티켓 전이를 한 트랜잭션으로: 중간에 죽어도 "성공했는데 제출 안 됨" 상태가 남지 않는다.
     this.company.store.transact(() => this.finishRunTx(run, failure));
     if (!failure && run.kind === 'work' && run.report?.kind === 'work') this.afterWorkReport(run, run.report);
+    if (!failure && run.kind === 'review' && run.report?.kind === 'review') {
+      const t = this.company.store.get<Ticket>('tickets', run.ticketId);
+      const r = run.report;
+      if (t) this.postFollowUps(run, t, r.followUps?.length ? r.followUps : followUpsFromSummary(r.summary));
+    }
+    this.checkTokenBudget(run.ticketId);
+  }
+
+  // ======================= 자동 설정 =======================
+
+  /**
+   * 병합 뒤 기준 브랜치에 테스트·타입 검사·빌드 명령이 생겼는지 본다(실측: 빈 저장소로 시작하면 대표가 직접 넣어야 했다).
+   * 검증 명령이 하나도 없으면 바로 넣고, 이미 있으면 빠진 것을 추천으로 남긴다(프로젝트 화면에서 한 번에 추가).
+   */
+  async autoVerifyCommands(projectId: string): Promise<void> {
+    const project = this.company.requireProject(projectId);
+    const found = await suggestVerifyAt(project.originPath, project.baseBranch);
+    const have = new Set(project.verifyCommands.map((v) => v.argv.join(' ')));
+    const missing = found.filter((f) => !have.has(f.argv.join(' ')));
+    if (!missing.length) {
+      this.company.store.setSetting(`verify_suggest:${projectId}`, '');
+      return;
+    }
+    if (project.verifyCommands.length === 0) {
+      this.company.updateProject(projectId, { verifyCommands: missing });
+      this.chat.ensureGeneral();
+      this.chat.post(
+        'general',
+        'system',
+        tr(
+          `${project.name}: 병합된 코드에 검증 명령이 생겨 자동으로 추가했습니다 — ${missing.map((m) => m.argv.join(' ')).join(', ')}`,
+          `${project.name}: added verify commands found in the merged code — ${missing.map((m) => m.argv.join(' ')).join(', ')}`,
+        ),
+        'event',
+      );
+    } else this.company.store.setSetting(`verify_suggest:${projectId}`, JSON.stringify(missing));
+    this.changed('project', projectId);
+  }
+
+  verifySuggestions(projectId: string): VerifyCommand[] {
+    const raw = this.company.store.getSetting(`verify_suggest:${projectId}`);
+    return raw ? (JSON.parse(raw) as VerifyCommand[]) : [];
+  }
+
+  // ======================= 비용(토큰) =======================
+
+  /** 업무별 예산을 넘으면 멈추고 대표에게 묻는다(계속 돌며 토큰을 태우지 않게). */
+  private checkTokenBudget(ticketId: string): void {
+    const t = this.company.store.get<Ticket>('tickets', ticketId);
+    if (!t || TERMINAL_STATUSES.includes(t.status) || t.hold) return;
+    const used = ticketTokens(this.records, t.id);
+    const budget = tokenBudget(t);
+    if (used < budget) return;
+    this.apply(t.id, {
+      type: 'hold',
+      reason: 'needs_decision',
+      note: tr(
+        `토큰 예산을 넘었습니다: ${Math.round(used / 1e4)}만 / 예산 ${Math.round(budget / 1e4)}만. 예산을 늘려 계속하거나 취소하세요.`,
+        `Token budget exceeded: ${Math.round(used / 1e3)}k of ${Math.round(budget / 1e3)}k. Raise the budget to continue, or cancel.`,
+      ),
+    });
+  }
+
+  /** 예산을 늘리고(없으면 1.5배, 적어도 쓴 양의 1.3배) 예산 때문에 멈췄으면 다시 돌린다. */
+  raiseTokenBudget(ticketId: string, maxTokens?: number): Ticket {
+    const t = this.company.requireTicket(ticketId);
+    const used = ticketTokens(this.records, t.id);
+    const next = maxTokens ?? Math.max(tokenBudget(t) * 1.5, used * 1.3);
+    let out = this.company.setTicketTokenBudget(t.id, next);
+    if (out.hold?.reason === 'needs_decision' && /토큰 예산|Token budget/.test(out.hold.note) && used < next) out = this.releaseHold(t.id);
+    this.changed('ticket', t.id);
+    return out;
+  }
+
+  private dailyCheckedAt = 0;
+
+  /** 하루 한도: 넘으면 회사 전체를 멈추고, 다음 날 자동으로 푼다(대표가 그날 직접 풀면 그날은 다시 멈추지 않는다). */
+  private checkDailyLimit(): void {
+    if (Date.now() - this.dailyCheckedAt < 30_000) return;
+    this.dailyCheckedAt = Date.now();
+    const limit = Number(this.company.store.getSetting('daily_token_limit') ?? 0);
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const reason = this.company.store.getSetting('paused_reason') ?? '';
+    if (this.paused && reason.startsWith('daily:') && reason !== `daily:${today}`) {
+      this.company.store.setSetting('paused_reason', '');
+      this.setPaused(false);
+      return;
+    }
+    if (!limit || this.paused || this.company.store.getSetting('daily_override') === today) return;
+    const used = this.records.usageSummary(d).today.total;
+    if (used < limit) return;
+    this.company.store.setSetting('paused_reason', `daily:${today}`);
+    this.setPaused(true);
+    this.chat.ensureGeneral();
+    this.chat.post(
+      'general',
+      'system',
+      tr(
+        `오늘 토큰 한도(${Math.round(limit / 1e4)}만)에 닿아 회사 전체를 멈췄습니다. 내일 자동으로 다시 시작합니다. 지금 계속하려면 "일시정지 풀기"를 누르세요.`,
+        `Hit today's token limit (${Math.round(limit / 1e3)}k); paused until tomorrow. Press Resume to continue now.`,
+      ),
+      'event',
+    );
+  }
+
+  tokenEstimates() {
+    return estimates(this.records, this.company.tickets());
+  }
+
+  ticketBudget(t: Ticket): { used: number; budget: number } {
+    return { used: ticketTokens(this.records, t.id), budget: tokenBudget(t) };
+  }
+
+  setDailyTokenLimit(tokens: number): { dailyLimit: number } {
+    const v = Math.max(0, Math.round(tokens || 0));
+    this.company.store.setSetting('daily_token_limit', String(v));
+    this.dailyCheckedAt = 0;
+    this.changed('company', 'company');
+    return { dailyLimit: v };
   }
 
   // ======================= 사내 대화 =======================
@@ -1094,10 +1383,32 @@ export class Orchestrator {
   /** 작업 보고의 후속 업무 제안·동료 질문을 업무방에 올린다. */
   private afterWorkReport(run: RunRecord, report: WorkReport): void {
     const t = this.company.store.get<Ticket>('tickets', run.ticketId);
-    if (!t || (!report.followUps?.length && !report.ask?.length)) return;
+    // 직원이 칸을 안 채워도 요약에 "범위 밖·후속"이 있으면 제안으로 올린다.
+    const followUps = report.followUps?.length ? report.followUps : followUpsFromSummary(report.summary);
+    if (!t || (!followUps.length && !report.ask?.length)) return;
     const room = this.chat.ensureTicketChannel(t.id);
     if (!room) return;
-    for (const f of report.followUps ?? [])
+    this.postFollowUps(run, t, followUps);
+    for (const a of report.ask ?? []) {
+      const to = this.company.employees().find((e) => e.name === a.to && !e.removedAt);
+      if (!to || to.id === run.employeeId) continue;
+      if (!room.members.includes(to.id)) this.chat.addMembers(room.id, [to.id]);
+      const m = this.chat.post(room.id, run.employeeId, `@${to.name} ${a.text}`, 'chat');
+      void this.dispatchChat(room.id, to.id, 1, m);
+    }
+  }
+
+  private postFollowUps(run: RunRecord, t: Ticket, followUps: { title: string; reason: string }[]): void {
+    const room = this.chat.ensureTicketChannel(t.id);
+    if (!room || !followUps.length) return;
+    // 같은 제목의 제안은 한 번만(재작업 회차마다 반복하지 않게)
+    const seen = new Set(
+      this.chat
+        .messages(room.id, 300)
+        .filter((m) => m.followUp)
+        .map((m) => m.followUp!.title),
+    );
+    for (const f of followUps.filter((x) => !seen.has(x.title)))
       this.chat.post(
         room.id,
         run.employeeId,
@@ -1107,13 +1418,6 @@ export class Orchestrator {
           followUp: { title: f.title, reason: f.reason, projectId: t.projectId, ticketId: t.id },
         },
       );
-    for (const a of report.ask ?? []) {
-      const to = this.company.employees().find((e) => e.name === a.to && !e.removedAt);
-      if (!to || to.id === run.employeeId) continue;
-      if (!room.members.includes(to.id)) this.chat.addMembers(room.id, [to.id]);
-      const m = this.chat.post(room.id, run.employeeId, `@${to.name} ${a.text}`, 'chat');
-      void this.dispatchChat(room.id, to.id, 1, m);
-    }
   }
 
   /** 후속 업무 제안 → 비서실장에게 요청(대표가 누름). */
@@ -1521,6 +1825,7 @@ ${failure.detail.slice(0, 400)}`,
   }
 
   private ensureIntegrationApproval(t: Ticket): void {
+    this.maybeScreenCheck(t);
     if (this.records.pendingApprovalFor(t.id, 'integrate')) return;
     if (t.type === 'review') {
       const claims = this.roundClaims(t);
@@ -1753,6 +2058,7 @@ ${failure.detail.slice(0, 400)}`,
         this.company.store.setSetting(`mergeverify_base:${ticketId}`, '');
         this.apply(ticketId, { type: 'integrated', commitSha: commit });
       });
+      await this.autoVerifyCommands(project.id).catch(() => {});
     } catch (error) {
       this.company.store.transact(() => {
         this.company.store.setSetting(`mergeverify_base:${ticketId}`, '');
@@ -2380,6 +2686,12 @@ ${failure.detail.slice(0, 400)}`,
 
   /** 대표가 회사 전체를 멈추거나 다시 돌린다. 진행 중인 실행은 끝까지 마무리한다. */
   setPaused(paused: boolean): { paused: boolean; running: number } {
+    if (!paused) {
+      // 하루 한도로 멈춘 날 대표가 직접 풀면 그날은 다시 멈추지 않는다.
+      const reason = this.company.store.getSetting('paused_reason') ?? '';
+      if (reason.startsWith('daily:')) this.company.store.setSetting('daily_override', reason.slice(6));
+      this.company.store.setSetting('paused_reason', '');
+    }
     this.company.store.setSetting('company_paused', paused ? new Date().toISOString() : '');
     this.company.store.appendEvent('ceo', paused ? 'company.paused' : 'company.resumed', 'company', {});
     this.changed('company', 'company');

@@ -44,6 +44,7 @@ export function TicketPage({ id }: { id: string }) {
   if (!detail || !state) return <Skeleton />;
   const tk = detail.ticket;
   const pending = detail.approvals.filter((a) => a.state === 'pending');
+  const budget = state.budgets?.[tk.id];
   const latestHead = detail.runs.filter((r) => r.kind === 'work' && r.headSha).at(-1)?.headSha;
 
   return (
@@ -66,9 +67,19 @@ export function TicketPage({ id }: { id: string }) {
             {t('assignee')} <b>{empName(state.employees, tk.assigneeId)}</b> · {t('reviewer')}{' '}
             <b>{empName(state.employees, tk.reviewerId)}</b> · {ko ? '난이도' : 'Difficulty'} {difficultyLabel(tk.difficulty)} ·{' '}
             {t('round')} {tk.round}/{tk.budget.maxRounds} · {ko ? '실행' : 'runs'} {tk.runCount}/{tk.budget.maxRuns}
-            {(state.usage?.byTicket[tk.id]?.total ?? 0) > 0 &&
-              ` · ${fmtTokens(state.usage!.byTicket[tk.id]!.total, lang)} ${ko ? '토큰' : 'tokens'}`}
+            {budget && ` · ${fmtTokens(budget.used, lang)} / ${fmtTokens(budget.budget, lang)} ${ko ? '토큰' : 'tokens'}`}
           </div>
+          {budget && budget.used > 0 && (
+            <div className="bar" style={{ marginTop: 6, maxWidth: 360 }} title={ko ? '토큰 예산 사용량' : 'Token budget used'}>
+              <i
+                style={{
+                  width: `${Math.min(100, Math.round((budget.used / budget.budget) * 100))}%`,
+                  background:
+                    budget.used >= budget.budget ? 'var(--bad)' : budget.used >= budget.budget * 0.7 ? 'var(--warn)' : 'var(--ok)',
+                }}
+              />
+            </div>
+          )}
         </div>
         <div className="row">
           <Link to={`/chat/${encodeURIComponent(`t:${tk.id}`)}`} className="btn">
@@ -161,7 +172,23 @@ export function TicketPage({ id }: { id: string }) {
             <Icon name="pause" size={14} /> {holdLabel(tk.hold.reason)}
           </b>
           <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{tk.hold.note}</div>
-          {tk.hold.reason === 'needs_decision' && tk.status === 'assigned' && (
+          {/토큰 예산|Token budget/.test(tk.hold.note) && (
+            <div className="row" style={{ marginTop: 10, justifyContent: 'flex-end' }}>
+              <button
+                className="btn primary"
+                disabled={busy}
+                onClick={() =>
+                  run(
+                    () => api(`tickets/${tk.id}/budget`, { body: {} }),
+                    ko ? '예산을 늘리고 다시 시작했습니다.' : 'Budget raised; resumed.',
+                  ).then(reload)
+                }
+              >
+                {ko ? '예산 50% 늘리고 계속' : 'Raise budget 50% and continue'}
+              </button>
+            </div>
+          )}
+          {tk.hold.reason === 'needs_decision' && tk.status === 'assigned' && !/토큰 예산|Token budget/.test(tk.hold.note) && (
             <div className="form" style={{ marginTop: 10 }}>
               <textarea
                 value={answer}

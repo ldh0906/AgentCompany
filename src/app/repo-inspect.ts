@@ -135,6 +135,25 @@ async function suggestVerify(repo: string): Promise<VerifySuggestion[]> {
   return out;
 }
 
+/** 브랜치(ref)의 내용으로 검증 명령을 추천한다(작업 트리가 아니라 git에서 읽는다: "브랜치만" 반영에서도 동작). */
+export async function suggestVerifyAt(repo: string, ref: string): Promise<VerifySuggestion[]> {
+  const show = async (f: string) => {
+    const r = await git(['show', `${ref}:${f}`], repo, { allowFail: true });
+    return r.code === 0 ? r.stdout : null;
+  };
+  const out: VerifySuggestion[] = [];
+  const pkgText = await show('package.json');
+  const scripts = (pkgText ? (JSON.parse(pkgText) as { scripts?: Record<string, string> }).scripts : null) ?? {};
+  if (scripts.test) out.push({ label: 'Unit tests', evidenceType: 'unit_test', argv: ['npm', 'test'] });
+  for (const s of ['typecheck', 'lint', 'build'])
+    if (scripts[s]) out.push({ label: s, evidenceType: 'static_check', argv: ['npm', 'run', s] });
+  if (await show('Cargo.toml')) out.push({ label: 'cargo test', evidenceType: 'unit_test', argv: ['cargo', 'test'] });
+  if (await show('go.mod')) out.push({ label: 'go test', evidenceType: 'unit_test', argv: ['go', 'test', './...'] });
+  if ((await show('pyproject.toml')) || (await show('pytest.ini')))
+    out.push({ label: 'pytest', evidenceType: 'unit_test', argv: ['python', '-m', 'pytest'] });
+  return out;
+}
+
 /**
  * 새 프로젝트: 고른 폴더 아래에 새 폴더를 만들고 git 저장소로 초기화한다(빈 첫 커밋, 기준 브랜치 main).
  * 이미 있는 폴더는 건드리지 않는다.

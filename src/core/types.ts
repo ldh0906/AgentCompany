@@ -154,6 +154,8 @@ export interface TicketBudget {
   maxRuns: number;
   maxRounds: number;
   runTimeoutMs: number;
+  /** 토큰 예산(없으면 난이도별 기본값). 넘으면 대표에게 묻는다. */
+  maxTokens?: number;
 }
 
 export const DEFAULT_BUDGET: TicketBudget = { maxRuns: 6, maxRounds: 3, runTimeoutMs: 30 * 60_000 };

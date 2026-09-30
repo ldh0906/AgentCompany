@@ -109,6 +109,8 @@ export class Api {
         return this.ticketDetail(id!);
       case 'GET tickets/:id/diff':
         return this.ticketDiff(id!);
+      case 'GET tickets/:id/screens':
+        return this.orch.screenImages(this.company.requireTicket(id!).id);
       case 'GET runs/:id/log':
         return this.runLog(id!, query.get('stream') === 'stderr' ? 'stderr' : 'stdout');
       case 'GET runs/:id/activity':
@@ -295,6 +297,10 @@ export class Api {
         return this.orch.assign(id!, str(b, 'assigneeId'), str(b, 'reviewerId'));
       case 'POST tickets/:id/pause':
         return this.orch.pauseTicket(id!);
+      case 'POST tickets/:id/budget':
+        return this.orch.raiseTokenBudget(id!, typeof b.maxTokens === 'number' ? b.maxTokens : undefined);
+      case 'POST daily-limit':
+        return this.orch.setDailyTokenLimit(Number(b.tokens ?? 0));
       case 'POST pause':
         return this.orch.setPaused(b.paused !== false);
       case 'POST tickets/:id/answer':
@@ -303,6 +309,9 @@ export class Api {
         return this.orch.reverify(id!);
       case 'POST tickets/:id/skip-review':
         return this.orch.skipReview(id!);
+      case 'POST tickets/:id/screen-check':
+        this.orch.rerunScreenCheck(id!);
+        return { ok: true };
       case 'POST tickets/:id/attest':
         return this.orch.attest(id!, str(b, 'requirementId'), str(b, 'note', { optional: true, max: 2000 }));
       case 'POST tickets/:id/release':
@@ -389,7 +398,20 @@ export class Api {
       permissionDelegate: this.orch.permissionDelegate()?.id ?? null,
       usage: r.usageSummary(),
       previews: this.orch.previewList(),
+      // 승인 대기 업무의 자동 화면 점검(사진은 tickets/:id/screens로 따로)
+      screenChecks: Object.fromEntries(
+        this.company
+          .tickets()
+          .filter((t) => t.status === 'awaiting_approval')
+          .map((t) => [t.id, this.orch.screenCheckView(t.id)])
+          .filter(([, v]) => v),
+      ),
       paused: this.orch.paused,
+      pausedReason: this.company.store.getSetting('paused_reason') ?? '',
+      dailyLimit: Number(this.company.store.getSetting('daily_token_limit') ?? 0),
+      estimates: this.orch.tokenEstimates(),
+      verifySuggest: Object.fromEntries(this.company.projects().map((p) => [p.id, this.orch.verifySuggestions(p.id)])),
+      budgets: Object.fromEntries(this.company.tickets().map((t) => [t.id, this.orch.ticketBudget(t)])),
       channels: this.orch.chat.channels(),
       // 직원이 대표를 부른 최근 메시지(알림·배지용)
       mentions: this.orch.chat

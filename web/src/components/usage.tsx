@@ -1,5 +1,6 @@
 // 토큰 사용량 표시: 숫자 서식, 오늘/누적 요약, 14일 막대, 직원별 막대. 시리즈는 하나라 한 가지 색(강조색)만 쓴다.
 import { useState } from 'react';
+import { api } from '../api.ts';
 import { useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
 import { Avatar, EmptyState, Icon } from './ui.tsx';
@@ -61,6 +62,60 @@ function DailyBars({ daily, days = 14 }: { daily: Record<string, { total: number
   );
 }
 
+/** 하루 토큰 한도: 넘으면 회사 전체가 멈추고 다음 날 자동으로 다시 시작한다. */
+function DailyLimit() {
+  const { lang } = useT();
+  const { state, reload } = useCompany();
+  const ko = lang === 'ko';
+  const [edit, setEdit] = useState<string | null>(null);
+  if (!state?.usage) return null;
+  const limit = state.dailyLimit ?? 0;
+  const used = state.usage.today.total;
+  const pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  const save = (v: number) =>
+    void api('daily-limit', { body: { tokens: v } })
+      .then(() => (setEdit(null), reload()))
+      .catch(() => {});
+  return (
+    <div className="daily-limit">
+      <div className="spread">
+        <span className="sub">
+          {ko ? '하루 한도' : 'Daily limit'}: <b>{limit ? `${fmtTokens(used, lang)} / ${fmtTokens(limit, lang)}` : ko ? '없음' : 'none'}</b>
+          {state.pausedReason?.startsWith('daily:') && <span className="chip warn">{ko ? '한도 도달로 멈춤' : 'paused by limit'}</span>}
+        </span>
+        {edit === null ? (
+          <button className="btn small" onClick={() => setEdit(limit ? String(Math.round(limit / 1e4)) : '')}>
+            {ko ? '한도 정하기' : 'Set limit'}
+          </button>
+        ) : (
+          <span className="row">
+            <input
+              style={{ width: 90 }}
+              value={edit}
+              onChange={(e) => setEdit(e.target.value.replace(/[^0-9]/g, ''))}
+              placeholder={ko ? '만 토큰' : '10k tokens'}
+            />
+            <span className="sub">{ko ? '만' : '×10k'}</span>
+            <button className="btn small primary" onClick={() => save(Number(edit || 0) * 1e4)}>
+              {ko ? '저장' : 'Save'}
+            </button>
+          </span>
+        )}
+      </div>
+      {limit > 0 && (
+        <div className="bar" style={{ marginTop: 6 }}>
+          <i style={{ width: `${pct}%`, background: pct >= 90 ? 'var(--bad)' : pct >= 70 ? 'var(--warn)' : 'var(--ok)' }} />
+        </div>
+      )}
+      <div className="hint">
+        {ko
+          ? '한도에 닿으면 새 작업을 멈추고(진행 중인 것은 마무리) 다음 날 자동으로 다시 시작합니다. 0이면 한도 없음.'
+          : 'At the limit, new work stops (running work finishes) and resumes tomorrow. 0 = no limit.'}
+      </div>
+    </div>
+  );
+}
+
 export function UsagePanel() {
   const { lang } = useT();
   const { state } = useCompany();
@@ -81,6 +136,9 @@ export function UsagePanel() {
         </span>
         <span className="sub">{ko ? 'CLI가 보고한 값' : 'as reported by the CLIs'}</span>
       </h2>
+      <div className="body" style={{ paddingBottom: 0 }}>
+        <DailyLimit />
+      </div>
       {usage.all.runs === 0 ? (
         <EmptyState icon="spark">
           {ko ? '아직 사용량 기록이 없습니다. 직원이 일하면 여기에 쌓입니다.' : 'No usage yet. It accumulates as employees work.'}

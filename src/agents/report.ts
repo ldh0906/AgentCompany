@@ -22,6 +22,8 @@ export interface ReviewReport {
   verdict: 'approve' | 'request_changes';
   summary: string;
   requirements: { id: string; met: boolean; evidenceIds: string[]; reason: string }[];
+  /** 이 업무 범위 밖에서 발견한 문제(대표가 후속 업무로 만들 수 있게) */
+  followUps?: { title: string; reason: string }[];
 }
 
 export type AgentReport = WorkReport | ReviewReport;
@@ -167,6 +169,7 @@ export function parseReport(
       verdict: r.verdict as ReviewReport['verdict'],
       summary: r.summary,
       requirements: reqs,
+      followUps: followUpsOf(r.followUps),
     },
   };
 }
@@ -305,6 +308,28 @@ function suggestionsOf(v: unknown): VerifySuggestion[] {
     });
   }
   return out.slice(0, 5);
+}
+
+function followUpsOf(v: unknown): { title: string; reason: string }[] {
+  return (isArr(v) ? (v as Record<string, unknown>[]) : [])
+    .filter((f) => isStr(f?.title) && f.title.trim())
+    .slice(0, 5)
+    .map((f) => ({ title: String(f.title).slice(0, 200), reason: isStr(f.reason) ? f.reason.slice(0, 2000) : '' }));
+}
+
+/**
+ * 요약 글에서 범위 밖·후속 문제를 찾는다(직원이 followUps 칸을 안 채워도 잡아내려고).
+ * 실측: "범위 밖 참고: README는 쓰기 범위 밖이라 갱신하지 않았으니 필요하면 후속 티켓으로" 같은 문장이 요약에만 있었다.
+ */
+export function followUpsFromSummary(summary: string): { title: string; reason: string }[] {
+  const sentences = summary
+    .split(/(?<=[.!?。])\s+|\n+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  return sentences
+    .filter((x) => /범위 밖|후속 (티켓|업무)|별도 (티켓|업무)|out of scope|follow-?up/i.test(x))
+    .slice(0, 3)
+    .map((x) => ({ title: x.replace(/^(범위 밖 참고|참고)\s*[:：]\s*/, '').slice(0, 80), reason: x.slice(0, 1000) }));
 }
 
 export interface ChatReply {

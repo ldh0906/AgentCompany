@@ -79,9 +79,33 @@ export interface State {
   previews?: PreviewInfo[];
   /** 회사 전체 일시정지 */
   paused?: boolean;
+  pausedReason?: string;
+  /** 하루 토큰 한도(0 = 없음) */
+  dailyLimit?: number;
+  /** 난이도별 예상 토큰(끝난 업무 평균, 없으면 기본값) */
+  estimates?: Record<'easy' | 'normal' | 'hard', { tokens: number; samples: number }>;
+  /** 업무별 토큰 사용량과 예산 */
+  budgets?: Record<string, { used: number; budget: number }>;
+  /** 병합된 코드에서 찾은, 아직 없는 검증 명령 */
+  verifySuggest?: Record<string, { label: string; argv: string[]; evidenceType: string }[]>;
+  /** 승인 대기 업무의 자동 화면 점검(사진은 tickets/:id/screens) */
+  screenChecks?: Record<string, ScreenCheck>;
   channels?: Channel[];
   /** 직원이 대표를 부른 최근 메시지 */
   mentions?: ChatMessage[];
+}
+
+export interface ScreenCheck {
+  sha: string;
+  state: 'running' | 'done' | 'failed';
+  at: string;
+  note: string;
+  shots: { label: string }[];
+  errors: string[];
+  qaRunId: string | null;
+  qaBy: string | null;
+  opinion: string | null;
+  qaState: string | null;
 }
 
 export interface Channel {

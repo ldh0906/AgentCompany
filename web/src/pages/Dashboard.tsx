@@ -7,7 +7,7 @@ import { Avatar, empName, EmptyState, HoldChip, Icon, Modal, needsCeo, StatusChi
 import { useCliStatus } from '../components/kit.tsx';
 import { UsagePanel } from '../components/usage.tsx';
 import { RequestBox } from './Requests.tsx';
-import { PreviewButton } from '../components/preview.tsx';
+import { PreviewButton, ScreenCheckPanel } from '../components/preview.tsx';
 
 const ACTIVE = ['assigned', 'in_progress', 'verifying', 'in_review', 'changes_requested', 'integrating'];
 
@@ -246,6 +246,7 @@ export function ApprovalItem({ a }: { a: Approval }) {
             <b>{lang === 'ko' ? '대표 직접 확인' : 'Your own check'}</b>
             <PreviewButton projectId={tk.projectId} ticketId={tk.id} />
           </div>
+          <ScreenCheckPanel ticketId={tk.id} />
           {ceoChecks.map((r) => (
             <label key={r.id} className="check-row">
               <input

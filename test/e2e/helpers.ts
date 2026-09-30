@@ -31,7 +31,13 @@ export async function makeOrigin(root: string): Promise<string> {
 
 export async function setup(
   t: { after: (fn: () => void | Promise<void>) => void },
-  opts: { implementer?: string; reviewer?: string; verify?: VerifyCommand[]; integrationMode?: 'manual' | 'auto_after_approval' } = {},
+  opts: {
+    implementer?: string;
+    reviewer?: string;
+    verify?: VerifyCommand[];
+    integrationMode?: 'manual' | 'auto_after_approval';
+    screenCheck?: boolean;
+  } = {},
 ): Promise<Env> {
   const root = mkdtempSync(join(tmpdir(), 'ac-e2e-'));
   const origin = await makeOrigin(root);
@@ -39,7 +45,7 @@ export async function setup(
   const dbPath = join(root, 'company.db');
   const store = new Store(dbPath);
   const company = new Company(store);
-  const orch = new Orchestrator(company, { dataDir, language: 'ko' });
+  const orch = new Orchestrator(company, { dataDir, language: 'ko', screenCheck: opts.screenCheck ?? false });
   t.after(async () => {
     await orch.stop();
     await orch.idle();

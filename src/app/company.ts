@@ -390,6 +390,19 @@ export class Company {
     });
   }
 
+  /** 업무의 토큰 예산을 바꾼다(대표). */
+  setTicketTokenBudget(id: string, maxTokens: number): Ticket {
+    const t = this.requireTicket(id);
+    if (!Number.isFinite(maxTokens) || maxTokens < 100_000)
+      throw new DomainError(tr('예산은 10만 토큰 이상이어야 합니다.', 'Budget must be at least 100k tokens.'));
+    const next = { ...t, budget: { ...t.budget, maxTokens: Math.round(maxTokens) }, updatedAt: this.clock() };
+    this.store.transact(() => {
+      this.saveTicket(next);
+      this.store.appendEvent('ceo', 'ticket.budget_changed', id, { maxTokens: next.budget.maxTokens }, this.clock());
+    });
+    return next;
+  }
+
   private saveTicket(t: Ticket): void {
     this.store.put('tickets', t.id, t, { project_id: t.projectId, status: t.status, created_at: t.createdAt, updated_at: t.updatedAt });
   }

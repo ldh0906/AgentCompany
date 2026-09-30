@@ -91,6 +91,37 @@ export function Projects() {
                   ))
                 )}
               </div>
+              {(() => {
+                const have = new Set(p.verifyCommands.map((v) => v.argv.join(' ')));
+                const sugg = (state.verifySuggest?.[p.id] ?? []).filter((v) => !have.has(v.argv.join(' ')));
+                return sugg.length ? (
+                  <div className="banner info" style={{ marginTop: 8 }}>
+                    {ko ? '병합된 코드에 검증 명령이 생겼습니다: ' : 'Verify commands found in the merged code: '}
+                    {sugg.map((v) => v.argv.join(' ')).join(', ')}{' '}
+                    <button
+                      className="btn small primary"
+                      disabled={busy}
+                      onClick={() =>
+                        run(
+                          () =>
+                            api(`projects/${p.id}`, {
+                              method: 'PATCH',
+                              body: {
+                                verifyCommands: [
+                                  ...p.verifyCommands.map(({ label, argv, evidenceType }) => ({ label, argv, evidenceType })),
+                                  ...sugg,
+                                ],
+                              },
+                            }),
+                          ko ? '검증 명령을 추가했습니다.' : 'Added.',
+                        ).then(reload)
+                      }
+                    >
+                      {ko ? '모두 추가' : 'Add all'}
+                    </button>
+                  </div>
+                ) : null;
+              })()}
               <div style={{ marginTop: 10 }}>
                 <b>{ko ? '보호 경로' : 'Protected paths'}</b>
                 <div className="row">

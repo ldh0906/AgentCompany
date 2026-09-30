@@ -1720,6 +1720,47 @@ details.advanced[open] summary {
   display: grid;
   gap: 8px;
 }
+/* 자동 화면 점검 (승인 카드) */
+.screen-check {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+}
+.shot {
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  overflow: hidden;
+  cursor: zoom-in;
+  text-align: left;
+  font-size: 12px;
+  color: inherit;
+}
+.shot img,
+.shot-empty {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  object-position: top;
+  background: #0003;
+}
+.shot span {
+  padding: 0 8px 6px;
+}
+.qa-opinion {
+  white-space: pre-wrap;
+}
 .check-row {
   display: flex;
   gap: 8px;
@@ -2145,4 +2186,24 @@ details.advanced[open] summary {
   .room-body {
     max-height: 60vh;
   }
+}
+
+/* 비용: 하루 한도·업무 예산 막대 */
+.daily-limit {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+.bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
 }
