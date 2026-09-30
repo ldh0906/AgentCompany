@@ -86,3 +86,12 @@ test('요약 속 "범위 밖"·"후속 티켓" 문장을 후속 업무 제안으
   assert.match(got[0]!.title, /^README/);
   assert.deepEqual(followUpsFromSummary('모든 요구사항을 충족했습니다.'), []);
 });
+
+test('예산은 같은 난이도 실제 평균의 2.5배까지 늘어난다(대표가 정한 값이 있으면 그 값)', () => {
+  const hard = { budget: {}, difficulty: 'hard' } as unknown as Parameters<typeof tokenBudget>[0];
+  assert.equal(tokenBudget(hard), DEFAULT_TOKEN_BUDGET.hard);
+  assert.equal(tokenBudget(hard, 8_110_000), 20_275_000);
+  assert.equal(tokenBudget(hard, 1_000_000), DEFAULT_TOKEN_BUDGET.hard, '평균이 작으면 기본값');
+  const fixed = { budget: { maxTokens: 3_000_000 }, difficulty: 'hard' } as unknown as Parameters<typeof tokenBudget>[0];
+  assert.equal(tokenBudget(fixed, 8_110_000), 3_000_000);
+});

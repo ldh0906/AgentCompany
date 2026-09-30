@@ -16,6 +16,16 @@ export interface WorkReport {
   ask?: { to: string; text: string }[];
   /** 대표 직접 확인 요구사항을 기계가 화면에서 보여 줄 순서(자동 화면 점검이 그대로 따라 한다). */
   screenSteps?: ScreenScenario[];
+  /** 혼자 하기엔 크다고 판단하면: 나눌 부분(2~4개). 다른 직원이 나눠 맡고, 끝나면 이 업무가 돌아와 마무리한다. */
+  split?: SplitPart[];
+}
+
+export interface SplitPart {
+  title: string;
+  purpose: string;
+  requirements: { text: string; evidenceType: string }[];
+  writeScope: string[];
+  difficulty: Difficulty;
 }
 
 /** 자동 화면 점검 한 단계. 좌표 대신 글자·선택자로 누를 수 있게 한다(직원은 화면 픽셀을 모른다). */
@@ -159,6 +169,7 @@ export function parseReport(
           .slice(0, 3)
           .map((a) => ({ to: String(a.to).replace(/^@/, '').slice(0, 60), text: String(a.text).slice(0, 2000) })),
         screenSteps: screenStepsOf(r.screenSteps, expected.requirementIds),
+        split: splitOf(r.split),
       },
     };
   }
@@ -362,6 +373,29 @@ export function screenStepsOf(v: unknown, requirementIds: string[]): ScreenScena
     if (steps.some((s) => s.do === 'shot')) out.push({ requirementId: x.requirementId, steps: steps.slice(0, 30) });
   }
   return out.slice(0, 6);
+}
+
+const EVIDENCE_TYPES = ['mockup', 'inspection', 'static_check', 'unit_test', 'runtime', 'human_attest'];
+
+/** 나눌 부분: 너그럽게 읽되 제목·요구사항·쓰기 범위가 없는 것은 버린다. 어려움은 보통으로 낮춘다(선임도 맡게). 2~4개일 때만. */
+export function splitOf(v: unknown): SplitPart[] {
+  const parts = (isArr(v) ? (v as Record<string, unknown>[]) : [])
+    .map((p) => ({
+      title: isStr(p?.title) ? p.title.trim().slice(0, 120) : '',
+      purpose: isStr(p?.purpose) ? p.purpose.slice(0, 1000) : '',
+      requirements: (isArr(p?.requirements) ? (p.requirements as Record<string, unknown>[]) : [])
+        .filter((q) => isStr(q?.text) && q.text.trim())
+        .slice(0, 8)
+        .map((q) => ({
+          text: String(q.text).slice(0, 1000),
+          evidenceType: EVIDENCE_TYPES.includes(String(q.evidenceType)) ? String(q.evidenceType) : 'inspection',
+        })),
+      writeScope: (isArr(p?.writeScope) ? (p.writeScope as unknown[]) : []).filter(isStr).slice(0, 10),
+      difficulty: (p?.difficulty === 'easy' ? 'easy' : 'normal') as Difficulty,
+    }))
+    .filter((p) => p.title && p.requirements.length && p.writeScope.length)
+    .slice(0, 4);
+  return parts.length >= 2 ? parts : [];
 }
 
 function followUpsOf(v: unknown): { title: string; reason: string }[] {

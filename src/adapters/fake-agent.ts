@@ -50,6 +50,28 @@ async function work(h: TaskHeader, prompt: string): Promise<string> {
       },
       L('대표 결정이 필요합니다.', 'Needs a CEO decision.'),
     );
+  // 나눌 수 있으면 둘로 나눈다(나눈 조각과 돌아온 원래 업무는 규칙이 없으니 평소처럼 일한다)
+  if (behavior === 'splitter' && prompt.includes('"split": 2-4 parts')) {
+    const base = (h.writeScope[0] ?? 'src/**').replace(/\*.*$/, '').replace(/\/$/, '') || 'src';
+    return finalWith(
+      {
+        nonce: h.nonce,
+        kind: 'work',
+        status: 'blocked',
+        summary: L('혼자 하기엔 커서 둘로 나눕니다.', 'Too big for one run; splitting in two.'),
+        requirements: h.requirementIds.map((id) => ({ id, claim: 'not_met', notes: '' })),
+        questions: [],
+        split: ['a', 'b'].map((x) => ({
+          title: `part ${x}`,
+          purpose: `part ${x}`,
+          requirements: [{ text: `part ${x} works`, evidenceType: 'unit_test' }],
+          writeScope: [`${base}/${x}/**`],
+          difficulty: 'normal',
+        })),
+      },
+      L('나눴습니다.', 'Split.'),
+    );
+  }
   const lazyNow = behavior === 'lazy' && h.round === 1;
   const rebut = behavior === 'stubborn' && h.round > 1;
   if (!lazyNow && !rebut) {

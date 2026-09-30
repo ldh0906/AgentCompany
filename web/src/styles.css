@@ -2217,3 +2217,27 @@ details.advanced[open] summary {
   height: 100%;
   border-radius: 999px;
 }
+
+/* QA 한 줄 결론(요구사항마다 ✅/⚠/❓) */
+.verdicts {
+  display: grid;
+  gap: 4px;
+}
+.verdict {
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  border-left: 3px solid var(--border);
+}
+.verdict.ok {
+  border-left-color: var(--ok);
+  background: var(--ok-soft);
+}
+.verdict.bad {
+  border-left-color: var(--bad);
+  background: var(--bad-soft);
+}
+.verdict.unk {
+  border-left-color: var(--warn);
+  background: var(--warn-soft);
+}

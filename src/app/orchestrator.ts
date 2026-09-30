@@ -43,6 +43,8 @@ import { AGENT_IDENTITY, git } from '../workspace/git.ts';
 import {
   changedPaths,
   checkScope,
+  removeWorktree,
+  scopesOverlap,
   commitWorktree,
   reviewDiffText,
   ensureDetachedWorktree,
@@ -336,6 +338,10 @@ export class Orchestrator {
         pageText: cap.text,
         scenarios,
         downloads: cap.downloads.map((d) => `${d.name} (${d.size} bytes) — ${d.verdict}${d.text ? `\n${d.text.preview}` : ''}`),
+        notes:
+          sub?.report?.kind === 'work'
+            ? sub.report.requirements.filter((r) => attestIds.has(r.id) && r.notes).map((r) => `${r.id}: ${r.notes.slice(0, 1500)}`)
+            : [],
         nonce,
         language: this.opts.language ?? 'ko',
       });
@@ -829,6 +835,12 @@ export class Orchestrator {
           .activeEmployees()
           .filter((e) => e.id !== employee.id)
           .map((e) => `"${e.name}" (${e.roles.join('/')})`),
+        // 어려움·보통 업무의 첫 회차만 나눌 수 있다(작은 업무를 쪼개면 오히려 비싸다)
+        canSplit: next.round === 1 && difficultyOf(next) !== 'easy' && this.canSplit(next),
+        // 앱이 CLI로 떠 있을 때만(테스트 등에서는 없음): 직원이 화면 점검을 미리 돌려 볼 명령
+        screenCheckCommand: /cli[\\/]main\.(ts|js)$/.test(process.argv[1] ?? '')
+          ? `"${process.execPath}" "${process.argv[1]}" screen-check --url <dev-server-url> --steps <steps.json>`
+          : null,
       });
       await this.launch({
         ticket: next,
@@ -867,6 +879,7 @@ export class Orchestrator {
             .filter((e) => e.type === 'ticket.changes_requested')
             .at(-1);
     const review = ev ? String((ev.payload as { reason?: string }).reason ?? '') : null;
+    const splitNote = this.company.store.getSetting(`split_note:${t.id}`) || null;
     // 대표가 업무방에 남긴 말(지난 작업 시작 이후)도 다음 작업 지시에 넣는다.
     const since =
       this.records
@@ -890,6 +903,7 @@ export class Orchestrator {
       })
       .slice(-20);
     const parts = [
+      splitNote,
       review,
       notes.length ? tr(`대표가 업무방에 남긴 말:\n${notes.join('\n')}`, `CEO notes in the ticket room:\n${notes.join('\n')}`) : null,
       related.length
@@ -1083,6 +1097,7 @@ export class Orchestrator {
     if (run.kind === 'chat') return this.finishChat(run, null, failure?.detail ?? '');
     // 실행 결과·이벤트·티켓 전이를 한 트랜잭션으로: 중간에 죽어도 "성공했는데 제출 안 됨" 상태가 남지 않는다.
     this.company.store.transact(() => this.finishRunTx(run, failure));
+    await this.cleanupSplitWorktrees();
     if (!failure && run.kind === 'work' && run.report?.kind === 'work') this.afterWorkReport(run, run.report);
     if (!failure && run.kind === 'review' && run.report?.kind === 'review') {
       const t = this.company.store.get<Ticket>('tickets', run.ticketId);
@@ -1140,7 +1155,7 @@ export class Orchestrator {
     const t = this.company.store.get<Ticket>('tickets', ticketId);
     if (!t || TERMINAL_STATUSES.includes(t.status) || t.hold) return;
     const used = ticketTokens(this.records, t.id);
-    const budget = tokenBudget(t);
+    const budget = this.budgetOf(t);
     if (used < budget) return;
     // 대표가 판단할 수 있게: 어디까지 왔는지, 실제 비용은 얼마인지(대부분 캐시 재사용이면 토큰 수보다 훨씬 싸다).
     // 실측(2026-09-30): 1225만 토큰 중 97%가 캐시 재사용이었고 비용은 약 $6.4였다. 작업은 이미 제출돼 검사·검수만 남아 있었다.
@@ -1175,7 +1190,7 @@ export class Orchestrator {
   raiseTokenBudget(ticketId: string, maxTokens?: number): Ticket {
     const t = this.company.requireTicket(ticketId);
     const used = ticketTokens(this.records, t.id);
-    const next = maxTokens ?? Math.max(tokenBudget(t) * 1.5, used * 1.3);
+    const next = maxTokens ?? Math.max(this.budgetOf(t) * 1.5, used * 1.3);
     let out = this.company.setTicketTokenBudget(t.id, next);
     if (out.hold?.reason === 'needs_decision' && /토큰 예산|Token budget/.test(out.hold.note) && used < next) out = this.releaseHold(t.id);
     this.changed('ticket', t.id);
@@ -1214,12 +1229,22 @@ export class Orchestrator {
     );
   }
 
-  tokenEstimates() {
-    return estimates(this.records, this.company.tickets());
+  private estimateCache: { at: number; value: ReturnType<typeof estimates> } | null = null;
+
+  /** 난이도별 예상치(1분 캐시: 대시보드가 업무마다 예산을 물어본다). */
+  tokenEstimates(): ReturnType<typeof estimates> {
+    if (!this.estimateCache || Date.now() - this.estimateCache.at > 60_000)
+      this.estimateCache = { at: Date.now(), value: estimates(this.records, this.company.tickets()) };
+    return this.estimateCache.value;
+  }
+
+  private budgetOf(t: Ticket): number {
+    const e = this.tokenEstimates()[difficultyOf(t)];
+    return tokenBudget(t, e.samples >= 2 ? e.tokens : undefined);
   }
 
   ticketBudget(t: Ticket): { used: number; budget: number } {
-    return { used: ticketTokens(this.records, t.id), budget: tokenBudget(t) };
+    return { used: ticketTokens(this.records, t.id), budget: this.budgetOf(t) };
   }
 
   setDailyTokenLimit(tokens: number): { dailyLimit: number } {
@@ -1498,6 +1523,104 @@ export class Orchestrator {
     this.changed('run', run.id);
   }
 
+  private readonly splitCleanup = new Set<string>();
+
+  private async cleanupSplitWorktrees(): Promise<void> {
+    for (const id of [...this.splitCleanup]) {
+      this.splitCleanup.delete(id);
+      const t = this.company.store.get<Ticket>('tickets', id);
+      if (!t) continue;
+      const paths = projectPaths(this.opts.dataDir, t.projectId);
+      await this.withProjectLock(t.projectId, async () => {
+        await removeWorktree(paths, path.join(paths.worktrees, id));
+        await git(['branch', '-D', ticketBranch(id)], paths.mirror, { allowFail: true });
+      });
+    }
+  }
+
+  /** 이 업무를 나눌 수 있는가: 나눈 조각이 아니고, 아직 한 번도 나누지 않은 업무만. */
+  canSplit(t: Ticket): boolean {
+    return !this.company.store.getSetting(`split_parent:${t.id}`) && !this.company.store.getSetting(`split_note:${t.id}`);
+  }
+
+  /**
+   * 담당자가 "혼자 하기엔 크다"며 나눈 부분을 업무로 만든다(대표 요청: 부하가 팀장에게 피드백해 일감을 나누기).
+   * 실측(2026-09-30, 메이플 3차): 어려운 업무 셋이 팀장 한 명에게 몰려 1시간 반 동안 선임 둘이 놀았다.
+   * - 조각은 보통 난이도 이하라 선임도 맡는다. 쓰기 범위는 원래 업무 범위 안이어야 한다. 겹치는 조각끼리는 앞 조각을 기다린다.
+   * - 원래 업무는 조각이 다 끝날 때까지 기다렸다가 최신 기준에서 새로 시작해 마무리한다.
+   */
+  private splitTicket(ticket: Ticket, run: RunRecord, wr: WorkReport): boolean {
+    const parts = wr.split ?? [];
+    if (parts.length < 2 || !this.canSplit(ticket)) return false;
+    const prefix = (g: string) => {
+      const n = g.replaceAll('\\', '/');
+      const i = n.search(/[*?[{]/);
+      return (i === -1 ? n : n.slice(0, i)).toLowerCase();
+    };
+    const inside = (g: string) => ticket.writeScope.some((p) => prefix(g).startsWith(prefix(p)));
+    if (!parts.every((p) => p.writeScope.every(inside))) return false;
+    const created: Ticket[] = [];
+    this.company.store.transact(() => {
+      for (const [n, p] of parts.entries()) {
+        const deps = created.filter((c) => scopesOverlap(c.writeScope, p.writeScope)).map((c) => c.id);
+        const child = this.company.createTicket(
+          {
+            projectId: ticket.projectId,
+            type: 'impl',
+            title: p.title,
+            purpose: tr(
+              `${ticket.id}의 일부(${n + 1}/${parts.length}): ${p.purpose}`,
+              `Part ${n + 1}/${parts.length} of ${ticket.id}: ${p.purpose}`,
+            ),
+            requirements: p.requirements.map((q) => ({ text: q.text, evidenceType: q.evidenceType as Evidence['type'] })),
+            doneCriteria: tr('요구사항을 증거로 충족하고 검수를 통과한다.', 'Requirements proven with evidence and review passed.'),
+            writeScope: p.writeScope,
+            difficulty: p.difficulty,
+            dependsOn: deps,
+          },
+          ORCH,
+        );
+        this.company.store.setSetting(`split_parent:${child.id}`, ticket.id);
+        created.push(child);
+      }
+      this.company.addDependencies(
+        ticket.id,
+        created.map((c) => c.id),
+      );
+      this.company.store.setSetting(
+        `split_note:${ticket.id}`,
+        tr(
+          `이 업무를 나눴고, 나눈 업무 ${created.map((c) => `${c.id}(${c.title})`).join(', ')}가 끝나 기준 브랜치에 들어갔습니다. 나눈 업무가 한 일을 이어받아, 남은 요구사항과 연결(통합)을 마무리해 제출하세요. 다시 나눌 수는 없습니다.`,
+          `You split this ticket; the parts ${created.map((c) => `${c.id} (${c.title})`).join(', ')} are done and merged into the base. Build on them, finish the remaining requirements and the integration, then submit. You cannot split again.`,
+        ),
+      );
+      this.apply(ticket.id, {
+        type: 'run_aborted',
+        reason: tr(`담당자가 업무를 ${created.length}개로 나눔`, `Assignee split the ticket into ${created.length}`),
+        hold: {
+          reason: 'waiting_dependency',
+          note: tr(
+            `나눈 업무(${created.map((c) => c.id).join(', ')})가 끝나면 이어서 마무리합니다.`,
+            `Resumes after the parts (${created.map((c) => c.id).join(', ')}) are done.`,
+          ),
+        },
+      });
+    });
+    // 나눈 업무의 결과를 받도록: 원래 업무의 작업 공간은 비우고(트랜잭션 뒤 finishRun에서), 다시 시작할 때 최신 기준에서 새로 만든다.
+    this.splitCleanup.add(ticket.id);
+    // 쓰기 잠금도 내려놓는다: 조각이 같은 범위 안에서 일해야 한다. 다시 시작할 때 다시 잡는다.
+    this.records.releaseLocks(ticket.id);
+    const text = tr(
+      `${this.nameOf(run.employeeId)}이(가) 혼자 하기엔 크다고 보고 일을 ${created.length}개로 나눴습니다: ${created.map((c) => `${c.id} ${c.title}`).join(' / ')}. 다른 직원이 나눠 맡고, 끝나면 ${ticket.id}가 이어서 마무리합니다.`,
+      `${this.nameOf(run.employeeId)} split the work into ${created.length}: ${created.map((c) => `${c.id} ${c.title}`).join(' / ')}. ${ticket.id} resumes when they are done.`,
+    );
+    const room = this.chat.ensureTicketChannel(ticket.id);
+    if (room) this.chat.post(room.id, 'system', text, 'event');
+    this.chat.ensureGeneral();
+    this.chat.post('general', 'system', text, 'event');
+    return true;
+  }
+
   /** 작업 보고의 후속 업무 제안·동료 질문을 업무방에 올린다. */
   private afterWorkReport(run: RunRecord, report: WorkReport): void {
     const t = this.company.store.get<Ticket>('tickets', run.ticketId);
@@ -1609,6 +1732,7 @@ ${failure.detail.slice(0, 400)}`,
         return;
       }
       const wr = run.report as WorkReport;
+      if (wr.status !== 'done' && wr.split?.length && this.splitTicket(ticket, run, wr)) return;
       if (wr.status !== 'done') {
         this.apply(ticket.id, {
           type: 'run_aborted',
@@ -2597,6 +2721,7 @@ ${failure.detail.slice(0, 400)}`,
       nonce,
       decisions: this.records.decisions(project.id, 'current'),
       language: this.opts.language,
+      team: this.company.activeEmployees().map((e) => `- ${e.name}: ${rankOf(e)}, ${e.roles.join('/')}`),
     });
     await this.launch({
       ticket: { id: req.id, round: 1, budget: DEFAULT_BUDGET },

@@ -405,6 +405,17 @@ export class Company {
     return next;
   }
 
+  /** 업무를 나눴을 때: 나눈 업무들이 끝나야 이 업무가 다시 돈다. */
+  addDependencies(id: string, deps: string[]): Ticket {
+    const t = this.requireTicket(id);
+    const next = { ...t, dependsOn: [...new Set([...t.dependsOn, ...deps])], updatedAt: this.clock() };
+    this.store.transact(() => {
+      this.saveTicket(next);
+      this.store.appendEvent('orchestrator', 'ticket.split', id, { parts: deps }, this.clock());
+    });
+    return next;
+  }
+
   /** 대표가 범위 밖 수정을 허용할 때: 그 경로를 이 업무의 쓰기 범위에 더한다. */
   extendWriteScope(id: string, paths: string[]): Ticket {
     const t = this.requireTicket(id);

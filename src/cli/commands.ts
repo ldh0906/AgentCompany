@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -366,6 +366,35 @@ async function shortcut(argv: string[]): Promise<void> {
   );
 }
 
+/**
+ * 화면 점검 미리 돌려 보기(직원용): 앱이 승인 전에 하는 자동 화면 점검을 똑같이 돌려, 몇 장 찍히고 어느 단계가 잘리는지 알려 준다.
+ * 실측(2026-09-30, 메이플 3차): 담당자가 적은 확인 순서가 앱의 장수·시간 상한에 잘려 핵심 장면(보스 처치)이 안 찍혔다.
+ * 사용: screen-check --url http://localhost:5173/ --steps steps.json [--out 폴더]
+ */
+async function screenCheckCmd(args: string[]): Promise<void> {
+  selectLanguage();
+  const { values } = parseArgs({ args, options: { url: { type: 'string' }, steps: { type: 'string' }, out: { type: 'string' } } });
+  if (!values.url || !values.steps) {
+    console.log('screen-check --url <http://localhost:5173/> --steps <steps.json> [--out <dir>]');
+    process.exitCode = 1;
+    return;
+  }
+  const { captureScreens, findChrome } = await import('../app/screen-check.ts');
+  const { screenStepsOf } = await import('../agents/report.ts');
+  const raw = JSON.parse(readFileSync(values.steps, 'utf8')) as unknown;
+  const list = Array.isArray(raw) ? raw : ((raw as { screenSteps?: unknown }).screenSteps ?? []);
+  const ids = (Array.isArray(list) ? list : []).map((x) => String((x as { requirementId?: unknown })?.requirementId ?? '*'));
+  const scenarios = screenStepsOf(list, ids);
+  const out = values.out ?? path.join(tmpdir(), `ac-screen-check-${Date.now()}`);
+  const cap = await captureScreens(values.url, out, findChrome(), scenarios);
+  console.log(`shots (${cap.shots.length}):`);
+  for (const s of cap.shots) console.log(`  ${s.file}  ${s.label}`);
+  console.log(`recordings: ${cap.clips.map((c) => `${c.label} ${c.frames.length} frames`).join(', ') || 'none'}`);
+  for (const d of cap.downloads) console.log(`download: ${d.name} (${d.size} bytes) ${d.verdict}`);
+  console.log(`problems (${cap.errors.length}):`);
+  for (const e of cap.errors) console.log(`  ${e}`);
+}
+
 export async function main(argv: string[]): Promise<void> {
   const [cmd, ...rest] = argv;
   switch (cmd) {
@@ -381,6 +410,8 @@ export async function main(argv: string[]): Promise<void> {
       return uninstall(rest);
     case 'shortcut':
       return shortcut(rest);
+    case 'screen-check':
+      return screenCheckCmd(rest);
     case undefined:
     case 'help':
     case '--help':

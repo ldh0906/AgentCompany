@@ -14,8 +14,12 @@ export function ticketTokens(records: Records, ticketId: string): number {
   return records.runsForTicket(ticketId).reduce((a, r) => a + (r.usage?.total ?? 0), 0);
 }
 
-export function tokenBudget(t: Ticket): number {
-  return t.budget.maxTokens ?? DEFAULT_TOKEN_BUDGET[difficultyOf(t)];
+/**
+ * 업무 예산: 대표가 정한 값, 없으면 기본값과 "같은 난이도 실제 평균의 2.5배" 중 큰 것.
+ * 실측(2026-09-30, 메이플 3차): 어려움 업무 평균이 811만인데 기본 예산 1000만이라 평범한 업무도 두 번 멈췄다.
+ */
+export function tokenBudget(t: Ticket, averageTokens?: number): number {
+  return t.budget.maxTokens ?? Math.max(DEFAULT_TOKEN_BUDGET[difficultyOf(t)], averageTokens ? Math.round(averageTokens * 2.5) : 0);
 }
 
 /** 난이도별 예상 토큰: 끝난 업무가 2개 이상이면 그 평균, 아니면 기본 예상치. */

@@ -4,6 +4,7 @@ import { api, type PreviewInfo } from '../api.ts';
 import { useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
 import { empName, Icon, Modal, useAction } from './ui.tsx';
+import { verdictsOf } from '../../../src/core/verdicts.ts';
 
 export function PreviewButton({ projectId, ticketId = null }: { projectId: string; ticketId?: string | null }) {
   const { state, reload } = useCompany();
@@ -145,18 +146,39 @@ export function ScreenCheckPanel({ ticketId }: { ticketId: string }) {
           ) : (
             <div className="hint">{ko ? '브라우저 콘솔 오류 없음' : 'No console errors'}</div>
           )}
-          {qaName && (
-            <div className="note qa-opinion">
-              <b>{qaName}</b>{' '}
-              {c.opinion ??
-                (c.qaState === 'running' || c.qaState === 'prepared'
-                  ? ko
-                    ? '화면을 보고 의견을 쓰는 중…'
-                    : 'Looking at the screenshots…'
-                  : ko
-                    ? '의견을 받지 못했습니다. 업무방에서 불러 물어볼 수 있습니다.'
-                    : 'No opinion. You can ask in the ticket room.')}
+          {qaName && c.opinion && verdictsOf(c.opinion).length > 0 && (
+            // 한 줄 결론: 요구사항마다 ✅/⚠/❓. 긴 의견은 아래에 접어 둔다(실측: 카드가 너무 길었다).
+            <div className="verdicts">
+              {verdictsOf(c.opinion).map((v) => (
+                <div key={v.id} className={`verdict ${v.mark === '✅' ? 'ok' : v.mark === '⚠' ? 'bad' : 'unk'}`}>
+                  <b>
+                    {v.id} {v.mark}
+                  </b>{' '}
+                  {v.line}
+                  {v.ceo && <div className="sub">👉 {v.ceo}</div>}
+                </div>
+              ))}
             </div>
+          )}
+          {qaName && c.opinion && verdictsOf(c.opinion).length > 0 ? (
+            <details className="advanced">
+              <summary>{ko ? `${qaName} 의견 자세히` : `${qaName}'s full notes`}</summary>
+              <div className="note qa-opinion">{c.opinion}</div>
+            </details>
+          ) : (
+            qaName && (
+              <div className="note qa-opinion">
+                <b>{qaName}</b>{' '}
+                {c.opinion ??
+                  (c.qaState === 'running' || c.qaState === 'prepared'
+                    ? ko
+                      ? '화면을 보고 의견을 쓰는 중…'
+                      : 'Looking at the screenshots…'
+                    : ko
+                      ? '의견을 받지 못했습니다. 업무방에서 불러 물어볼 수 있습니다.'
+                      : 'No opinion. You can ask in the ticket room.')}
+              </div>
+            )
           )}
           <div className="hint">
             {c.scripted

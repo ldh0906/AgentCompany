@@ -20,6 +20,7 @@ export const SCENARIO_MIN_MS = 90_000;
 const CLIP_FPS = 4;
 const CLIP_SETTLE_MAX_MS = 3000;
 const CLIP_MAX_FRAMES = 40;
+const CLIP_SCALE = 480 / 1280;
 
 export interface ScreenClip {
   /** 요구사항 ID(어느 확인 순서의 움직임인지) */
@@ -355,9 +356,10 @@ export async function captureScreens(
       const grab = async () => {
         const r = await cdp!
           .send<{ data: string }>('Page.captureScreenshot', {
+            // 녹화는 움직임만 보면 되므로 가로 480px로 줄여 찍는다(대표 선택: 한 장 약 55KB → 약 15KB).
             format: 'jpeg',
-            quality: 60,
-            clip: { x: 0, y: 0, width: 1280, height: 800, scale: 1 },
+            quality: 55,
+            clip: { x: 0, y: 0, width: 1280, height: 800, scale: CLIP_SCALE },
           })
           .catch(() => null);
         return r?.data ?? '';

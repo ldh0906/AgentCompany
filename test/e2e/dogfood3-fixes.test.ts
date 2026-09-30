@@ -197,3 +197,26 @@ test('내려받은 파일 미리보기는 앞뒤를 함께 보여 준다(합계 
   assert.match(p, /…/);
   assert.match(p, /합계,45$/);
 });
+
+test('혼자 하기엔 크면 담당자가 나눈다: 조각은 다른 직원이 맡고, 끝나면 원래 업무가 이어서 마무리한다', { timeout: 240_000 }, async (t) => {
+  const env = await setup(t, { implementer: 'splitter' });
+  env.company.updateProject(env.projectId, { autoApprove: true });
+  const parent = newImplTicket(env);
+  const held = await driveUntil(env, parent.id, (x) => x.hold?.reason === 'waiting_dependency' || x.status === 'done');
+  assert.equal(held.hold?.reason, 'waiting_dependency', '나누면 조각을 기다린다');
+  const parts = env.company.tickets().filter((x) => x.id !== parent.id);
+  assert.equal(parts.length, 2);
+  assert.deepEqual(held.dependsOn.sort(), parts.map((p) => p.id).sort());
+  assert.ok(parts.every((p) => p.difficulty === 'normal' && p.writeScope[0]!.startsWith('src/')));
+  assert.ok(env.orch.chat.messages('general', 50).some((m) => /나눴습니다/.test(m.text)));
+  const done = await driveUntil(
+    env,
+    parent.id,
+    (x) => x.status === 'done' || (x.hold !== null && x.hold.reason !== 'waiting_dependency'),
+    180_000,
+  );
+  assert.equal(done.status, 'done', `보류: ${done.hold?.note}`);
+  assert.ok(parts.every((p) => env.company.requireTicket(p.id).status === 'done'));
+  // 조각은 다시 나누지 않는다(조각 업무의 지시에는 나누기 규칙이 없다)
+  assert.equal(env.company.tickets().length, 3);
+});
