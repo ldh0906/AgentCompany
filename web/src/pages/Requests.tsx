@@ -241,7 +241,9 @@ function DraftReview({ r }: { r: CeoRequest }) {
   // 없는 검증 명령을 비서실장 제안이 모두 채우면: 확정할 때 함께 추가한다(실측: "경고 무시하고"만 보여 비개발자가 막혔다).
   const needed = suggestions.filter((sg) => mismatches.some((m) => m.type === sg.evidenceType));
   const fixable = mismatches.length > 0 && mismatches.every((m) => needed.some((sg) => sg.evidenceType === m.type));
-  const estimateOf = (i: number) => state.estimates?.[diffs[i] ?? r.drafts[i]!.difficulty ?? 'normal']?.tokens ?? 0;
+  // 조사는 웹 페이지를 읽어 같은 난이도의 약 3배가 든다(실측 2026-10-02: 보통 조사 한 번 629만, src/app/cost.ts).
+  const estimateOf = (i: number) =>
+    (state.estimates?.[diffs[i] ?? r.drafts[i]!.difficulty ?? 'normal']?.tokens ?? 0) * (r.drafts[i]!.type === 'research' ? 3 : 1);
   // 어려움 업무는 팀장만 맡는다: 구현 담당 팀장이 없으면 비서실장·검수 팀장이 떠맡거나 보류된다.
   const leads = state.employees.filter((e) => e.active && e.rank === 'lead');
   const hardImpl = kept.filter((i) => (diffs[i] ?? r.drafts[i]!.difficulty) === 'hard' && ['impl', 'doc'].includes(r.drafts[i]!.type));

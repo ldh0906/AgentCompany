@@ -94,6 +94,9 @@ test('예산은 같은 난이도 실제 평균의 2.5배까지 늘어난다(대�
   assert.equal(tokenBudget(hard, 1_000_000), DEFAULT_TOKEN_BUDGET.hard, '평균이 작으면 기본값');
   const fixed = { budget: { maxTokens: 3_000_000 }, difficulty: 'hard' } as unknown as Parameters<typeof tokenBudget>[0];
   assert.equal(tokenBudget(fixed, 8_110_000), 3_000_000);
+  // 조사는 웹 페이지를 읽어 3배(실측: 보통 조사 한 번 629만 > 기본 400만)
+  const research = { budget: {}, difficulty: 'normal', type: 'research' } as unknown as Parameters<typeof tokenBudget>[0];
+  assert.equal(tokenBudget(research), DEFAULT_TOKEN_BUDGET.normal * 3);
 });
 
 test('제출 뒤(검사·검수만 남음) 예산을 넘으면 멈추지 않고 알리기만 한다', { timeout: 240_000 }, async (t) => {

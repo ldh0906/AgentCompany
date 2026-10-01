@@ -19,15 +19,22 @@ export function ticketTokens(records: Records, ticketId: string): number {
  * 실측(2026-09-30, 메이플 3차): 어려움 업무 평균이 811만인데 기본 예산 1000만이라 평범한 업무도 두 번 멈췄다.
  */
 export function tokenBudget(t: Ticket, averageTokens?: number): number {
-  return t.budget.maxTokens ?? Math.max(DEFAULT_TOKEN_BUDGET[difficultyOf(t)], averageTokens ? Math.round(averageTokens * 2.5) : 0);
+  // 조사는 웹 페이지를 통째로 읽어 토큰이 많이 든다. 실측(2026-10-02, 카페 사업계획서): 보통 난이도 조사 한 번에 629만,
+  // 기본 예산 400만을 넘어 첫 제출부터 대표에게 물었다.
+  const research = t.type === 'research' ? RESEARCH_BUDGET_FACTOR : 1;
+  return (
+    t.budget.maxTokens ?? Math.max(DEFAULT_TOKEN_BUDGET[difficultyOf(t)] * research, averageTokens ? Math.round(averageTokens * 2.5) : 0)
+  );
 }
+export const RESEARCH_BUDGET_FACTOR = 3;
 
 /** 난이도별 예상 토큰: 끝난 업무가 2개 이상이면 그 평균, 아니면 기본 예상치. */
 export function estimates(records: Records, tickets: Ticket[]): Record<Difficulty, { tokens: number; samples: number }> {
   const out = {} as Record<Difficulty, { tokens: number; samples: number }>;
   for (const d of ['easy', 'normal', 'hard'] as const) {
+    // 조사는 따로 크게 잡으므로(tokenBudget) 평균에서 뺀다: 섞이면 구현 업무 예산까지 부풀어 오른다.
     const done = tickets
-      .filter((t) => t.status === 'done' && difficultyOf(t) === d)
+      .filter((t) => t.status === 'done' && difficultyOf(t) === d && t.type !== 'research')
       .map((t) => ticketTokens(records, t.id))
       .filter((n) => n > 0);
     out[d] =
