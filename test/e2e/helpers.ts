@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../src/store/db.ts';
 import { Company } from '../../src/app/company.ts';
-import { Orchestrator } from '../../src/app/orchestrator.ts';
+import { Orchestrator, type OrchestratorOptions } from '../../src/app/orchestrator.ts';
 import { AGENT_IDENTITY, git } from '../../src/workspace/git.ts';
 import type { Ticket, TicketStatus, VerifyCommand } from '../../src/core/types.ts';
 
@@ -37,6 +37,8 @@ export async function setup(
     verify?: VerifyCommand[];
     integrationMode?: 'manual' | 'auto_after_approval';
     screenCheck?: boolean;
+    /** 출처 링크 확인(기본: 네트워크 없이 모두 열림) */
+    linkCheck?: OrchestratorOptions['linkCheck'];
   } = {},
 ): Promise<Env> {
   const root = mkdtempSync(join(tmpdir(), 'ac-e2e-'));
@@ -45,7 +47,12 @@ export async function setup(
   const dbPath = join(root, 'company.db');
   const store = new Store(dbPath);
   const company = new Company(store);
-  const orch = new Orchestrator(company, { dataDir, language: 'ko', screenCheck: opts.screenCheck ?? false });
+  const orch = new Orchestrator(company, {
+    dataDir,
+    language: 'ko',
+    screenCheck: opts.screenCheck ?? false,
+    linkCheck: opts.linkCheck ?? (async (urls) => urls.map((url) => ({ url, state: 'ok' as const, detail: '200' }))),
+  });
   t.after(async () => {
     await orch.stop();
     await orch.idle();

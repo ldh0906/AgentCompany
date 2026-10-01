@@ -100,7 +100,9 @@ async function work(h: TaskHeader, prompt: string): Promise<string> {
       .join('\n');
     writeFileSync(
       file,
-      `${prev}# ${h.ticketId} round ${h.round}\n\n${L('작업 결과입니다. 요구사항', 'Work result. Requirements')}: ${h.requirementIds.join(', ')}\n`,
+      `${prev}# ${h.ticketId} round ${h.round}\n\n${L('작업 결과입니다. 요구사항', 'Work result. Requirements')}: ${h.requirementIds.join(', ')}\n` +
+        // 조사 업무는 출처 링크가 있어야 검증을 통과한다
+        (prompt.includes('This is a research ticket') ? `\n${L('출처', 'Sources')}: [1] https://example.com/\n` : ''),
     );
     emit({
       type: 'assistant',

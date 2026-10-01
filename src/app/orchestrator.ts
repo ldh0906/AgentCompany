@@ -88,7 +88,8 @@ import { CeoDesk } from './ceo-desk.ts';
 import type { OrchHost } from './orch-host.ts';
 import { Playtests } from './playtests.ts';
 import { ScreenQa } from './screen-qa.ts';
-import { projectDoc, projectDocList } from './deliverables.ts';
+import { deliverableKindOf, projectDoc, projectDocList } from './deliverables.ts';
+import { checkLinks, extractLinks, linkSummary, type LinkResult } from './link-check.ts';
 
 const ORCH: Actor = { kind: 'orchestrator' };
 const CEO: Actor = { kind: 'ceo' };
@@ -105,6 +106,8 @@ export interface OrchestratorOptions {
   onChange?: (kind: string, id: string) => void;
   /** 승인 대기에 오면 결과물을 띄워 화면을 찍고 QA 직원 의견을 받는다(기본 켬). */
   screenCheck?: boolean;
+  /** 조사·문서 결과물의 출처 링크 확인(기본: 실제로 열어 봄). 테스트는 가짜를 넣는다. */
+  linkCheck?: (urls: string[]) => Promise<LinkResult[]>;
 }
 
 export interface RecoveryReport {
@@ -159,6 +162,7 @@ export class Orchestrator {
       concurrency: { claude: Infinity, codex: Infinity, agy: Infinity, fake: 4, ...opts.concurrency },
       onChange: opts.onChange,
       screenCheck: opts.screenCheck ?? true,
+      linkCheck: opts.linkCheck ?? ((urls) => checkLinks(urls)),
     };
     // 기능별로 떼어 낸 부분이 쓰는 오케스트레이터 쪽 기능(필요한 것만 넘긴다).
     const host: OrchHost = {
@@ -1938,7 +1942,8 @@ ${failure.detail.slice(0, 400)}`,
       return;
     }
     if (!sub.headSha) {
-      if (ticket.type === 'impl' || ticket.type === 'doc') {
+      // 조사도 보고서 파일로 남겨야 한다(대표가 앱에서 읽고 링크를 확인할 수 있게).
+      if (ticket.type === 'impl' || ticket.type === 'doc' || ticket.type === 'research') {
         this.apply(ticketId, {
           type: 'verification_failed',
           reason: tr(
@@ -2036,6 +2041,8 @@ ${failure.detail.slice(0, 400)}`,
         }
       }
     }
+    const linkFailure = await this.checkSourceLinks(ticket, project, sub);
+    if (linkFailure) failures.push(linkFailure);
     this.changed('ticket', ticketId);
     this.company.store.transact(() => {
       this.company.store.setSetting(`verify_base:${ticketId}`, '');
@@ -2046,6 +2053,57 @@ ${failure.detail.slice(0, 400)}`,
         });
       else this.apply(ticketId, { type: 'verification_passed' });
     });
+  }
+
+  /**
+   * 출처 링크 확인: 조사 업무와 문서 프로젝트에서 바뀐 문서(.md/.txt)의 링크를 실제로 열어 보고 증거로 남긴다.
+   * 깨진 링크가 있거나 조사 보고서에 출처가 하나도 없으면 실패 사유를 돌려준다(담당자에게 돌아간다).
+   * 대표 요청(2026-10-01): 조사 결과를 믿을 수 있게. AI가 쓴 인용 링크에는 지어낸 것이 섞인다.
+   */
+  private async checkSourceLinks(ticket: Ticket, project: Project, sub: RunRecord): Promise<string | null> {
+    if (!sub.headSha || (ticket.type !== 'research' && deliverableOf(project) !== 'document')) return null;
+    const paths = projectPaths(this.opts.dataDir, project.id);
+    const docs = sub.changedPaths.filter((p) => ['markdown', 'text'].includes(deliverableKindOf(p) ?? ''));
+    const urls = new Set<string>();
+    for (const p of docs) {
+      const text = (await git(['show', `${sub.headSha}:${p}`], paths.mirror, { allowFail: true })).stdout;
+      for (const u of extractLinks(text)) urls.add(u);
+    }
+    if (!urls.size && ticket.type !== 'research') return null;
+    const results = urls.size ? await this.opts.linkCheck([...urls]) : [];
+    const dead = results.filter((r) => r.state === 'dead');
+    const noSources = ticket.type === 'research' && !results.length;
+    const summary = noSources
+      ? tr('바뀐 문서에 출처 링크가 하나도 없습니다.', 'The changed documents have no source links.')
+      : linkSummary(results, this.opts.language === 'ko');
+    this.records.saveEvidence(
+      {
+        id: newId('EV'),
+        ticketId: ticket.id,
+        round: ticket.round,
+        headSha: sub.headSha,
+        type: 'static_check',
+        label: tr('출처 링크 확인', 'Source link check'),
+        argv: null,
+        exitCode: null,
+        passed: !dead.length && !noSources,
+        outputPath: null,
+        summary,
+        createdAt: new Date().toISOString(),
+      },
+      sub.id,
+    );
+    if (noSources)
+      return tr(
+        '출처 링크가 없습니다: 조사 보고서는 주장마다 실제로 열어 본 출처의 주소를 [번호]로 달아야 합니다.',
+        'No source links: a research report must cite the exact URL of a page it opened for each claim.',
+      );
+    if (dead.length)
+      return tr(
+        `열리지 않는 출처 링크가 있습니다(주소가 없거나 404). 실제로 열어 본 페이지로 바꾸거나 그 주장을 빼세요:\n${summary}`,
+        `Some source links do not open (no such address or 404). Replace them with pages you actually opened, or drop the claim:\n${summary}`,
+      );
+    return null;
   }
 
   /** 검증 기준 스냅샷: 중단된 이전 시도의 기준이 남아 있으면 그것을 쓴다(가장 이른 기준). */
