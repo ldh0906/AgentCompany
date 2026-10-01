@@ -23,7 +23,13 @@ export function RequestBox() {
   const recent = [...state.requests]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .find((r) => state.projects.some((p) => p.id === r.projectId));
-  const pid = projectId || recent?.projectId || state.projects[0]!.id;
+  // 그보다 나중에 새로 만든 프로젝트가 있으면 그쪽이 먼저(실측: 방금 "눈 휴식"을 만들고 왔는데 지난 요청의 메이플이 골라져 있었다).
+  const newest = [...state.projects].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const pid =
+    projectId ||
+    (newest && (!recent || newest.createdAt > recent.createdAt) ? newest.id : null) ||
+    recent?.projectId ||
+    state.projects[0]!.id;
   const open = state.requests.filter((r) => r.status === 'drafting' || r.status === 'drafted' || r.status === 'failed');
   const projectName = (id: string) => state.projects.find((p) => p.id === id)?.name ?? id;
 
@@ -58,7 +64,7 @@ export function RequestBox() {
           }
           disabled={!state.chiefOfStaff}
         />
-        <div className="row">
+        <div className="row" style={{ flexWrap: 'wrap' }}>
           {state.projects.length > 1 && (
             <select value={pid} onChange={(e) => setProjectId(e.target.value)} style={{ width: 'auto' }}>
               {state.projects.map((p) => (
@@ -68,7 +74,7 @@ export function RequestBox() {
               ))}
             </select>
           )}
-          <span className="sub" style={{ flex: 1 }}>
+          <span className="sub" style={{ flex: 1, minWidth: 220 }}>
             {ko
               ? '비서실장이 프로젝트 폴더를 읽어 보고(고치지 않음) 할 일을 나눈 초안을 만듭니다. 확정은 대표가 합니다.'
               : 'The chief of staff reads the repo (read-only) and drafts tickets. You confirm.'}
@@ -87,53 +93,74 @@ export function RequestBox() {
         </div>
       </div>
       <div className="list">
-        {open.map((r) => (
-          <div className="item request-item" key={r.id}>
-            <div className="spread">
-              <div className="title">
-                <span className="chip accent">{projectName(r.projectId)}</span> {r.text.slice(0, 120)}
-              </div>
-              <span className={`chip ${r.status === 'drafted' ? 'warn' : r.status === 'failed' ? 'bad' : 'info pulse'}`}>
-                {r.status === 'drafting'
-                  ? ko
-                    ? '초안 작성 중'
-                    : 'Drafting'
-                  : r.status === 'drafted'
+        {open.map((r) => {
+          // 일시적 오류(자동 재시도 예정)는 "실패"가 아니다: 차분하게 "곧 다시 시도"만 보여 준다(원문은 접어 둔다).
+          // 실측(2026-10-01): 로그인 토큰 갱신이 겹친 일시 오류가 빨간 "실패"와 영어 문장으로 보여 대표가 놀랐다.
+          const retrying = r.status === 'failed' && /자동으로 다시|retrying automatically/.test(r.error ?? '');
+          return (
+            <div className="item request-item" key={r.id}>
+              <div className="spread">
+                <div className="title">
+                  <span className="chip accent">{projectName(r.projectId)}</span> {r.text.slice(0, 120)}
+                </div>
+                <span
+                  className={`chip ${r.status === 'drafted' ? 'warn' : retrying ? 'info pulse' : r.status === 'failed' ? 'bad' : 'info pulse'}`}
+                >
+                  {retrying
                     ? ko
-                      ? '확정 대기'
-                      : 'Review drafts'
-                    : ko
-                      ? '실패'
-                      : 'Failed'}
-              </span>
-            </div>
-            <div className="meta">
-              {when(r.createdAt)} · {r.summary}
-            </div>
-            {r.error && <div className="note">{r.error}</div>}
-            {r.status === 'failed' && (
-              <div className="row" style={{ justifyContent: 'flex-end' }}>
-                <button
-                  className="btn small"
-                  disabled={busy}
-                  onClick={() => run(() => api(`requests/${r.id}/dismiss`, { body: {} })).then(reload)}
-                >
-                  {ko ? '버리기' : 'Dismiss'}
-                </button>
-                <button
-                  className="btn small primary"
-                  disabled={busy}
-                  onClick={() =>
-                    run(() => api(`requests/${r.id}/retry`, { body: {} }), ko ? '다시 요청했습니다.' : 'Retried.').then(reload)
-                  }
-                >
-                  {ko ? '다시 시도' : 'Retry'}
-                </button>
+                      ? '잠깐 멈춤 · 곧 다시 시도'
+                      : 'Retrying shortly'
+                    : r.status === 'drafting'
+                      ? ko
+                        ? '초안 작성 중'
+                        : 'Drafting'
+                      : r.status === 'drafted'
+                        ? ko
+                          ? '확정 대기'
+                          : 'Review drafts'
+                        : ko
+                          ? '실패'
+                          : 'Failed'}
+                </span>
               </div>
-            )}
-            {r.status === 'drafted' && <DraftReview r={r} />}
-          </div>
-        ))}
+              <div className="meta">
+                {when(r.createdAt)} · {r.summary}
+              </div>
+              {r.error &&
+                (retrying ? (
+                  <details className="advanced">
+                    <summary>
+                      {ko ? 'AI 쪽에서 잠깐 문제가 있어 1분 뒤 저절로 다시 시도합니다.' : 'A brief AI-side hiccup; retrying in a minute.'}
+                    </summary>
+                    <div className="note">{r.error}</div>
+                  </details>
+                ) : (
+                  <div className="note">{r.error}</div>
+                ))}
+              {r.status === 'failed' && !retrying && (
+                <div className="row" style={{ justifyContent: 'flex-end' }}>
+                  <button
+                    className="btn small"
+                    disabled={busy}
+                    onClick={() => run(() => api(`requests/${r.id}/dismiss`, { body: {} })).then(reload)}
+                  >
+                    {ko ? '버리기' : 'Dismiss'}
+                  </button>
+                  <button
+                    className="btn small primary"
+                    disabled={busy}
+                    onClick={() =>
+                      run(() => api(`requests/${r.id}/retry`, { body: {} }), ko ? '다시 요청했습니다.' : 'Retried.').then(reload)
+                    }
+                  >
+                    {ko ? '다시 시도' : 'Retry'}
+                  </button>
+                </div>
+              )}
+              {r.status === 'drafted' && <DraftReview r={r} />}
+            </div>
+          );
+        })}
         {state.requests
           .filter((r) => r.status === 'accepted')
           .slice(0, 3)
@@ -331,6 +358,23 @@ function DraftReview({ r }: { r: CeoRequest }) {
                       <button className="btn small" onClick={() => setEditing(i)}>
                         {ko ? '수정' : 'Edit'}
                       </button>
+                      {/* 대표가 읽을 것만 먼저: 무엇을 하는지 한 줄 + 내가 확인할 것. 기술 명세는 접는다.
+                          실측(2026-10-01, 눈 휴식): 초안 59줄이 직원용 명세라 요약 두 줄과 질문만 읽혔다. */}
+                      {d.purpose && <div style={{ marginTop: 4 }}>{d.purpose}</div>}
+                      {ed.reqs.some((q) => q.evidenceType === 'human_attest') && (
+                        <div className="sub" style={{ marginTop: 4 }}>
+                          👀 {ko ? '내가 확인할 것' : 'You will check'}:{' '}
+                          {ed.reqs
+                            .filter((q) => q.evidenceType === 'human_attest')
+                            .map((q) => q.text)
+                            .join(' / ')}
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <details className="advanced" open={editing === i}>
+                    <summary>{ko ? `자세히 (직원용 세부 ${ed.reqs.length}개 · 난이도 · 예상 토큰)` : 'Details for the team'}</summary>
+                    {editing !== i && (
                       <div className="sub draft-reqs">
                         {ed.reqs.map((q, j) => (
                           <span key={j}>
@@ -342,35 +386,37 @@ function DraftReview({ r }: { r: CeoRequest }) {
                           </span>
                         ))}
                       </div>
-                    </>
-                  )}
-                  <div className="row" style={{ marginTop: 6 }}>
-                    <span className="sub">{ko ? '난이도' : 'Difficulty'}</span>
-                    <Segmented
-                      small
-                      value={diffs[i] ?? d.difficulty ?? 'normal'}
-                      onChange={(v) => setDiffs({ ...diffs, [i]: v })}
-                      options={(['easy', 'normal', 'hard'] as const).map((x) => ({ value: x, label: difficulty(x) }))}
-                    />
-                    {diffs[i] && diffs[i] !== (d.difficulty ?? 'normal') && (
-                      <span className="sub">
-                        {ko ? `비서실장 제안: ${difficulty(d.difficulty)}` : `Proposed: ${difficulty(d.difficulty)}`}
-                      </span>
                     )}
-                    <span
-                      className="chip"
-                      title={ko ? '같은 난이도 업무의 실제 평균(기록이 적으면 기본 예상치)' : 'Average of past tickets of this difficulty'}
-                    >
-                      {ko ? '예상' : 'est.'} ~{fmtTokens(estimateOf(i), lang)} {ko ? '토큰' : 'tokens'}
-                    </span>
-                  </div>
-                  <div className="row" style={{ marginTop: 4 }}>
-                    {d.writeScope.map((g) => (
-                      <code key={g} className="chip">
-                        {g}
-                      </code>
-                    ))}
-                  </div>
+                    <div className="row" style={{ marginTop: 6 }}>
+                      <span className="sub">{ko ? '난이도' : 'Difficulty'}</span>
+                      <Segmented
+                        small
+                        value={diffs[i] ?? d.difficulty ?? 'normal'}
+                        onChange={(v) => setDiffs({ ...diffs, [i]: v })}
+                        options={(['easy', 'normal', 'hard'] as const).map((x) => ({ value: x, label: difficulty(x) }))}
+                      />
+                      {diffs[i] && diffs[i] !== (d.difficulty ?? 'normal') && (
+                        <span className="sub">
+                          {ko ? `비서실장 제안: ${difficulty(d.difficulty)}` : `Proposed: ${difficulty(d.difficulty)}`}
+                        </span>
+                      )}
+                      <span
+                        className="chip"
+                        title={
+                          ko ? '같은 난이도 업무의 실제 평균(기록이 적으면 기본 예상치)' : 'Average of past tickets of this difficulty'
+                        }
+                      >
+                        {ko ? '예상' : 'est.'} ~{fmtTokens(estimateOf(i), lang)} {ko ? '토큰' : 'tokens'}
+                      </span>
+                    </div>
+                    <div className="row" style={{ marginTop: 4 }}>
+                      {d.writeScope.map((g) => (
+                        <code key={g} className="chip">
+                          {g}
+                        </code>
+                      ))}
+                    </div>
+                  </details>
                 </td>
               </tr>
             );

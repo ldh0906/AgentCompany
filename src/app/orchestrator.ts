@@ -256,7 +256,11 @@ export class Orchestrator {
       } else sha = await this.syncMirrorRecorded(project, paths);
       return { sha, dir: await ensureDetachedWorktree(paths, 'preview', 'base', sha) };
     });
-    return this.previews.start({ projectId, ticketId, sha, dir });
+    // 직원이 알려 준 열어 볼 페이지(예: 알림음 확인용 demo.html)
+    const t = ticketId ? this.company.requireTicket(ticketId) : null;
+    const rep = t ? this.records.latestSubmission(t)?.report : null;
+    const page = rep?.kind === 'work' ? (rep.previewPage ?? null) : null;
+    return this.previews.start({ projectId, ticketId, sha, dir, page });
   }
 
   /** 모든 진행 중 비동기 작업이 끝날 때까지 기다린다(테스트용). */
@@ -1342,6 +1346,39 @@ export class Orchestrator {
     this.changed('run', run.id);
   }
 
+  // ======================= 나중에 확인 =======================
+
+  /** 승인 때 "나중에 확인"으로 미룬 대표 직접 확인 항목 */
+  laterChecks(ticketId: string): { id: string; text: string; at: string }[] {
+    const raw = this.company.store.getSetting(`later_checks:${ticketId}`);
+    return raw ? (JSON.parse(raw) as { id: string; text: string; at: string }[]) : [];
+  }
+
+  /**
+   * 미뤄 둔 확인을 끝낸다. 괜찮으면 확인 기록을 남기고, 문제가 있으면 비서실장에게 고칠 요청을 보낸다.
+   */
+  async resolveLaterCheck(ticketId: string, requirementId: string, ok: boolean, note = ''): Promise<{ requestId: string | null }> {
+    const list = this.laterChecks(ticketId);
+    const item = list.find((x) => x.id === requirementId);
+    if (!item) throw new DomainError(tr('나중에 확인할 항목이 아닙니다.', 'Not a deferred check.'));
+    this.company.store.setSetting(`later_checks:${ticketId}`, JSON.stringify(list.filter((x) => x.id !== requirementId)));
+    let requestId: string | null = null;
+    if (ok) this.attest(ticketId, requirementId, tr('반영 뒤 대표가 직접 확인했습니다.', 'Confirmed by the CEO after merging.'));
+    else {
+      const t = this.company.requireTicket(ticketId);
+      const req = await this.submitRequest(
+        t.projectId,
+        tr(
+          `${t.id} "${t.title}"을(를) 반영한 뒤 대표가 직접 확인해 보니 이 부분이 기대와 달라요: ${item.text}${note ? `\n대표 메모: ${note}` : ''}`,
+          `After ${t.id} "${t.title}" was merged, the CEO checked and this is not right: ${item.text}${note ? `\nCEO note: ${note}` : ''}`,
+        ),
+      );
+      requestId = req.id;
+    }
+    this.changed('ticket', ticketId);
+    return { requestId };
+  }
+
   // ======================= 멈춘 실행 =======================
 
   /** 이만큼 아무 출력이 없으면 멈췄을 수 있다고 대표에게 알린다(라이브 화면은 5분부터 ⚠). */
@@ -2139,7 +2176,14 @@ ${failure.detail.slice(0, 400)}`,
   decideIntegration(
     approvalId: string,
     decision: 'approved' | 'rejected',
-    opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[]; auto?: boolean; by?: string } = {},
+    opts: {
+      mode?: Project['integrationMode'];
+      reason?: string;
+      attested?: string[];
+      deferred?: string[];
+      auto?: boolean;
+      by?: string;
+    } = {},
   ): Ticket {
     const t = this.decideIntegrationCore(approvalId, decision, opts);
     // 확인이 끝났으니 띄워 둔 미리보기를 끈다(반려 뒤 새 제출물이 오면 새로 띄운다).
@@ -2150,7 +2194,7 @@ ${failure.detail.slice(0, 400)}`,
   private decideIntegrationCore(
     approvalId: string,
     decision: 'approved' | 'rejected',
-    opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[]; auto?: boolean; by?: string },
+    opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[]; deferred?: string[]; auto?: boolean; by?: string },
   ): Ticket {
     const a = this.records.approval(approvalId);
     if (!a || a.kind !== 'integrate' || a.state !== 'pending' || !a.ticketId)
@@ -2194,7 +2238,10 @@ ${failure.detail.slice(0, 400)}`,
     );
     const missing = t.requirements.filter((r) => r.evidenceType === 'human_attest' && !attested.has(r.id));
     const checkedNow = missing.filter((r) => opts.attested?.includes(r.id));
-    if (checkedNow.length < missing.length)
+    // "지금은 확인 못 함 → 나중에": 확인한 척 체크하지 않고 반영하되, 대표 할 일로 남긴다.
+    // 실측(2026-10-01, 눈 휴식): 들어 볼 페이지가 없는 알림음을 "들어 보고 확인"에 체크해야 승인되어, 확인 못 한 채 체크했다.
+    const deferred = missing.filter((r) => !opts.attested?.includes(r.id) && opts.deferred?.includes(r.id));
+    if (checkedNow.length + deferred.length < missing.length)
       throw new DomainError(
         tr(
           `대표 직접 확인 항목을 확인하고 체크하세요: ${missing.map((r) => r.id).join(', ')}`,
@@ -2202,6 +2249,13 @@ ${failure.detail.slice(0, 400)}`,
         ),
       );
     for (const r of checkedNow) this.attest(t.id, r.id, tr('승인하면서 대표가 직접 확인했습니다.', 'Confirmed by the CEO when approving.'));
+    if (deferred.length) {
+      this.company.store.setSetting(
+        `later_checks:${t.id}`,
+        JSON.stringify([...this.laterChecks(t.id), ...deferred.map((r) => ({ id: r.id, text: r.text, at: new Date().toISOString() }))]),
+      );
+      this.company.store.appendEvent('ceo', 'evidence.deferred', t.id, { requirementIds: deferred.map((r) => r.id) });
+    }
     const mode = opts.mode ?? (a.detail as { mode: Project['integrationMode'] }).mode;
     return tx(() => {
       // 자동 반영은 대표가 켠 설정에 따른 것: 기록에는 'auto'로 남겨 대표가 직접 누른 승인과 구분한다.

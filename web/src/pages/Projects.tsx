@@ -255,9 +255,11 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
     project?.verifyCommands.map((v) => ({ label: v.label, evidenceType: v.evidenceType, command: joinArgs(v.argv) })) ?? [],
   );
   const [docRules, setDocRules] = useState(project?.docRules ?? '');
-  const [autoApprove, setAutoApprove] = useState(project?.autoApprove ?? false);
+  // 새 프로젝트는 켬: 대표가 볼 것 없는 업무까지 승인을 기다리지 않게(실측: 타이머 계산 업무 승인을 다음 업무가 기다렸다).
+  const [autoApprove, setAutoApprove] = useState(project ? (project.autoApprove ?? false) : true);
   const [profileSummary, setProfileSummary] = useState(project?.profile?.summary ?? '');
   const [profileMobile, setProfileMobile] = useState(project?.profile?.mobile ?? true);
+  const [mobileTouched, setMobileTouched] = useState(Boolean(project?.profile));
   const [profileGame, setProfileGame] = useState(project?.profile?.game ?? false);
   const [qaAutoReject, setQaAutoReject] = useState(project?.qaAutoReject ?? true);
   const [autoPlaytest, setAutoPlaytest] = useState(project?.autoPlaytest ?? false);
@@ -391,7 +393,18 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
           {ko ? '어떤 프로젝트인가요?' : 'What is this project?'}
           <textarea
             value={profileSummary}
-            onChange={(e) => setProfileSummary(e.target.value)}
+            onChange={(e) => {
+              setProfileSummary(e.target.value);
+              // 설명에 PC만 나오면 휴대폰 점검을 끈다(대표가 직접 고른 뒤에는 건드리지 않음).
+              // 실측: "회사 pc에 켜두고"라고 썼는데 휴대폰 점검이 기본으로 켜져 있어 휴대폰 확인 일이 붙었다.
+              if (!mobileTouched) {
+                const v = e.target.value;
+                const pc = /pc|데스크톱|데스크탑|컴퓨터|desktop/i.test(v);
+                const phone = /폰|모바일|휴대|스마트폰|mobile|phone|태블릿/i.test(v);
+                if (pc && !phone) setProfileMobile(false);
+                else if (phone) setProfileMobile(true);
+              }
+            }}
             placeholder={ko ? '예: PC용 픽셀 RPG(메이플 느낌), 키보드 조작, 한국어' : 'e.g. PC pixel RPG, keyboard controls, Korean'}
             rows={2}
           />
@@ -402,7 +415,7 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
           </span>
         </label>
         <label className="check-row">
-          <input type="checkbox" checked={profileMobile} onChange={(e) => setProfileMobile(e.target.checked)} />
+          <input type="checkbox" checked={profileMobile} onChange={(e) => (setProfileMobile(e.target.checked), setMobileTouched(true))} />
           <span>{ko ? '휴대폰 화면도 신경 쓰기 (끄면 휴대폰 폭 점검·경고를 하지 않음)' : 'Also care about phone screens'}</span>
         </label>
         <label className="check-row">

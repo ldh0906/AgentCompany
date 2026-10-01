@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, type Approval, type DomainEvent, type State } from '../api.ts';
 import { Link, useCompany, useRoute } from '../App.tsx';
 import { ACCESS, josa, useT } from '../i18n.ts';
@@ -209,7 +209,9 @@ export function ApprovalItem({ a }: { a: Approval }) {
   const ceoChecks =
     a.kind === 'integrate' && d.mode !== 'review' ? (tk?.requirements.filter((r) => r.evidenceType === 'human_attest') ?? []) : [];
   const [checked, setChecked] = useState<string[]>([]);
-  const unchecked = ceoChecks.length > checked.length;
+  // "지금 확인 못 함 → 나중에": 확인한 척 체크하지 않게(실측: 들어 볼 수 없는 소리를 체크하고 승인했다)
+  const [later, setLater] = useState<string[]>([]);
+  const unchecked = ceoChecks.some((r) => !checked.includes(r.id) && !later.includes(r.id));
   const ko = lang === 'ko';
   const proj = tk ? state?.projects.find((p) => p.id === tk.projectId) : undefined;
   // 이 승인을 기다리는 뒤 업무(실측: T-19가 T-18 승인 대기로 멈춘 줄 대표가 몰랐다)
@@ -220,7 +222,12 @@ export function ApprovalItem({ a }: { a: Approval }) {
     run(
       () =>
         api(`approvals/${a.id}/decide`, {
-          body: { decision, ...(mode ? { mode } : {}), reason, ...(decision === 'approved' ? { attested: checked } : {}) },
+          body: {
+            decision,
+            ...(mode ? { mode } : {}),
+            reason,
+            ...(decision === 'approved' ? { attested: checked, deferred: later.filter((x) => !checked.includes(x)) } : {}),
+          },
         }),
       decision === 'approved' ? '승인했습니다.' : '반려했습니다.',
     ).then(reload);
@@ -316,17 +323,36 @@ export function ApprovalItem({ a }: { a: Approval }) {
               <input
                 type="checkbox"
                 checked={checked.includes(r.id)}
+                disabled={later.includes(r.id)}
                 onChange={() => setChecked(checked.includes(r.id) ? checked.filter((x) => x !== r.id) : [...checked, r.id])}
               />
               <span>
-                <b>{r.id}</b> {r.text}
+                <b>{r.id}</b> {r.text}{' '}
+                {!checked.includes(r.id) && (
+                  <button
+                    type="button"
+                    className={`btn small ${later.includes(r.id) ? 'on' : ''}`}
+                    onClick={(ev) => {
+                      ev.preventDefault();
+                      setLater(later.includes(r.id) ? later.filter((x) => x !== r.id) : [...later, r.id]);
+                    }}
+                  >
+                    {later.includes(r.id)
+                      ? lang === 'ko'
+                        ? '✓ 나중에 확인 (할 일에 남김)'
+                        : '✓ Check later'
+                      : lang === 'ko'
+                        ? '지금 확인 못 함 → 나중에'
+                        : "Can't check now → later"}
+                  </button>
+                )}
               </span>
             </label>
           ))}
           <div className="spread">
             <span className="hint">
               {lang === 'ko'
-                ? '실행해 보고 확인한 항목을 체크하세요. 모두 체크해야 승인할 수 있습니다.'
+                ? '실행해 보고 확인한 항목을 체크하세요. 지금 확인할 수 없으면 "나중에"를 누르세요(할 일에 남습니다).'
                 : 'Run it, then tick what you confirmed. All items must be ticked to approve.'}
             </span>
             {/* 체크한 바로 옆에서 승인(실측: 체크는 카드 맨 아래, 승인 버튼은 맨 위라 다시 올라가야 했다) */}
@@ -447,6 +473,7 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
         </div>
       </div>
 
+      <AwaySummary />
       <SetupGuide onNewTicket={onNewTicket} />
 
       <div className="grid cols-4" style={{ marginBottom: 16 }}>
@@ -599,7 +626,10 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
             <ul className="timeline">
               {[...state.events]
                 .reverse()
-                .filter((e) => !isNoiseEvent(e, state))
+                // 직원이 대표 대신 허용한 명령 원문은 대시보드에서 뺀다(실측: 돌아와 보니 powershell 명령이 줄줄이). 차단(⛔)은 남긴다.
+                .filter(
+                  (e) => !isNoiseEvent(e, state) && !(e.type === 'approval.delegated' && (e.payload as { allow?: boolean } | null)?.allow),
+                )
                 .slice(0, 25)
                 .map((e) => (
                   <li key={e.seq}>
@@ -831,4 +861,123 @@ function toolInputText(input: unknown): string {
   if (x && Array.isArray(x.files) && typeof x.diff === 'string')
     return `${x.files.map((f) => `${f.kind}  ${f.path}`).join('\n')}\n\n${x.diff}`;
   return JSON.stringify(input, null, 2);
+}
+
+/**
+ * 자리 비운 사이 요약: 30분 넘게 대시보드를 안 봤으면, 그동안 끝난 일·생긴 일을 세 줄로 먼저 보여 준다.
+ * 실측(2026-10-01, 눈 휴식): 돌아와 보니 "최근 활동"이 명령 기록뿐이라 무슨 일이 있었는지 알 수 없었다.
+ * 근거: 끊긴 일로 돌아오는 데 평균 25분(Mark·Gudith 2008) — 다시 붙는 비용을 줄인다.
+ */
+const SEEN_KEY = 'ac_last_seen';
+function AwaySummary() {
+  const { state } = useCompany();
+  const { lang } = useT();
+  const { go } = useRoute();
+  const ko = lang === 'ko';
+  const [since, setSince] = useState<number | null>(() => {
+    try {
+      const v = Number(localStorage.getItem(SEEN_KEY) || 0);
+      return v && Date.now() - v > 30 * 60_000 ? v : null;
+    } catch {
+      return null;
+    }
+  });
+  const [events, setEvents] = useState<DomainEvent[] | null>(null);
+  useEffect(() => {
+    const mark = () => {
+      try {
+        if (document.visibilityState === 'visible') localStorage.setItem(SEEN_KEY, String(Date.now()));
+      } catch {
+        // 저장 못 해도 요약만 안 뜰 뿐
+      }
+    };
+    if (since === null) mark();
+    const t = setInterval(mark, 60_000);
+    document.addEventListener('visibilitychange', mark);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', mark);
+    };
+  }, [since]);
+  useEffect(() => {
+    if (since !== null)
+      void api<DomainEvent[]>('events?limit=1000')
+        .then(setEvents)
+        .catch(() => setEvents([]));
+  }, [since]);
+  if (since === null || !state || !events) return null;
+  const after = events.filter((e) => Date.parse(e.ts) > since);
+  const ids = (type: string) => [...new Set(after.filter((e) => e.type === type).map((e) => e.entityId))];
+  const doneIds = ids('ticket.done');
+  const drafted = ids('request.drafted').filter((id) => state.requests.find((r) => r.id === id)?.status === 'drafted');
+  const waiting = state.approvals.filter((a) => a.kind === 'integrate');
+  const stuck = state.tickets.filter(
+    (t) => t.hold && t.hold.reason !== 'waiting_dependency' && !['done', 'cancelled', 'failed'].includes(t.status),
+  );
+  const notices = (state.notices ?? []).filter((n) => Date.parse(n.at) > since);
+  const mins = Math.round((Date.now() - since) / 60_000);
+  const away =
+    mins >= 60
+      ? ko
+        ? `${Math.floor(mins / 60)}시간 ${mins % 60}분`
+        : `${Math.floor(mins / 60)}h ${mins % 60}m`
+      : ko
+        ? `${mins}분`
+        : `${mins}m`;
+  const title = (id: string) => state.tickets.find((t) => t.id === id)?.title ?? '';
+  const lines: { text: string; to?: string }[] = [
+    ...(doneIds.length
+      ? [
+          {
+            text: ko
+              ? `✅ 끝난 업무 ${doneIds.length}개: ${doneIds.map((id) => `${id} ${title(id)}`).join(', ')}`
+              : `✅ ${doneIds.length} done: ${doneIds.join(', ')}`,
+          },
+        ]
+      : []),
+    ...(waiting.length
+      ? [{ text: ko ? `⏳ 대표 승인을 기다리는 업무 ${waiting.length}개` : `⏳ ${waiting.length} waiting for your approval`, to: '/' }]
+      : []),
+    ...(drafted.length ? [{ text: ko ? `📝 확인할 초안 ${drafted.length}개` : `📝 ${drafted.length} drafts to review`, to: '/' }] : []),
+    ...(stuck.length
+      ? [
+          {
+            text: ko
+              ? `⚠ 멈춰서 대표를 기다리는 업무 ${stuck.length}개: ${stuck.map((t) => t.id).join(', ')}`
+              : `⚠ ${stuck.length} on hold`,
+            to: `/tickets/${stuck[0]!.id}`,
+          },
+        ]
+      : []),
+    ...notices.slice(-3).map((n) => ({ text: `🔔 ${n.title}`, to: n.link })),
+  ];
+  const close = () => {
+    try {
+      localStorage.setItem(SEEN_KEY, String(Date.now()));
+    } catch {
+      // 무시
+    }
+    setSince(null);
+  };
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="body">
+        <div className="spread">
+          <b>{ko ? `자리 비운 사이 (${away})` : `While you were away (${away})`}</b>
+          <button className="btn small" onClick={close}>
+            {ko ? '확인했어요' : 'Got it'}
+          </button>
+        </div>
+        {lines.length === 0 ? (
+          <div className="sub">{ko ? '그동안 새로 생긴 일은 없습니다.' : 'Nothing new.'}</div>
+        ) : (
+          lines.map((l, i) => (
+            <div key={i} style={{ marginTop: 6, cursor: l.to ? 'pointer' : undefined }} onClick={() => l.to && go(l.to)}>
+              {l.text}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
 }

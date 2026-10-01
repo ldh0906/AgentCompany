@@ -4,7 +4,7 @@
 // - 개발 서버 출력에서 localhost 주소를 찾아 돌려준다. 프로세스는 앱 종료 때 함께 끝낸다.
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, type Dirent } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import path from 'node:path';
@@ -44,7 +44,35 @@ const MIME: Record<string, string> = {
 };
 
 /** 무엇으로 띄울지 정한다(순수 판단: 테스트용으로 분리). */
-export function previewCommand(dir: string): { argv: string[] } | { static: true } | null {
+/**
+ * 맨 위 index.html이 없을 때 열 만한 .html을 찾는다(얕은 곳 먼저, node_modules·.git 제외).
+ * 실측(2026-10-01, 눈 휴식): 알림음 업무에 직원이 src/sound/demo.html을 만들어 뒀는데 "띄울 방법을 찾지 못했습니다"로 끝났다.
+ */
+export function findHtml(dir: string, maxDepth = 3): string | null {
+  let level = [''];
+  for (let depth = 0; depth <= maxDepth && level.length; depth++) {
+    const next: string[] = [];
+    for (const rel of level) {
+      let entries: Dirent[] = [];
+      try {
+        entries = readdirSync(path.join(dir, rel), { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      const html = entries.filter((e) => e.isFile() && /\.html?$/i.test(e.name)).map((e) => e.name);
+      const pick = html.find((n) => /^index\.html?$/i.test(n)) ?? html.sort()[0];
+      if (pick) return rel ? `${rel}/${pick}` : pick;
+      for (const e of entries)
+        if (e.isDirectory() && !['node_modules', '.git'].includes(e.name) && !e.name.startsWith('.'))
+          next.push(rel ? `${rel}/${e.name}` : e.name);
+    }
+    level = next.sort();
+  }
+  return null;
+}
+
+/** 띄우는 방법: dev/start 스크립트, 아니면 정적 서버와 열 페이지(직원이 알려 준 페이지 → index.html → 찾은 .html). */
+export function previewCommand(dir: string, page?: string | null): { argv: string[] } | { static: true; page: string } | null {
   const pkgPath = path.join(dir, 'package.json');
   if (existsSync(pkgPath)) {
     try {
@@ -55,8 +83,10 @@ export function previewCommand(dir: string): { argv: string[] } | { static: true
       // 잘못된 package.json: 아래 정적 서버로
     }
   }
-  if (existsSync(path.join(dir, 'index.html'))) return { static: true };
-  return null;
+  if (page && existsSync(path.join(dir, page))) return { static: true, page };
+  if (existsSync(path.join(dir, 'index.html'))) return { static: true, page: '' };
+  const found = findHtml(dir);
+  return found ? { static: true, page: found } : null;
 }
 
 interface Live {
@@ -72,7 +102,7 @@ export class PreviewManager {
     return [...this.live.values()].map((l) => l.info);
   }
 
-  async start(p: { projectId: string; ticketId: string | null; sha: string; dir: string }): Promise<PreviewInfo> {
+  async start(p: { projectId: string; ticketId: string | null; sha: string; dir: string; page?: string | null }): Promise<PreviewInfo> {
     const key = `${p.projectId}:${p.ticketId ?? 'base'}`;
     this.stop(key);
     const info: PreviewInfo = {
@@ -97,11 +127,11 @@ export class PreviewManager {
       return info;
     };
 
-    const how = previewCommand(p.dir);
+    const how = previewCommand(p.dir, p.page);
     if (!how)
       return fail(
         tr(
-          '띄울 방법을 찾지 못했습니다: package.json의 dev/start 스크립트나 index.html이 없습니다.',
+          '띄울 화면을 찾지 못했습니다: 열어 볼 페이지(.html)도 실행 명령도 없습니다. 화면이 생기는 업무에서 확인할 수 있습니다.',
           'Nothing to run: no dev/start script in package.json and no index.html.',
         ),
       );
@@ -110,7 +140,7 @@ export class PreviewManager {
       info.command = tr('내장 정적 서버', 'built-in static server');
       entry.server = await staticServer(p.dir);
       const addr = entry.server.address();
-      info.url = typeof addr === 'object' && addr ? `http://127.0.0.1:${addr.port}/` : null;
+      info.url = typeof addr === 'object' && addr ? `http://127.0.0.1:${addr.port}/${encodeURI(how.page)}` : null;
       info.state = 'running';
       return info;
     }

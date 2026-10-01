@@ -20,6 +20,8 @@ export interface WorkReport {
   split?: SplitPart[];
   /** 범위 밖 파일을 꼭 고쳐야 할 때(예: 옛 동작을 기대하는 기존 테스트): 대표가 한 번에 허용할 수 있게 요청한다. */
   needScope?: { paths: string[]; reason: string } | null;
+  /** 대표가 열어 볼 페이지(맨 위 index.html이나 dev 서버가 아닐 때, 예: src/sound/demo.html) */
+  previewPage?: string | null;
 }
 
 export interface SplitPart {
@@ -173,6 +175,7 @@ export function parseReport(
         screenSteps: screenStepsOf(r.screenSteps, expected.requirementIds),
         split: splitOf(r.split),
         needScope: needScopeOf(r.needScope),
+        previewPage: pageOf(r.previewPage),
       },
     };
   }
@@ -488,4 +491,12 @@ export function parseChatReply(finalText: string | null, nonce: string): ChatRep
   // JSON 없이 답만 한 경우: 코드 블록을 떼고 본문만.
   const text = finalText.replace(/```[\s\S]*?```/g, '').trim();
   return text ? { reply: text.slice(0, 6000), mentions: [], openRoom: null } : null;
+}
+
+/** 열어 볼 페이지 경로: 폴더 안의 상대 경로 .html만(밖으로 나가는 경로는 버린다). */
+export function pageOf(v: unknown): string | null {
+  if (!isStr(v)) return null;
+  const p = v.trim().replaceAll('\\', '/').replace(/^\.\//, '');
+  if (!p || p.startsWith('/') || /^[a-z]:/i.test(p) || p.split('/').includes('..') || !/\.html?$/i.test(p)) return null;
+  return p.slice(0, 300);
 }

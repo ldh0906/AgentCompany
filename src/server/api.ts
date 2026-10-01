@@ -118,6 +118,8 @@ export class Api {
         return this.runLog(id!, query.get('stream') === 'stderr' ? 'stderr' : 'stdout');
       case 'GET runs/:id/activity':
         return this.runActivity(id!);
+      case 'POST tickets/:id/later-check':
+        return this.orch.resolveLaterCheck(id!, str(b, 'requirementId'), b.ok === true, str(b, 'note', { optional: true, max: 2000 }));
       case 'POST runs/:id/restart':
         return this.orch.restartRun(id!);
       case 'POST runs/:id/steer':
@@ -370,6 +372,7 @@ export class Api {
             ...(mode ? { mode } : {}),
             reason: str(b, 'reason', { optional: true }),
             attested: strList(b, 'attested'),
+            deferred: strList(b, 'deferred'),
           });
         }
         throw new ApiError(
@@ -503,6 +506,7 @@ export class Api {
       claims: r.claimsFor(id),
       approvals: r.approvals().filter((a) => a.ticketId === id),
       scopeRequest: this.orch.scopeRequestOf(id),
+      laterChecks: this.orch.laterChecks(id),
       events: this.company.store.events(id, 500),
     };
   }

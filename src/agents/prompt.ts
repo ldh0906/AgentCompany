@@ -97,6 +97,8 @@ ${
 - Everything left in your directory is committed. Put temporary files (screenshots, browser profiles, downloads, logs) in the OS temp directory, never in the worktree.
 - Do not override the CEO's decisions or invent product rules the ticket does not ask for. When the ticket itself asks you to define values or content (for example balance numbers or item lists), propose sensible values, implement them, and write down the reasoning; you are not blocked by the absence of a decision. Use status "needs_decision" only when you truly cannot proceed without the CEO, and put those items in "questions".
 - Requirements that need "human_attest" (the CEO playing or looking at the result) are checked by the CEO at approval. Do not stop for them: finish the work and submit with status "done", noting in "notes" how the CEO can check it by hand. For each of them also write a screen-check scenario (see "Screen check guide").
+- The CEO is a tired non-developer with a few minutes, on this PC only (no phone). In those notes say in plain words what to open, what to click and what they should see or hear, and make it checkable within a minute: if it only shows after a wait (a 20-minute timer, a daily reset), add a quick-check way (for example "?quick=1" that shortens the wait to seconds) and say so. Measured: the CEO could not see a 20-minute break without sitting through it.
+- If the page to check is not the project's index.html or dev server (for example a small demo page for a sound module), set "previewPage" to its path inside the project, e.g. "src/sound/demo.html"; the app opens that page for the CEO.
 - If your own change can only pass by also editing a file outside your write scope (for example an existing test that encodes the old behavior), do not resubmit hoping it passes: return status "blocked" with "needScope": {"paths":["tests/game/boss.test.ts"],"reason":"one line: why"}. The CEO can allow it in one click and you continue in the next run.
 - Problems you notice outside your write scope (another ticket's area) are not blockers: finish your part, submit "done", and add them to "followUps" (title + reason) so the CEO can turn them into tickets with one click.
 ${
@@ -150,7 +152,7 @@ ${i.feedback ? dataBlock('Feedback and notes (reviewer feedback, CEO notes, agre
 ## Final answer format (required)
 Write your summary in language "${i.language}". End your final answer with exactly one JSON code block:
 \`\`\`json
-{"nonce":"${i.nonce}","kind":"work","status":"done|blocked|needs_decision","summary":"...","requirements":[${header.requirementIds.map((id) => `{"id":"${id}","claim":"met|partial|not_met","notes":"..."}`).join(',')}],"questions":[],"followUps":[],"ask":[],"screenSteps":[]}
+{"nonce":"${i.nonce}","kind":"work","status":"done|blocked|needs_decision","summary":"...","requirements":[${header.requirementIds.map((id) => `{"id":"${id}","claim":"met|partial|not_met","notes":"..."}`).join(',')}],"questions":[],"followUps":[],"ask":[],"screenSteps":[],"previewPage":null}
 \`\`\`
 The nonce must be copied exactly. Missing or wrong JSON means the run is rejected.
 `;
@@ -285,6 +287,8 @@ Rules:
 - Each ticket has a narrow write scope (globs). Tickets that touch the same files must depend on each other (dependsOn = earlier ticket indexes).
 - Each requirement names the MINIMUM evidence that proves it. unit_test / static_check / runtime are produced ONLY by the project verify commands listed below: use a type only if a verify command of that exact type exists. If a requirement needs a check the project cannot run yet (e.g. type checking or lint), add that command to "verifySuggestions" (no shell operators) so the CEO can add it before confirming.
 - Use "human_attest" only for what a person must see, hear or play (visuals, feel, sound). Anything a reviewer can confirm by reading code is "inspection". Documents are "inspection".
+- Put "human_attest" only on a ticket whose result the CEO can actually open and see or hear (it produces a page or the app itself). Parts without a screen of their own (logic, a sound module, data) use unit_test or inspection; the ticket that brings them onto the screen carries the human check. Measured: a sound module had "listen and confirm" while no page existed yet, so the CEO approved without hearing it.
+- If something only shows after a wait (a 20-minute timer, a daily reset), add a requirement for a quick-check way (for example a URL option that shortens the wait) so the CEO can check it within a minute.
 - Do not decide product rules or numbers the CEO has not decided. Put them in "questions", each with your recommended default as "proposal" so the CEO can accept it in one click. Ask only what really matters; small tuning values can simply be proposed.
 - Prefer 1-5 tickets. Fewer is better, but do not bundle unrelated work: independent parts should be separate tickets so different employees can work at the same time.
 - Give each ticket a "difficulty": "easy" (small, local, low risk), "normal" (a typical feature or fix), or "hard" (cross-cutting, risky, or design-heavy). Difficulty decides the minimum rank: easy = junior+, normal = senior+, hard = lead.

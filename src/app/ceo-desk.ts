@@ -59,6 +59,17 @@ export class CeoDesk {
           title: tr(`${p.name} 프로필 변경 제안 확인`, `Review the profile proposal for ${p.name}`),
           link: '/projects',
         });
+    for (const t of this.h.company.tickets()) {
+      const later = this.h.company.store.getSetting(`later_checks:${t.id}`);
+      if (later && later !== '[]')
+        for (const x of JSON.parse(later) as { id: string; text: string }[])
+          out.push({
+            key: `later:${t.id}:${x.id}`,
+            kind: 'later',
+            title: tr(`나중에 확인: ${t.id} ${x.text.slice(0, 80)}`, `Check later: ${t.id} ${x.text.slice(0, 80)}`),
+            link: `/tickets/${t.id}`,
+          });
+    }
     for (const s of this.h.stalled())
       out.push({
         key: `stall:${s.runId}`,

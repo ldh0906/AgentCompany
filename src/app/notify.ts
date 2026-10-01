@@ -6,7 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 export interface CeoTodo {
   /** 같은 할 일을 두 번 알리지 않기 위한 키 */
   key: string;
-  kind: 'approval' | 'decision' | 'permission' | 'draft' | 'failed' | 'paused' | 'stalled';
+  kind: 'approval' | 'decision' | 'permission' | 'draft' | 'failed' | 'paused' | 'stalled' | 'later';
   title: string;
   /** 대시보드 안의 이동 경로(예: /tickets/T-3) */
   link: string;

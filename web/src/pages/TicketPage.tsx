@@ -16,6 +16,8 @@ interface Detail {
   events: DomainEvent[];
   /** 담당자가 범위 밖 파일 수정 허가를 요청했으면 */
   scopeRequest?: { paths: string[]; reason: string } | null;
+  /** 승인 때 "나중에 확인"으로 미룬 대표 직접 확인 */
+  laterChecks?: { id: string; text: string; at: string }[];
 }
 
 export function TicketPage({ id }: { id: string }) {
@@ -168,6 +170,48 @@ export function TicketPage({ id }: { id: string }) {
           )}
         </div>
       </div>
+
+      {(detail.laterChecks ?? []).length > 0 && (
+        <div className="banner info">
+          <b>{ko ? '나중에 확인하기로 한 것' : 'Checks you deferred'}</b>
+          {detail.laterChecks!.map((x) => (
+            <div key={x.id} style={{ marginTop: 8 }}>
+              <div>
+                <b>{x.id}</b> {x.text}
+              </div>
+              <div className="row" style={{ marginTop: 6 }}>
+                <PreviewButton projectId={tk.projectId} ticketId={null} />
+                <button
+                  className="btn small ok"
+                  disabled={busy}
+                  onClick={() =>
+                    run(
+                      () => api(`tickets/${tk.id}/later-check`, { body: { requirementId: x.id, ok: true } }),
+                      ko ? '확인했다고 기록했습니다.' : 'Recorded.',
+                    ).then(() => (load(), reload()))
+                  }
+                >
+                  {ko ? '확인했어요' : 'Looks right'}
+                </button>
+                <button
+                  className="btn small"
+                  disabled={busy}
+                  onClick={() => {
+                    const note = prompt(ko ? '무엇이 다른가요? (비워 둬도 됩니다)' : 'What is wrong? (optional)');
+                    if (note === null) return;
+                    void run(
+                      () => api(`tickets/${tk.id}/later-check`, { body: { requirementId: x.id, ok: false, note } }),
+                      ko ? '비서실장에게 고칠 일을 요청했습니다.' : 'Asked the chief of staff for a fix.',
+                    ).then(() => (load(), reload()));
+                  }}
+                >
+                  {ko ? '문제 있어요' : 'Something is wrong'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {tk.hold && (
         <div className="banner warn">

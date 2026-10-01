@@ -94,8 +94,19 @@ test('새 프로젝트: 폴더를 만들고 빈 첫 커밋이 있는 main 저장
 test('실행해 보기: dev 스크립트 우선, 없으면 index.html을 내장 정적 서버로 띄운다', async (t) => {
   const d = tmp(t);
   assert.equal(previewCommand(d), null);
+  // 맨 위 index.html이 없어도 안쪽 .html을 찾고, 직원이 알려 준 페이지가 있으면 그것을 연다(실측: 알림음 demo.html)
+  mkdirSync(path.join(d, 'src', 'sound'), { recursive: true });
+  writeFileSync(path.join(d, 'src', 'sound', 'demo.html'), '<button>들어 보기</button>');
+  assert.deepEqual(previewCommand(d), { static: true, page: 'src/sound/demo.html' });
+  assert.deepEqual(previewCommand(d, 'nope.html'), { static: true, page: 'src/sound/demo.html' }, '없는 페이지는 무시');
+  const demo = new PreviewManager();
+  t.after(() => demo.stopAll());
+  const demoInfo = await demo.start({ projectId: 'P', ticketId: null, sha: 'x', dir: d });
+  assert.match(demoInfo.url!, /\/src\/sound\/demo\.html$/);
+  assert.match(await (await fetch(demoInfo.url!)).text(), /들어 보기/);
   writeFileSync(path.join(d, 'index.html'), '<canvas id="game"></canvas>');
-  assert.deepEqual(previewCommand(d), { static: true });
+  assert.deepEqual(previewCommand(d), { static: true, page: '' });
+  assert.deepEqual(previewCommand(d, 'src/sound/demo.html'), { static: true, page: 'src/sound/demo.html' });
   const pm = new PreviewManager();
   t.after(() => pm.stopAll());
   const info = await pm.start({ projectId: 'P', ticketId: null, sha: 'x', dir: d });
