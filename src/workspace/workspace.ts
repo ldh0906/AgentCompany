@@ -252,7 +252,8 @@ export async function removeWorktree(paths: ProjectPaths, wtPath: string): Promi
 export type IntegrationResult =
   | { kind: 'branch'; branch: string; sha: string }
   | { kind: 'merged'; baseBranch: string; mergeSha: string; previousBaseSha: string }
-  | { kind: 'downgraded'; branch: string; sha: string; reason: string };
+  /** sendBack: 충돌·합친 결과 검사 실패처럼 담당자가 최신 기준 위에서 다시 맞춰야 하는 경우 */
+  | { kind: 'downgraded'; branch: string; sha: string; reason: string; sendBack?: boolean };
 
 /** 원본 저장소의 모든 worktree(주 작업 트리 포함)가 체크아웃한 브랜치 → 경로. */
 export async function checkedOutBranches(originPath: string): Promise<Map<string, string>> {
@@ -325,9 +326,9 @@ export async function integrateWithMerge(
   verifyMerge?: (mergeSha: string) => Promise<{ ok: boolean; reason?: string }>,
 ): Promise<IntegrationResult> {
   const branch = ticketBranch(ticketId);
-  const downgrade = async (reason: string): Promise<IntegrationResult> => {
+  const downgrade = async (reason: string, sendBack = false): Promise<IntegrationResult> => {
     const r = await integrateAsBranch(originPath, paths, ticketId, expectedHead);
-    return { kind: 'downgraded', branch, sha: r.kind === 'branch' ? r.sha : expectedHead, reason };
+    return { kind: 'downgraded', branch, sha: r.kind === 'branch' ? r.sha : expectedHead, reason, ...(sendBack ? { sendBack } : {}) };
   };
 
   const head = await headSha(paths.mirror, `refs/heads/${branch}`);
@@ -351,6 +352,7 @@ export async function integrateWithMerge(
       await git(['merge', '--abort'], tmp, { allowFail: true });
       return await downgrade(
         tr('기준 브랜치와 충돌해 자동 병합할 수 없습니다.', 'Cannot auto-merge due to conflicts with the base branch.'),
+        true,
       );
     }
     mergeSha = await headSha(tmp);
@@ -360,7 +362,7 @@ export async function integrateWithMerge(
 
   if (verifyMerge) {
     const v = await verifyMerge(mergeSha);
-    if (!v.ok) return downgrade(tr(`병합 결과 재검증 실패: ${v.reason ?? ''}`, `Merge re-verification failed: ${v.reason ?? ''}`));
+    if (!v.ok) return downgrade(tr(`병합 결과 재검증 실패: ${v.reason ?? ''}`, `Merge re-verification failed: ${v.reason ?? ''}`), true);
   }
 
   await fetchExactSha(originPath, paths, mergeSha);

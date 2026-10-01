@@ -73,7 +73,7 @@ import { newId, Records, sha256, type CeoRequest, type RunRecord } from './recor
 import { appProfileDir } from './doctor.ts';
 import { dependencySetup, installDependencies } from './verify-setup.ts';
 import { estimates, ticketTokens, tokenBudget } from './cost.ts';
-import { suggestVerifyAt } from './repo-inspect.ts';
+import { nodeTestArgs, suggestVerifyAt } from './repo-inspect.ts';
 import { PreviewManager, type PreviewInfo } from './preview.ts';
 import { CeoDesk } from './ceo-desk.ts';
 import type { OrchHost } from './orch-host.ts';
@@ -629,6 +629,18 @@ export class Orchestrator {
       const existed = (await git(['rev-parse', '--verify', '-q', branchRef], paths.mirror, { allowFail: true })).stdout.trim() || null;
       const wt = await ensureTicketWorktree(paths, t.id, project.baseBranch);
       this.records.recordRefMove(project.id, 'mirror', branchRef, existed, await headSha(wt.path));
+      // 반영 충돌로 돌아온 업무: 최신 기준을 업무 폴더에 합쳐 둔다. 충돌이면 표시를 남긴 채 두고(직원이 정리),
+      // 제출 때 시스템 커밋이 병합을 마친다. 이제 비교 기준은 최신 기준이다(다른 업무의 변경이 범위 위반으로 보이지 않게).
+      if (this.company.store.getSetting(`catch_up:${t.id}`)) {
+        this.company.store.setSetting(`catch_up:${t.id}`, '');
+        const before = await headSha(wt.path);
+        const baseRef = `refs/heads/${project.baseBranch}`;
+        const merged = await git([...AGENT_IDENTITY, 'merge', '--no-ff', '--no-edit', baseRef], wt.path, { allowFail: true });
+        if (merged.code === 0) this.records.recordRefMove(project.id, 'mirror', branchRef, before, await headSha(wt.path));
+        const conflicted = (await git(['diff', '--name-only', '--diff-filter=U'], wt.path, { allowFail: true })).stdout.trim();
+        wt.baseSha = await headSha(paths.mirror, baseRef);
+        this.company.store.appendEvent('orchestrator', 'ticket.caught_up', t.id, { conflicted: conflicted.split('\n').filter(Boolean) });
+      }
       return {
         wt,
         refsBefore: await snapshotRefs(paths.mirror),
@@ -1728,6 +1740,34 @@ ${failure.detail.slice(0, 400)}`,
       }
       const wr = run.report as WorkReport;
       if (wr.status !== 'done' && wr.split?.length && this.splitTicket(ticket, run, wr)) return;
+      // 시험용 파일만 더 쓰겠다는 요청은 대표가 판단할 것이 아니다: 다른 진행 중 업무와 겹치지 않으면 바로 허용한다.
+      // 실측(2026-10-01, 물 마시기): "tests/sound/** 허용하고 계속"을 비개발자 대표가 판단하지 못한 채 눌렀다.
+      const askPaths = wr.needScope?.paths ?? [];
+      const project = this.company.requireProject(ticket.projectId);
+      if (
+        askPaths.length &&
+        askPaths.every((p) => /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.[a-z]+$/i.test(p.replaceAll('\\', '/'))) &&
+        !checkScope(askPaths, askPaths, project.protectedPaths).protectedTouched.length &&
+        !this.company.tickets().some((x) => x.id !== ticket.id && LOCK_HOLDING.includes(x.status) && scopesOverlap(x.writeScope, askPaths))
+      ) {
+        this.company.extendWriteScope(ticket.id, askPaths);
+        this.apply(ticket.id, {
+          type: 'run_aborted',
+          reason: tr('시험용 파일 범위를 넓혀 다시 시작', 'Test files added to scope; restarting'),
+        });
+        const room = ticketChannelId(ticket.id);
+        if (this.chat.channel(room))
+          this.chat.post(
+            room,
+            'system',
+            tr(
+              `시험용 파일이라 바로 허용했습니다: ${askPaths.join(', ')} (다른 업무와 겹치지 않음)`,
+              `Allowed test files right away: ${askPaths.join(', ')}`,
+            ),
+            'event',
+          );
+        return;
+      }
       if (wr.needScope?.paths.length) {
         // 범위 밖 파일이 필요하다는 요청: 헛되이 다시 내지 않고 대표에게 한 번에 묻는다.
         // 실측(2026-09-30, T-27): 기존 보스 테스트 한 줄이 범위 밖이라 같은 실패로 세 번 제출하고 멈췄다.
@@ -1993,7 +2033,7 @@ ${failure.detail.slice(0, 400)}`,
     const runDir = `${baseRunDir}-${Date.now()}-${randomBytes(3).toString('hex')}`;
     // 프로세스를 띄우기 전에 실행 폴더를 먼저 기록한다(띄운 직후 죽어도 복구가 셔틀 기록을 찾을 수 있게).
     if (ticketId) this.company.store.setSetting(`verify_proc:${ticketId}`, JSON.stringify({ runDir }));
-    const [cmd, ...rest] = vc.argv;
+    const [cmd, ...rest] = nodeTestArgs(vc.argv, cwd);
     const located = cmd ? await locateExecutable(cmd) : null;
     if (!located?.launch)
       return {
@@ -2367,8 +2407,29 @@ ${failure.detail.slice(0, 400)}`,
         this.records.setApprovalState(approval.id, 'consumed', 'orchestrator', { result });
         this.company.store.appendEvent('orchestrator', 'ticket.integration_result', ticketId, result);
         this.company.store.setSetting(`mergeverify_base:${ticketId}`, '');
+        // 최신 기준과 충돌(또는 합친 결과 검사 실패)한 자동 반영은 완료가 아니다: 담당자에게 돌려보내고,
+        // 다음 작업 시작 때 최신 기준을 업무 폴더에 합쳐 준다.
+        // 실측(2026-10-01, 물 마시기): 충돌로 "따로 보관"되고도 완료 처리되어, 코드가 내 폴더에 없는데 뒤 업무가 시작했다.
+        if (result.kind === 'downgraded' && result.sendBack) {
+          this.company.store.setSetting(`catch_up:${ticketId}`, '1');
+          this.apply(ticketId, {
+            type: 'merge_conflict',
+            reason: tr(
+              `내 폴더에 반영하려는데 그사이 다른 업무가 바꾼 내용과 겹쳤습니다(${result.reason}). 이번 작업을 시작할 때 최신 기준을 업무 폴더에 합쳐 두었습니다: 충돌 표시(<<<<<<< ======= >>>>>>>)가 남은 파일을 정리해 양쪽 변경을 모두 살리고, 이미 기준에 들어온 것은 다시 만들지 마세요.`,
+              `Merging into the CEO's folder collided with another ticket's changes (${result.reason}). The latest base is merged into your folder at the start of this run: resolve the conflict markers (<<<<<<< ======= >>>>>>>) keeping both sides, and do not rebuild what is already in the base.`,
+            ),
+          });
+          return;
+        }
         this.apply(ticketId, { type: 'integrated', commitSha: commit });
       });
+      // 그 밖의 강등(예: 내 폴더에 커밋하지 않은 변경)은 완료로 두되 대표에게 알린다(조용히 따로 보관되지 않게).
+      if (result.kind === 'downgraded' && !result.sendBack)
+        this.desk.notice(
+          tr(`${ticketId}를 내 폴더에 바로 반영하지 못했습니다`, `${ticketId} could not be merged into your folder`),
+          tr(`따로 보관(${result.branch})했습니다: ${result.reason}`, `Kept on ${result.branch}: ${result.reason}`),
+          `/tickets/${ticketId}`,
+        );
       await this.autoVerifyCommands(project.id).catch(() => {});
     } catch (error) {
       this.company.store.transact(() => {

@@ -43,6 +43,8 @@ export type TicketCommand =
   | { type: 'submit' }
   | { type: 'deliberation_done'; claims: number; escalated: number }
   | { type: 'run_aborted'; reason: string; hold?: { reason: HoldReason; note: string } }
+  /** 반영하려는데 최신 기준과 충돌(또는 합친 결과 검사 실패): 완료로 치지 않고 담당자에게 돌려보낸다. */
+  | { type: 'merge_conflict'; reason: string }
   | { type: 'verification_passed' }
   | { type: 'verification_failed'; reason: string }
   | { type: 'scope_violation'; paths: string[] }
@@ -399,6 +401,14 @@ export function applyTicketCommand(ticket: Ticket, cmd: TicketCommand, actor: Ac
       const bad = expect('integrating');
       if (bad) return reject(bad);
       return next({ status: 'done' }, 'ticket.done', { commitSha: cmd.commitSha });
+    }
+
+    case 'merge_conflict': {
+      if (!isOrchestrator(actor))
+        return reject(tr('반영 충돌 처리는 오케스트레이터만 할 수 있습니다.', 'Only the orchestrator can send back merge conflicts.'));
+      const bad = expect('integrating');
+      if (bad) return reject(bad);
+      return requestChanges(ticket, now, actor, cmd.reason, 'verification');
     }
 
     case 'integration_failed': {

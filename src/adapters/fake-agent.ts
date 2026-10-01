@@ -73,7 +73,9 @@ async function work(h: TaskHeader, prompt: string): Promise<string> {
     );
   }
   // 범위 밖 파일이 필요하다고 요청한다(허용되면 평소처럼 일한다)
-  if (behavior === 'scoper' && !h.writeScope.includes('extra/fix.md'))
+  // testscoper: 시험용 파일(tests/extra.test.js)을 더 쓰겠다고 요청한다
+  const askFor = behavior === 'scoper' ? 'extra/fix.md' : behavior === 'testscoper' ? 'tests/extra.test.js' : null;
+  if (askFor && !h.writeScope.includes(askFor))
     return finalWith(
       {
         nonce: h.nonce,
@@ -82,7 +84,7 @@ async function work(h: TaskHeader, prompt: string): Promise<string> {
         summary: L('범위 밖 파일이 필요합니다.', 'Needs a file outside the scope.'),
         requirements: h.requirementIds.map((id) => ({ id, claim: 'not_met', notes: '' })),
         questions: [],
-        needScope: { paths: ['extra/fix.md'], reason: 'old test expects old behavior' },
+        needScope: { paths: [askFor], reason: 'old test expects old behavior' },
       },
       L('허가 요청.', 'Asking.'),
     );
@@ -91,7 +93,11 @@ async function work(h: TaskHeader, prompt: string): Promise<string> {
   if (!lazyNow && !rebut) {
     const file = targetFile(h);
     mkdirSync(path.dirname(file), { recursive: true });
-    const prev = existsSync(file) ? readFileSync(file, 'utf8') : '';
+    // 충돌 표시가 남아 있으면 양쪽을 살리고 표시 줄만 지운다(반영 충돌로 돌아온 업무 흉내)
+    const prev = (existsSync(file) ? readFileSync(file, 'utf8') : '')
+      .split('\n')
+      .filter((l) => !/^(<<<<<<<|=======|>>>>>>>)/.test(l))
+      .join('\n');
     writeFileSync(
       file,
       `${prev}# ${h.ticketId} round ${h.round}\n\n${L('작업 결과입니다. 요구사항', 'Work result. Requirements')}: ${h.requirementIds.join(', ')}\n`,

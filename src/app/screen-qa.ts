@@ -198,7 +198,7 @@ export class ScreenQa {
     if (!c || !isQa || !t || t.status !== 'awaiting_approval' || t.hold) return;
     const project = this.h.company.requireProject(t.projectId);
     if (project.qaAutoReject === false) return;
-    const warns = verdictsOf(opinion).filter((v) => v.mark === '⚠');
+    const warns = verdictsOf(opinion).filter((v) => v.mark === '⚠' && !v.unsure);
     if (!warns.length) return;
     const a = this.h.records.pendingApprovalFor(t.id, 'integrate');
     if (!a || this.h.records.latestSubmission(t)?.headSha !== c.sha) return;

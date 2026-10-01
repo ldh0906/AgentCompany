@@ -1,5 +1,5 @@
 // 프로젝트 등록·업무 작성 도우미: 폴더 찾아보기와 저장소 자동 분석(읽기만), 새 프로젝트용 빈 저장소 만들기.
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -172,4 +172,23 @@ export async function createRepo(parent: string, name: string): Promise<string> 
   await git(['init', '-q', '-b', 'main'], dir);
   await git([...AGENT_IDENTITY, 'commit', '-q', '--allow-empty', '-m', 'Start project'], dir);
   return dir;
+}
+
+/**
+ * "node --test tests/"처럼 폴더를 넘기면 Node 22+는 그 폴더를 테스트 파일 하나로 열려다 실패한다.
+ * 폴더 인자를 그 안의 테스트 파일 패턴으로 바꿔 실행한다(셸 없이 넘겨도 node가 패턴을 직접 펼친다).
+ * 실측(2026-10-01, 물 마시기): 비서실장이 제안한 "node --test tests/"가 실패해, 두 업무가 우회 파일을 만들겠다며
+ * 대표에게 범위 허가를 연달아 물었다.
+ */
+export function nodeTestArgs(argv: string[], cwd: string): string[] {
+  if (argv[0] !== 'node' || !argv.includes('--test')) return argv;
+  return argv.flatMap((a, i) => {
+    if (i === 0 || a.startsWith('-') || /[*?{]/.test(a)) return [a];
+    const dir = a.replace(/[\\/]+$/, '');
+    try {
+      return statSync(path.join(cwd, dir)).isDirectory() ? [`${dir}/**/*.test.*`, `${dir}/**/*.spec.*`] : [a];
+    } catch {
+      return [a];
+    }
+  });
 }

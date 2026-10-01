@@ -443,6 +443,19 @@ export class Api {
       events: this.company.store.events(undefined, 60),
       requests: r.requests(),
       // 요청별 사용 토큰(초안 + 업무 + 업무방 대화): 요청 카드에 합계와 업무별로
+      // 승인 대기 업무의 대표 직접 확인 항목별 "확인하는 법"(담당자 메모): 승인 카드의 체크 바로 아래에 보인다.
+      // 실측(2026-10-01, 물 마시기): 담당자가 "?interval=10s로 10초 만에 확인"을 적어 뒀는데 승인 카드에는 없었다.
+      checkNotes: Object.fromEntries(
+        this.company
+          .tickets()
+          .filter((t) => t.status === 'awaiting_approval' && t.requirements.some((q) => q.evidenceType === 'human_attest'))
+          .map((t) => {
+            const rep = r.latestSubmission(t)?.report;
+            const notes =
+              rep?.kind === 'work' ? rep.requirements.filter((q) => q.notes).map((q) => [q.id, q.notes.slice(0, 1200)] as const) : [];
+            return [t.id, Object.fromEntries(notes)] as const;
+          }),
+      ),
       // 대화에서 직원이 낸 프로젝트 프로필 변경 제안(프로젝트 ID별)
       profileProposals: Object.fromEntries(
         this.company

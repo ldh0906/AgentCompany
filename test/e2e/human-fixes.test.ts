@@ -3,7 +3,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDraftPrompt, buildWorkPrompt } from '../../src/agents/prompt.ts';
 import { pageOf } from '../../src/agents/report.ts';
-import { driveUntil, setup, statusIs } from './helpers.ts';
+import { nodeTestArgs } from '../../src/app/repo-inspect.ts';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { driveUntil, newImplTicket, setup, statusIs } from './helpers.ts';
+import { ticketChannelId } from '../../src/app/chat.ts';
 
 test('나중에 확인: 확인 못 한 항목은 체크 대신 미루고 반영, 할 일에 남았다가 확인/문제로 끝난다', { timeout: 180_000 }, async (t) => {
   const env = await setup(t);
@@ -74,4 +79,26 @@ test('지시문: 대표 확인은 화면이 생기는 업무에만, 기다려야
   const work = buildWorkPrompt({ employee: emp!, project, ticket, nonce: 'n', decisions: [], feedback: null, language: 'ko' });
   assert.match(work, /checkable within a minute/);
   assert.match(work, /"previewPage"/);
+});
+
+test('검증 명령: node --test에 폴더를 주면 그 안의 테스트 파일 패턴으로 바꿔 실행한다(Node 22+는 폴더를 못 연다)', () => {
+  const d = mkdtempSync(path.join(os.tmpdir(), 'ac-nt-'));
+  try {
+    mkdirSync(path.join(d, 'tests', 'sound'), { recursive: true });
+    assert.deepEqual(nodeTestArgs(['node', '--test', 'tests/'], d), ['node', '--test', 'tests/**/*.test.*', 'tests/**/*.spec.*']);
+    assert.deepEqual(nodeTestArgs(['node', '--test', 'tests/a.test.js'], d), ['node', '--test', 'tests/a.test.js'], '파일은 그대로');
+    assert.deepEqual(nodeTestArgs(['node', '--test'], d), ['node', '--test']);
+    assert.deepEqual(nodeTestArgs(['npm', 'test'], d), ['npm', 'test']);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('시험용 파일만 더 쓰겠다는 요청은 대표에게 묻지 않고 바로 허용한다', { timeout: 180_000 }, async (t) => {
+  const env = await setup(t, { implementer: 'testscoper' });
+  const tk = newImplTicket(env);
+  const done = await driveUntil(env, tk.id, (x) => x.status === 'awaiting_approval' || x.hold !== null, 120_000);
+  assert.equal(done.hold, null, '대표 결정으로 멈추지 않는다');
+  assert.ok(done.writeScope.includes('tests/extra.test.js'));
+  assert.ok(env.orch.chat.messages(ticketChannelId(tk.id)).some((m) => /시험용 파일이라 바로 허용/.test(m.text)));
 });

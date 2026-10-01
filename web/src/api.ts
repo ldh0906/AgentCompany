@@ -103,6 +103,8 @@ export interface State {
   /** 윈도우 토스트 알림 켬 */
   toast?: boolean;
   /** 고급 QA(직접 플레이) 기록: 업무 ID 또는 Q:요청 ID */
+  /** 승인 대기 업무의 대표 확인 항목별 "확인하는 법"(담당자 메모): 업무 ID → 요구사항 ID → 메모 */
+  checkNotes?: Record<string, Record<string, string>>;
   /** 대화에서 직원이 낸 프로젝트 프로필 변경 제안(프로젝트 ID별) */
   profileProposals?: Record<string, { profile: { summary: string; mobile: boolean; game: boolean }; by: string; at: string }>;
   /** 요청별 사용 토큰(초안 + 업무 + 업무방 대화) */

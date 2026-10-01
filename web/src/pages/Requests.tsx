@@ -449,7 +449,7 @@ function DraftReview({ r }: { r: CeoRequest }) {
           {fixable ? (
             <div>
               {ko
-                ? `요구사항 ${mismatches.length}개가 아직 없는 검증 명령을 필요로 합니다. 업무를 만들 때 비서실장이 제안한 명령을 함께 추가합니다.`
+                ? `이 프로젝트에는 아직 자동 검사가 없어, 비서실장이 제안한 검사(${needed.map((sg) => sg.argv.join(' ')).join(', ')})를 업무와 함께 켭니다. 직원 결과를 기계가 먼저 확인하는 장치입니다.`
                 : `${mismatches.length} requirement(s) need a verify command the project lacks. The suggested command is added when you create the tickets.`}
             </div>
           ) : (
@@ -580,7 +580,7 @@ function DraftReview({ r }: { r: CeoRequest }) {
         <button className={`btn ${mismatches.length && !fixable ? 'danger' : 'ok'}`} disabled={busy || kept.length === 0} onClick={confirm}>
           {fixable
             ? ko
-              ? `검증 명령(${needed.map((sg) => sg.argv.join(' ')).join(', ')}) 추가하고 업무 ${kept.length}개 만들기`
+              ? `자동 검사도 함께 켜고 ${project.name} 업무 ${kept.length}개 만들기`
               : `Add verify command and create ${kept.length} tickets`
             : mismatches.length
               ? ko

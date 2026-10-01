@@ -328,6 +328,11 @@ export function ApprovalItem({ a }: { a: Approval }) {
               />
               <span>
                 <b>{r.id}</b> {r.text}{' '}
+                {state?.checkNotes?.[tk.id]?.[r.id] && (
+                  <span className="sub" style={{ display: 'block', marginTop: 2 }}>
+                    💡 {lang === 'ko' ? '확인하는 법' : 'How to check'}: {state.checkNotes[tk.id]![r.id]}
+                  </span>
+                )}
                 {!checked.includes(r.id) && (
                   <button
                     type="button"

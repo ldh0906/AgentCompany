@@ -16,3 +16,11 @@ test('QA 의견에서 요구사항별 한 줄 결론과 대표 확인 방법을 
   );
   assert.deepEqual(verdictsOf('예전 형식 R1: 괜찮음'), []);
 });
+
+test('⚠인데 "사진으로는 판단할 수 없다"면 확실하지 않은 것으로 표시한다(자동 돌려보내기 제외)', () => {
+  const v = verdictsOf(
+    'R2 ✅ 잘 보입니다\nR3 ⚠ 배너가 없습니다\n7.png: 타이머가 00:05라 아직 울릴 시각이 아니었던 것으로 보입니다. 기능 고장인지는 사진으로 판단할 수 없습니다.\nR4 ⚠ 버튼 글자가 잘립니다\n9.png: 오른쪽이 잘려 있습니다',
+  );
+  assert.equal(v.find((x) => x.id === 'R3')!.unsure, true);
+  assert.equal(v.find((x) => x.id === 'R4')!.unsure, undefined);
+});
