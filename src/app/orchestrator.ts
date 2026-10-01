@@ -994,6 +994,26 @@ export class Orchestrator {
     const cost = runs.reduce((a, r) => a + (r.usage?.costUsd ?? 0), 0);
     const cached = runs.reduce((a, r) => a + (r.usage?.cacheRead ?? 0), 0);
     const submitted = ['verifying', 'in_review', 'awaiting_approval'].includes(t.status);
+    // 이미 제출되어 검사·검수만 남았으면 멈추지 않는다(남은 비용이 작다): 알리고 그대로 간다.
+    // 돌려보내져 다시 일해야 할 때(그때는 제출 상태가 아님) 멈추고 묻는다.
+    // 실측(2026-10-01, 메이플 5차): "작업은 이미 끝나 제출됐고 검사·검수만 남음(10~20만)"인데 멈춰 대표가 눌러야 했다.
+    if (submitted) {
+      if (!this.company.store.getSetting(`budget_noted:${t.id}:${Math.round(budget)}`)) {
+        this.company.store.setSetting(`budget_noted:${t.id}:${Math.round(budget)}`, '1');
+        this.desk.notice(
+          tr(
+            `${t.id} 토큰 예산을 넘었습니다 (${Math.round(used / 1e4)}만 / ${Math.round(budget / 1e4)}만)`,
+            `${t.id} is over its token budget`,
+          ),
+          tr(
+            `작업은 이미 제출되어 검사·검수만 남아 그대로 진행합니다${cost ? ` (추정 $${cost.toFixed(1)})` : ''}. 다시 일해야 하면 그때 멈추고 묻습니다.`,
+            'The work is already submitted, so checks and review continue. It will stop and ask if more work is needed.',
+          ),
+          `/tickets/${t.id}`,
+        );
+      }
+      return;
+    }
     this.apply(t.id, {
       type: 'hold',
       reason: 'needs_decision',

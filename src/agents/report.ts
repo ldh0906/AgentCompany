@@ -39,6 +39,8 @@ export type ScreenStep =
   | { do: 'type'; text: string }
   | { do: 'wait'; ms: number }
   | { do: 'reload' }
+  /** 같은 앱을 다른 주소로 연다(예: "?check=boss" 같은 빠른 확인 모드). 다른 사이트로는 가지 않는다. */
+  | { do: 'open'; path: string }
   /** 저장된 데이터가 필요한 확인(예: 새로고침 뒤 최고 점수)을 위해 localStorage에 값을 넣는다. */
   | { do: 'setStorage'; key: string; value: string }
   | { do: 'shot'; label: string };
@@ -382,6 +384,8 @@ export function screenStepsOf(v: unknown, requirementIds: string[]): ScreenScena
       else if (d === 'type' && isStr(s.text)) steps.push({ do: 'type', text: s.text.slice(0, 200) });
       else if (d === 'wait') steps.push({ do: 'wait', ms: num(s.ms, 0, 10_000) ?? 500 });
       else if (d === 'reload') steps.push({ do: 'reload' });
+      else if (d === 'open' && isStr(s.path) && !/^[a-z][a-z0-9+.-]*:|^\/\//i.test(s.path.trim()))
+        steps.push({ do: 'open', path: s.path.trim().slice(0, 300) });
       else if (d === 'setStorage' && isStr(s.key) && isStr(s.value))
         steps.push({ do: 'setStorage', key: s.key.slice(0, 200), value: s.value.slice(0, 5000) });
       else if (d === 'shot') steps.push({ do: 'shot', label: isStr(s.label) ? s.label.slice(0, 80) : '' });

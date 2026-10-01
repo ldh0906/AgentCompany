@@ -7,7 +7,7 @@ import { Avatar, empName, EmptyState, HoldChip, Icon, Modal, needsCeo, StatusChi
 import { CliConnect, Segmented, useCliStatus } from '../components/kit.tsx';
 import { UsagePanel } from '../components/usage.tsx';
 import { RequestBox } from './Requests.tsx';
-import { PlaytestPanel, PreviewButton, ScreenCheckPanel } from '../components/preview.tsx';
+import { PlaytestPanel, PreviewButton, QuickCheckLink, quickQueries, ScreenCheckPanel } from '../components/preview.tsx';
 
 const ACTIVE = ['assigned', 'in_progress', 'verifying', 'in_review', 'changes_requested', 'integrating'];
 
@@ -367,6 +367,13 @@ export function ApprovalItem({ a, full = false }: { a: Approval; full?: boolean 
                     {state?.checkNotes?.[tk.id]?.[r.id] && (
                       <span className="sub" style={{ display: 'block', marginTop: 2 }}>
                         💡 {lang === 'ko' ? '확인하는 법' : 'How to check'}: {state.checkNotes[tk.id]![r.id]}
+                        {quickQueries(state.checkNotes[tk.id]![r.id]!).length > 0 && (
+                          <span className="row" style={{ marginTop: 4, gap: 6 }}>
+                            {quickQueries(state.checkNotes[tk.id]![r.id]!).map((q) => (
+                              <QuickCheckLink key={q} projectId={tk.projectId} ticketId={tk.id} query={q} />
+                            ))}
+                          </span>
+                        )}
                       </span>
                     )}
                     {!checked.includes(r.id) && (

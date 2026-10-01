@@ -82,8 +82,9 @@ export async function stopPlay(dir: string): Promise<void> {
  * 명령: start | look | key <코드>[+<코드>] | click | type <글자> | wait <ms> | storage <키> <값> | stop
  */
 export async function playCommand(argv: string[]): Promise<string> {
+  // 같은 옵션이 여러 번이면 뒤의 것(./play 래퍼가 앞에 붙이는 기본값보다 직원이 준 값이 이긴다)
   const opt = (name: string) => {
-    const i = argv.indexOf(`--${name}`);
+    const i = argv.lastIndexOf(`--${name}`);
     return i >= 0 ? argv[i + 1] : undefined;
   };
   const positional = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && argv[i - 1]!.startsWith('--')));
@@ -98,8 +99,22 @@ export async function playCommand(argv: string[]): Promise<string> {
 
   let session: Session | null = existsSync(sessionFile) ? (JSON.parse(await readFile(sessionFile, 'utf8')) as Session) : null;
   if (cmd === 'start') {
-    const url = opt('url') ?? value ?? session?.url;
+    // "./play start ?check=boss": 같은 결과물의 다른 주소(빠른 확인 모드)로 연다. 다른 사이트로는 가지 않는다.
+    // 실측(2026-10-01, 메이플 5차): 래퍼가 늘 기본 주소를 먼저 넘겨 QA가 ?check=boss를 열지 못했다.
+    const base = opt('url') ?? session?.url;
+    let url = base;
+    if (value) {
+      try {
+        const target = new URL(value, base);
+        if (base && target.origin !== new URL(base).origin) return `only addresses of this build can be opened (${new URL(base).origin})`;
+        url = target.href;
+      } catch {
+        return `not an address: ${value}`;
+      }
+    }
     if (!url) return 'usage: play start --url <address>';
+    // 다시 시작해도 행동 수와 사진 번호는 이어진다(실측: 0001부터 다시 매겨 앞 사진을 덮어썼고, 행동 상한도 새로 시작됐다).
+    const prevSteps = Math.max(session?.steps ?? 0, Number(await readFile(path.join(dir, 'steps.txt'), 'utf8').catch(() => '0')) || 0);
     if (session) await stopPlay(dir);
     const chrome = findChrome();
     if (!chrome) return 'Chrome not found';
@@ -127,7 +142,7 @@ export async function playCommand(argv: string[]): Promise<string> {
       port = Number((await readFile(path.join(profile, 'DevToolsActivePort'), 'utf8').catch(() => '')).split('\n')[0]) || 0;
     }
     if (!port) return 'Chrome did not start';
-    session = { pid: child.pid!, port, url, steps: 0 };
+    session = { pid: child.pid!, port, url, steps: prevSteps };
   }
   if (!session) return 'no session: run "play start --url <address>" first';
   if (session.steps >= MAX_STEPS) return `limit reached (${MAX_STEPS} actions). Write your report now and run "play stop".`;
@@ -182,6 +197,7 @@ export async function playCommand(argv: string[]): Promise<string> {
     }
     session.steps++;
     await writeFile(sessionFile, JSON.stringify(session));
+    await writeFile(path.join(dir, 'steps.txt'), String(session.steps));
     const shot = await snap(cdp, dir, session.steps);
     const errors = await errorsSince(cdp);
     return [

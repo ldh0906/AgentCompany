@@ -95,3 +95,14 @@ test('예산은 같은 난이도 실제 평균의 2.5배까지 늘어난다(대�
   const fixed = { budget: { maxTokens: 3_000_000 }, difficulty: 'hard' } as unknown as Parameters<typeof tokenBudget>[0];
   assert.equal(tokenBudget(fixed, 8_110_000), 3_000_000);
 });
+
+test('제출 뒤(검사·검수만 남음) 예산을 넘으면 멈추지 않고 알리기만 한다', { timeout: 240_000 }, async (t) => {
+  // 실행 한 번에 약 3만: 작업 → 반려 → 재작업까지 약 9.5만, 두 번째 검수에서 10만을 넘는다(이미 제출된 상태)
+  const env = await setup(t, { reviewer: 'picky' });
+  const tk = newImplTicket(env);
+  env.company.setTicketTokenBudget(tk.id, 100_000);
+  const after = await driveUntil(env, tk.id, (x) => x.status === 'awaiting_approval' || x.hold !== null, 150_000);
+  assert.equal(after.hold, null, '제출 뒤에는 멈추지 않는다');
+  assert.equal(after.status, 'awaiting_approval');
+  assert.ok(env.orch.desk.notices().some((n) => /토큰 예산을 넘었습니다/.test(n.title)));
+});

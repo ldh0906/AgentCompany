@@ -324,3 +324,30 @@ export function PlaytestPanel({ ticketId, requestId }: { ticketId?: string; requ
     </div>
   );
 }
+
+/**
+ * 빠른 확인 주소 바로 열기: 담당자 메모의 "?check=boss" 같은 주소를 결과물 주소에 붙여 연다(안 떠 있으면 먼저 띄운다).
+ * 실측(2026-10-01, 메이플 5차): 메모는 localhost:5173이라 했지만 실제 결과물은 다른 포트에 떠 있어, 대표가 주소를 고쳐 쳐야 했다.
+ */
+export function QuickCheckLink({ projectId, ticketId, query }: { projectId: string; ticketId: string; query: string }) {
+  const { state, reload } = useCompany();
+  const { busy, run } = useAction();
+  const live = state?.previews?.find((p) => p.key === `${projectId}:${ticketId}` && p.state === 'running' && p.url && !p.stale);
+  const go = () =>
+    run(async () => {
+      const url = live?.url ?? (await api<PreviewInfo>(`projects/${projectId}/preview`, { body: { ticketId } })).url;
+      reload();
+      if (!url) throw new Error('실행하지 못했습니다. "실행해 보기"의 기록을 확인하세요.');
+      window.open(new URL(query, url).href, '_blank', 'noopener');
+    });
+  return (
+    <button type="button" className="btn small" disabled={busy} onClick={() => void go()}>
+      ▶ {query}
+    </button>
+  );
+}
+
+/** 담당자 메모에서 빠른 확인 주소("?check=boss", "?interval=10s&x=1")를 뽑는다. */
+export function quickQueries(note: string): string[] {
+  return [...new Set(note.match(/\?[A-Za-z][\w-]*=[\w.,-]+(?:&[A-Za-z][\w-]*=[\w.,-]+)*/g) ?? [])].slice(0, 4);
+}

@@ -101,6 +101,8 @@ export class Playtests {
       profile: project.profile,
       hints: hints.slice(0, 12),
       maxActions: MAX_STEPS,
+      // 실측(2026-10-01, 메이플 5차): 대표가 "퀘스트 창은 J 유지"로 정했는데, 요청 원문의 "Q키"대로 확인해 ⚠를 줬다.
+      decisions: this.h.records.decisions(project.id, 'current').map((d) => `- ${d.text}`),
       nonce,
       language: this.h.language,
     });

@@ -35,3 +35,32 @@ test('play: 시작 → 글자로 클릭 → 키 → 멈춤, 명령마다 사진 
     server.close();
   }
 });
+
+test(
+  'play: 래퍼가 기본 주소를 앞에 붙여도 "start ?check=boss"로 같은 결과물의 다른 주소를 열고, 다시 시작해도 사진 번호·행동 수가 이어진다',
+  { skip: !findChrome(), timeout: 60_000 },
+  async () => {
+    const seen: string[] = [];
+    const server = createServer((q, r) => {
+      seen.push(q.url ?? '');
+      r.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><body>x</body>');
+    });
+    await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/`;
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ac-play-'));
+    try {
+      // ./play 래퍼: play --dir D --url BASE <직원이 준 인자>
+      assert.match(await playCommand(['--dir', dir, '--url', url, 'start']), /0001\.jpg/);
+      assert.match(await playCommand(['--dir', dir, '--url', url, 'look']), /0002\.jpg/);
+      assert.equal(await playCommand(['--dir', dir, '--url', url, 'stop']), 'stopped');
+      const again = await playCommand(['--dir', dir, '--url', url, 'start', '?check=boss']);
+      assert.match(again, /0003\.jpg/, '앞 사진을 덮어쓰지 않는다');
+      assert.match(again, /actions used: 3\//, '행동 수가 이어진다');
+      assert.ok(seen.includes('/?check=boss'), seen.join(','));
+      assert.match(await playCommand(['--dir', dir, '--url', url, 'start', 'https://example.com/']), /only addresses of this build/);
+      await playCommand(['--dir', dir, 'stop']);
+    } finally {
+      server.close();
+    }
+  },
+);

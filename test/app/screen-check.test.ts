@@ -6,6 +6,7 @@ import { mkdtemp, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { captureScreens, findChrome } from '../../src/app/screen-check.ts';
+import { screenStepsOf } from '../../src/agents/report.ts';
 
 const PAGE = `<!doctype html><body style="margin:0;background:#123"><h1 id="h">시작 화면</h1><div style="width:600px;height:10px"></div><script>
 console.error('boom from page');
@@ -64,3 +65,43 @@ test('확인 창(confirm)은 "확인"으로 닫고 문구를 알려 준다(창 �
     server.close();
   }
 });
+
+test(
+  '화면 점검 "open" 단계: 같은 앱의 다른 주소(빠른 확인 모드)를 열고, 다른 사이트는 열지 않는다',
+  { skip: !findChrome(), timeout: 60_000 },
+  async () => {
+    const seen: string[] = [];
+    const server = createServer((q, r) => {
+      seen.push(q.url ?? '');
+      r.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><body><h1>게임</h1></body>');
+    });
+    await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+    const port = (server.address() as { port: number }).port;
+    try {
+      const out = await mkdtemp(path.join(os.tmpdir(), 'ac-shots-'));
+      const steps = screenStepsOf(
+        [
+          {
+            requirementId: 'R1',
+            steps: [
+              { do: 'open', path: '?check=boss' },
+              { do: 'shot', label: '보스' },
+              { do: 'open', path: 'https://example.com/' },
+            ],
+          },
+        ],
+        ['R1'],
+      );
+      assert.deepEqual(
+        steps[0]!.steps.map((s) => s.do),
+        ['open', 'shot'],
+        '다른 사이트 주소는 읽을 때 버린다',
+      );
+      const cap = await captureScreens(`http://127.0.0.1:${port}/`, out, undefined, steps, { mobile: false });
+      assert.ok(seen.includes('/?check=boss'), `빠른 확인 주소를 열었다: ${seen.join(', ')}`);
+      assert.ok(cap.shots.some((s) => /보스/.test(s.label)));
+    } finally {
+      server.close();
+    }
+  },
+);

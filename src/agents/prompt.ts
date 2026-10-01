@@ -127,7 +127,8 @@ For each "human_attest" requirement add a scenario to "screenSteps", shaped [{"r
 - Each scenario starts from a fresh page load with empty storage. Limits per scenario: at most 5 shots and about 90 seconds; later steps are skipped. So: put the decisive shot first, one shot per distinct state (not several of the same moment), and reach the state fast.
 - Reach states by seeding, not by long play: setStorage saved data (or a debug value your code reads only from localStorage) and reload. Randomness and enemy movement make "play until X" unreliable (measured: attacks missed because the enemy stood behind the player, so the kill scene never appeared).
 - Show the requirement working, not just the first screen: before/after pairs (full bar → reduced bar; closed → open window; result message).
-- Steps: {"do":"key","key":"ArrowRight|Space|Enter|KeyZ|Digit1|...","holdMs":800,"times":3} (KeyboardEvent.code), {"do":"click","text":"Start"} or {"do":"click","selector":"#play"} or {"do":"click","x":0.5,"y":0.5} (fraction of the viewport), {"do":"type","text":"..."} (typed one character at a time), {"do":"wait","ms":1000}, {"do":"reload"}, {"do":"setStorage","key":"...","value":"..."} (localStorage), {"do":"shot","label":"what the CEO should see"}.
+- Steps: {"do":"key","key":"ArrowRight|Space|Enter|KeyZ|Digit1|...","holdMs":800,"times":3} (KeyboardEvent.code), {"do":"click","text":"Start"} or {"do":"click","selector":"#play"} or {"do":"click","x":0.5,"y":0.5} (fraction of the viewport), {"do":"type","text":"..."} (typed one character at a time), {"do":"wait","ms":1000}, {"do":"reload"}, {"do":"open","path":"?check=boss"} (opens the same app at another address, e.g. your quick-check mode; same site only), {"do":"setStorage","key":"...","value":"..."} (localStorage), {"do":"shot","label":"what the CEO should see"}.
+- If you built a quick-check address (like "?check=boss"), start that scenario with an "open" step so the machine shows the same state the CEO will check. Measured: a quick-check mode existed but the machine could not open it, so every picture showed the first screen.
 - Clicking a download/export button captures the file: the system reports its name, encoding (UTF-8 BOM for Excel) and first and last lines.
 - Browser dialogs (alert / confirm / prompt) are answered with OK automatically and their text is reported to QA. Pictures never show the dialog itself, so shoot the state after it (for example the list after a confirmed delete).
 - This guide is the whole contract of the checker. Do not open, import or test the Agent Company app's own files, and do not build your own browser harness to find out how the checker behaves (measured: an employee did that, its test script hung, and the ticket stalled for 10 minutes).${i.screenCheckCommand ? ' If unsure, run the self-check command once.' : ''}
@@ -477,6 +478,8 @@ export interface PlaytestPromptInput {
   maxActions: number;
   nonce: string;
   language: string;
+  /** 대표가 정한 규칙(초안 질문의 답 등): 요청 원문과 다르게 정해진 것은 문제로 보지 않게 */
+  decisions?: string[];
 }
 
 /**
@@ -491,7 +494,7 @@ You are "${i.employee.name}", a senior QA who plays the product like a real user
 Play the current build of: ${i.subject}. Judge whether each goal below works and how it feels to use or play (responsiveness, clarity, fun, annoying moments), and find bugs a person would hit.
 
 How to play (only these commands; you cannot change any code):
-- Start: ./play start   (opens the build in a hidden browser and prints the path of a screenshot)
+- Start: ./play start   (opens the build in a hidden browser and prints the path of a screenshot). To open another address of the same build (a quick-check mode from the hints), add it: ./play start "?check=boss". Restarting keeps your action count.
 - Then, one action per command, each printing a new screenshot path: ./play key ArrowRight --hold 800 | ./play key KeyZ --times 3 | ./play click --text "시작" | ./play click --x 0.5 --y 0.4 | ./play type "abc" | ./play wait 1500 | ./play look
   Keys are KeyboardEvent.code names (ArrowLeft, Space, Enter, Escape, KeyZ, KeyJ, Digit1, ...). Press several at once with "+": ./play key ArrowRight+Space --hold 600 (e.g. jump while moving).
 - To reach later content without grinding from the start, seed saved data: ./play storage <localStorage key> <value> (reloads the page). Use the save/debug keys in the hints below when there are any; say in your report when you did.
@@ -512,6 +515,8 @@ ${fence}
 ${profileBlock({ profile: i.profile })}
 
 ${dataBlock('Goals to check by playing', i.goals.map((g) => `- ${g.id}: ${g.text}`).join('\n'))}
+
+${dataBlock('CEO decisions (binding: where they differ from the original request, the decision wins; do not report that as a problem)', (i.decisions ?? []).join('\n'))}
 
 ${dataBlock('Known controls and how to reach things (from the implementers; a claim, not proof)', i.hints.join('\n') || '(none)')}
 `;

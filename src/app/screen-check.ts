@@ -314,9 +314,9 @@ export async function captureScreens(
     await cdp.send('Runtime.enable');
     await cdp.send('Log.enable');
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
-    const load = async (how: 'navigate' | 'reload') => {
+    const load = async (how: 'navigate' | 'reload', target = url) => {
       loaded = false;
-      if (how === 'navigate') await cdp!.send('Page.navigate', { url });
+      if (how === 'navigate') await cdp!.send('Page.navigate', { url: target });
       else await cdp!.send('Page.reload', {});
       for (let i = 0; i < 100 && !loaded; i++) await sleep(200);
       await sleep(2000); // 첫 그림이 그려질 시간
@@ -443,7 +443,13 @@ export async function captureScreens(
         } else if (st.do === 'type') await recorded(clip, () => typeSlowly(cdp!, st.text));
         else if (st.do === 'wait') await sleep(st.ms);
         else if (st.do === 'reload') await load('reload');
-        else if (st.do === 'setStorage')
+        else if (st.do === 'open') {
+          // 같은 앱의 다른 주소만(빠른 확인 모드 등). 실측(2026-10-01, 메이플 5차): 담당자가 만든 ?check=boss를 기계가 열 수 없어
+          // 화면 점검 사진이 전부 첫 화면이었다.
+          const target = new URL(st.path, url);
+          if (target.origin === new URL(url).origin) await load('navigate', target.href);
+          else fail(`다른 사이트 주소는 열지 않음: ${st.path}`);
+        } else if (st.do === 'setStorage')
           await cdp.send('Runtime.evaluate', {
             expression: `localStorage.setItem(${JSON.stringify(st.key)}, ${JSON.stringify(st.value)})`,
           });
