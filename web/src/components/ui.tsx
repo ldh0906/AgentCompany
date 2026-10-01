@@ -131,11 +131,14 @@ export function Modal({
   onClose,
   children,
   actions,
+  wide = false,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   actions?: ReactNode;
+  /** 넓은 창(예: 승인 카드 크게 보기) */
+  wide?: boolean;
 }) {
   const { t } = useT();
   useEffect(() => {
@@ -146,7 +149,7 @@ export function Modal({
   // body로 띄운다: 카드의 backdrop-filter 안에서는 fixed가 카드 기준이 되어 창이 카드 안에 갇히고 버튼이 화면 밖으로 잘렸다(실측).
   return createPortal(
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-label={title}>
+      <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-label={title}>
         <div className="head">
           <h2>{title}</h2>
           <button className="btn small" onClick={onClose}>

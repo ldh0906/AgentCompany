@@ -4,7 +4,7 @@ import { Link, useCompany, useRoute } from '../App.tsx';
 import { ACCESS, josa, useT } from '../i18n.ts';
 import { MAX_ACTIVE_EMPLOYEES } from '../../../src/core/types.ts';
 import { Avatar, empName, EmptyState, HoldChip, Icon, Modal, needsCeo, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
-import { CliConnect, useCliStatus } from '../components/kit.tsx';
+import { CliConnect, Segmented, useCliStatus } from '../components/kit.tsx';
 import { UsagePanel } from '../components/usage.tsx';
 import { RequestBox } from './Requests.tsx';
 import { PlaytestPanel, PreviewButton, ScreenCheckPanel } from '../components/preview.tsx';
@@ -195,7 +195,7 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
   }
 }
 
-export function ApprovalItem({ a }: { a: Approval }) {
+export function ApprovalItem({ a, full = false }: { a: Approval; full?: boolean }) {
   const { reload, state } = useCompany();
   const { t, lang } = useT();
   const { busy, run } = useAction();
@@ -211,6 +211,9 @@ export function ApprovalItem({ a }: { a: Approval }) {
   const [checked, setChecked] = useState<string[]>([]);
   // "지금 확인 못 함 → 나중에": 확인한 척 체크하지 않게(실측: 들어 볼 수 없는 소리를 체크하고 승인했다)
   const [later, setLater] = useState<string[]>([]);
+  // 카드는 스크롤로, "크게 보기"는 넓은 창에서 요약 · 화면 점검 · 확인하고 승인 페이지로 나눠 본다.
+  const [big, setBig] = useState(false);
+  const [page, setPage] = useState<'summary' | 'screen' | 'check'>('summary');
   const unchecked = ceoChecks.some((r) => !checked.includes(r.id) && !later.includes(r.id));
   const ko = lang === 'ko';
   const proj = tk ? state?.projects.find((p) => p.id === tk.projectId) : undefined;
@@ -232,6 +235,10 @@ export function ApprovalItem({ a }: { a: Approval }) {
       decision === 'approved' ? '승인했습니다.' : '반려했습니다.',
     ).then(reload);
 
+  const paged = full && ceoChecks.length > 0;
+  const showSummary = !paged || page === 'summary';
+  const showScreen = !paged || page === 'screen';
+  const showCheck = !paged || page === 'check';
   return (
     <div className="item">
       <div className="spread">
@@ -254,6 +261,15 @@ export function ApprovalItem({ a }: { a: Approval }) {
           </div>
         </div>
         <div className="row">
+          {!full && a.kind === 'integrate' && (
+            <button
+              className="btn small"
+              onClick={() => setBig(true)}
+              title={ko ? '넓은 창에서 페이지로 나눠 보기' : 'Open in a wide window'}
+            >
+              ⤢ {ko ? '크게 보기' : 'Expand'}
+            </button>
+          )}
           {a.kind === 'integrate' && d.mode === 'auto_after_approval' ? (
             <>
               <button className="btn ok small" disabled={busy || unchecked} onClick={() => decide('approved', 'auto_after_approval')}>
@@ -273,182 +289,210 @@ export function ApprovalItem({ a }: { a: Approval }) {
           </button>
         </div>
       </div>
-      {a.kind === 'tool_permission' && (
-        <pre className="code" style={{ marginTop: 8, maxHeight: 240 }}>
-          {toolInputText(d.input)}
-        </pre>
-      )}
-      {waiting.length > 0 && (
-        <div className="banner info" style={{ margin: '8px 0 0' }}>
-          {ko
-            ? `⏳ ${waiting.map((x) => x.id).join(', ')} 업무가 이 승인을 기다리고 있습니다.`
-            : `⏳ ${waiting.map((x) => x.id).join(', ')} wait for this approval.`}
-          {!proj?.autoApprove && ceoChecks.length === 0 && (
-            <span className="sub">
-              {ko
-                ? " 프로젝트 설정에서 '검수를 통과하면 내 승인 없이 반영'을 켜면, 직접 볼 항목이 없는 업무는 기다리지 않습니다."
-                : ' Turn on auto-merge after review in project settings to skip this wait.'}
-            </span>
-          )}
+      {paged && (
+        <div className="approval-pages">
+          <Segmented
+            value={page}
+            onChange={(v) => setPage(v as typeof page)}
+            options={[
+              { value: 'summary', label: ko ? '1. 요약' : '1. Summary' },
+              { value: 'screen', label: ko ? '2. 화면 점검' : '2. Screen check' },
+              { value: 'check', label: ko ? `3. 확인하고 승인 (${ceoChecks.length})` : `3. Check & approve (${ceoChecks.length})` },
+            ]}
+          />
         </div>
       )}
-      {a.kind === 'integrate' && typeof d.summary === 'string' && d.summary && (
-        <div className="note">
-          <b>{lang === 'ko' ? '담당' : 'Assignee'}</b> {d.summary}
-        </div>
-      )}
-      {a.kind === 'integrate' && d.mode !== 'review' && (
-        <div className="note">
-          <b>{lang === 'ko' ? '검수' : 'Review'}</b>{' '}
-          {(d.review as { by: string; summary: string } | null)?.summary
-            ? `${empName(state?.employees ?? [], (d.review as { by: string }).by)}: ${(d.review as { summary: string }).summary}`
-            : lang === 'ko'
-              ? '검수 의견 없음 (대표가 검수를 건너뛰었거나 이전 버전 승인 요청)'
-              : 'No review verdict (review skipped by the CEO, or an older approval request)'}
-        </div>
-      )}
-      {tk && ceoChecks.length > 0 && (
-        <div className="ceo-checks">
-          <div className="spread">
-            <b>{lang === 'ko' ? '대표 직접 확인' : 'Your own check'}</b>
-            <PreviewButton projectId={tk.projectId} ticketId={tk.id} />
+      <div className={full ? '' : 'approval-scroll'}>
+        {a.kind === 'tool_permission' && (
+          <pre className="code" style={{ marginTop: 8, maxHeight: 240 }}>
+            {toolInputText(d.input)}
+          </pre>
+        )}
+        {showSummary && waiting.length > 0 && (
+          <div className="banner info" style={{ margin: '8px 0 0' }}>
+            {ko
+              ? `⏳ ${waiting.map((x) => x.id).join(', ')} 업무가 이 승인을 기다리고 있습니다.`
+              : `⏳ ${waiting.map((x) => x.id).join(', ')} wait for this approval.`}
+            {!proj?.autoApprove && ceoChecks.length === 0 && (
+              <span className="sub">
+                {ko
+                  ? " 프로젝트 설정에서 '검수를 통과하면 내 승인 없이 반영'을 켜면, 직접 볼 항목이 없는 업무는 기다리지 않습니다."
+                  : ' Turn on auto-merge after review in project settings to skip this wait.'}
+              </span>
+            )}
           </div>
-          <ScreenCheckPanel ticketId={tk.id} />
-          {/* 직접 플레이는 게임만(실측: 메모 앱 승인 카드에 "고급 QA (직접 플레이)"가 떴다) */}
-          {(state?.projects.find((p) => p.id === tk.projectId)?.profile?.game || state?.playtests?.[tk.id]) && (
-            <PlaytestPanel ticketId={tk.id} />
-          )}
-          {ceoChecks.map((r) => (
-            <label key={r.id} className="check-row">
-              <input
-                type="checkbox"
-                checked={checked.includes(r.id)}
-                disabled={later.includes(r.id)}
-                onChange={() => setChecked(checked.includes(r.id) ? checked.filter((x) => x !== r.id) : [...checked, r.id])}
-              />
-              <span>
-                <b>{r.id}</b> {r.text}{' '}
-                {state?.checkNotes?.[tk.id]?.[r.id] && (
-                  <span className="sub" style={{ display: 'block', marginTop: 2 }}>
-                    💡 {lang === 'ko' ? '확인하는 법' : 'How to check'}: {state.checkNotes[tk.id]![r.id]}
+        )}
+        {showSummary && a.kind === 'integrate' && typeof d.summary === 'string' && d.summary && (
+          <div className="note">
+            <b>{lang === 'ko' ? '담당' : 'Assignee'}</b> {d.summary}
+          </div>
+        )}
+        {showSummary && a.kind === 'integrate' && d.mode !== 'review' && (
+          <div className="note">
+            <b>{lang === 'ko' ? '검수' : 'Review'}</b>{' '}
+            {(d.review as { by: string; summary: string } | null)?.summary
+              ? `${empName(state?.employees ?? [], (d.review as { by: string }).by)}: ${(d.review as { summary: string }).summary}`
+              : lang === 'ko'
+                ? '검수 의견 없음 (대표가 검수를 건너뛰었거나 이전 버전 승인 요청)'
+                : 'No review verdict (review skipped by the CEO, or an older approval request)'}
+          </div>
+        )}
+        {tk && ceoChecks.length > 0 && (showScreen || showCheck) && (
+          <div className="ceo-checks">
+            <div className="spread">
+              <b>{lang === 'ko' ? '대표 직접 확인' : 'Your own check'}</b>
+              <PreviewButton projectId={tk.projectId} ticketId={tk.id} />
+            </div>
+            {showScreen && <ScreenCheckPanel ticketId={tk.id} />}
+            {/* 직접 플레이는 게임만(실측: 메모 앱 승인 카드에 "고급 QA (직접 플레이)"가 떴다) */}
+            {showScreen && (state?.projects.find((p) => p.id === tk.projectId)?.profile?.game || state?.playtests?.[tk.id]) && (
+              <PlaytestPanel ticketId={tk.id} />
+            )}
+            {paged && page === 'screen' && (
+              <button className="btn small primary" onClick={() => setPage('check')}>
+                {ko ? '다음: 확인하고 승인 →' : 'Next: check & approve →'}
+              </button>
+            )}
+            {showCheck &&
+              ceoChecks.map((r) => (
+                <label key={r.id} className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={checked.includes(r.id)}
+                    disabled={later.includes(r.id)}
+                    onChange={() => setChecked(checked.includes(r.id) ? checked.filter((x) => x !== r.id) : [...checked, r.id])}
+                  />
+                  <span>
+                    <b>{r.id}</b> {r.text}{' '}
+                    {state?.checkNotes?.[tk.id]?.[r.id] && (
+                      <span className="sub" style={{ display: 'block', marginTop: 2 }}>
+                        💡 {lang === 'ko' ? '확인하는 법' : 'How to check'}: {state.checkNotes[tk.id]![r.id]}
+                      </span>
+                    )}
+                    {!checked.includes(r.id) && (
+                      <button
+                        type="button"
+                        className={`btn small ${later.includes(r.id) ? 'on' : ''}`}
+                        onClick={(ev) => {
+                          ev.preventDefault();
+                          setLater(later.includes(r.id) ? later.filter((x) => x !== r.id) : [...later, r.id]);
+                        }}
+                      >
+                        {later.includes(r.id)
+                          ? lang === 'ko'
+                            ? '✓ 나중에 확인 (할 일에 남김)'
+                            : '✓ Check later'
+                          : lang === 'ko'
+                            ? '지금 확인 못 함 → 나중에'
+                            : "Can't check now → later"}
+                      </button>
+                    )}
                   </span>
-                )}
-                {!checked.includes(r.id) && (
+                </label>
+              ))}
+            {showCheck && (
+              <div className="spread">
+                <span className="hint">
+                  {lang === 'ko'
+                    ? '실행해 보고 확인한 항목을 체크하세요. 지금 확인할 수 없으면 "나중에"를 누르세요(할 일에 남습니다).'
+                    : 'Run it, then tick what you confirmed. All items must be ticked to approve.'}
+                </span>
+                {/* 체크한 바로 옆에서 승인(실측: 체크는 카드 맨 아래, 승인 버튼은 맨 위라 다시 올라가야 했다) */}
+                <button
+                  className="btn ok small"
+                  disabled={busy || unchecked}
+                  onClick={() => (d.mode === 'auto_after_approval' ? decide('approved', 'auto_after_approval') : decide('approved'))}
+                >
+                  {d.mode === 'auto_after_approval' ? t('approveMerge') : t('approve')}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        {showSummary && a.kind === 'integrate' && tk?.reviewBelowRank && (
+          <div className="banner warn" style={{ margin: '8px 0 0' }}>
+            {lang === 'ko'
+              ? `하위 직급 검수: ${empName(state?.employees ?? [], tk.assigneeId)}의 작업을 더 낮은 직급인 ${josa(empName(state?.employees ?? [], tk.reviewerId), '이/가')} 검수했습니다(같은 직급 이상 직원 없음). 변경 내용을 더 꼼꼼히 확인하고 승인하세요.`
+              : `Lower-rank review: ${empName(state?.employees ?? [], tk.reviewerId)} reviewed work by a higher-ranked ${empName(state?.employees ?? [], tk.assigneeId)} (no peer available). Check the changes more closely before approving.`}
+          </div>
+        )}
+        {showSummary && d.mode === 'review' && Array.isArray(d.escalated) && (d.escalated as { id: string; text: string }[]).length > 0 && (
+          <div className="note">
+            {lang === 'ko' ? '미해결 이견 (대표 판단 필요):' : 'Unresolved disputes:'}
+            {(d.escalated as { id: string; text: string }[]).map((c) => (
+              <div key={c.id} className="spread" style={{ marginTop: 6, gap: 8 }}>
+                <span>• {c.text}</span>
+                {tk && (
                   <button
-                    type="button"
-                    className={`btn small ${later.includes(r.id) ? 'on' : ''}`}
-                    onClick={(ev) => {
-                      ev.preventDefault();
-                      setLater(later.includes(r.id) ? later.filter((x) => x !== r.id) : [...later, r.id]);
-                    }}
+                    className="btn small"
+                    disabled={busy || recorded.includes(c.id)}
+                    onClick={() => setDeciding({ id: c.id, text: c.text })}
                   >
-                    {later.includes(r.id)
+                    {recorded.includes(c.id)
                       ? lang === 'ko'
-                        ? '✓ 나중에 확인 (할 일에 남김)'
-                        : '✓ Check later'
+                        ? '기록함'
+                        : 'Recorded'
                       : lang === 'ko'
-                        ? '지금 확인 못 함 → 나중에'
-                        : "Can't check now → later"}
+                        ? '규칙으로 남기기'
+                        : 'Record decision'}
                   </button>
                 )}
-              </span>
-            </label>
-          ))}
-          <div className="spread">
-            <span className="hint">
-              {lang === 'ko'
-                ? '실행해 보고 확인한 항목을 체크하세요. 지금 확인할 수 없으면 "나중에"를 누르세요(할 일에 남습니다).'
-                : 'Run it, then tick what you confirmed. All items must be ticked to approve.'}
-            </span>
-            {/* 체크한 바로 옆에서 승인(실측: 체크는 카드 맨 아래, 승인 버튼은 맨 위라 다시 올라가야 했다) */}
-            <button
-              className="btn ok small"
-              disabled={busy || unchecked}
-              onClick={() => (d.mode === 'auto_after_approval' ? decide('approved', 'auto_after_approval') : decide('approved'))}
-            >
-              {d.mode === 'auto_after_approval' ? t('approveMerge') : t('approve')}
-            </button>
+              </div>
+            ))}
           </div>
-        </div>
-      )}
-      {a.kind === 'integrate' && tk?.reviewBelowRank && (
-        <div className="banner warn" style={{ margin: '8px 0 0' }}>
-          {lang === 'ko'
-            ? `하위 직급 검수: ${empName(state?.employees ?? [], tk.assigneeId)}의 작업을 더 낮은 직급인 ${josa(empName(state?.employees ?? [], tk.reviewerId), '이/가')} 검수했습니다(같은 직급 이상 직원 없음). 변경 내용을 더 꼼꼼히 확인하고 승인하세요.`
-            : `Lower-rank review: ${empName(state?.employees ?? [], tk.reviewerId)} reviewed work by a higher-ranked ${empName(state?.employees ?? [], tk.assigneeId)} (no peer available). Check the changes more closely before approving.`}
-        </div>
-      )}
-      {d.mode === 'review' && Array.isArray(d.escalated) && (d.escalated as { id: string; text: string }[]).length > 0 && (
-        <div className="note">
-          {lang === 'ko' ? '미해결 이견 (대표 판단 필요):' : 'Unresolved disputes:'}
-          {(d.escalated as { id: string; text: string }[]).map((c) => (
-            <div key={c.id} className="spread" style={{ marginTop: 6, gap: 8 }}>
-              <span>• {c.text}</span>
-              {tk && (
-                <button
-                  className="btn small"
-                  disabled={busy || recorded.includes(c.id)}
-                  onClick={() => setDeciding({ id: c.id, text: c.text })}
-                >
-                  {recorded.includes(c.id)
-                    ? lang === 'ko'
-                      ? '기록함'
-                      : 'Recorded'
-                    : lang === 'ko'
-                      ? '규칙으로 남기기'
-                      : 'Record decision'}
-                </button>
-              )}
+        )}
+        {deciding && tk && (
+          <Modal
+            title={lang === 'ko' ? '규칙으로 남기기' : 'Record a decision'}
+            onClose={() => setDeciding(null)}
+            actions={
+              <button
+                className="btn primary"
+                disabled={busy || !deciding.text.trim()}
+                onClick={() =>
+                  run(
+                    () =>
+                      api('decisions', {
+                        body: { projectId: tk.projectId, text: deciding.text.trim(), sourceRefs: [deciding.id, tk.id] },
+                      }),
+                    lang === 'ko' ? '규칙으로 남겼습니다.' : 'Decision recorded.',
+                  ).then((ok) => ok && (setRecorded([...recorded, deciding.id]), setDeciding(null), reload()))
+                }
+              >
+                {t('save')}
+              </button>
+            }
+          >
+            <div className="form">
+              <label>
+                {lang === 'ko' ? '규칙 (이후 모든 업무의 직원이 따릅니다)' : 'Your decision (sent to later tickets as current)'}
+                <textarea value={deciding.text} onChange={(e) => setDeciding({ ...deciding, text: e.target.value })} autoFocus />
+              </label>
             </div>
-          ))}
-        </div>
-      )}
-      {deciding && tk && (
-        <Modal
-          title={lang === 'ko' ? '규칙으로 남기기' : 'Record a decision'}
-          onClose={() => setDeciding(null)}
-          actions={
-            <button
-              className="btn primary"
-              disabled={busy || !deciding.text.trim()}
-              onClick={() =>
-                run(
-                  () =>
-                    api('decisions', {
-                      body: { projectId: tk.projectId, text: deciding.text.trim(), sourceRefs: [deciding.id, tk.id] },
-                    }),
-                  lang === 'ko' ? '규칙으로 남겼습니다.' : 'Decision recorded.',
-                ).then((ok) => ok && (setRecorded([...recorded, deciding.id]), setDeciding(null), reload()))
-              }
-            >
-              {t('save')}
-            </button>
-          }
-        >
-          <div className="form">
-            <label>
-              {lang === 'ko' ? '규칙 (이후 모든 업무의 직원이 따릅니다)' : 'Your decision (sent to later tickets as current)'}
-              <textarea value={deciding.text} onChange={(e) => setDeciding({ ...deciding, text: e.target.value })} autoFocus />
-            </label>
-          </div>
-        </Modal>
-      )}
-      {rejecting && (
-        <Modal
-          title={t('reject')}
-          onClose={() => setRejecting(false)}
-          actions={
-            <button className="btn danger" disabled={busy} onClick={() => decide('rejected').then(() => setRejecting(false))}>
-              {t('reject')}
-            </button>
-          }
-        >
-          <div className="form">
-            <label>
-              {lang === 'ko' ? '반려 사유 (담당 직원에게 전달됩니다)' : 'Reason (sent to the employee)'}
-              <textarea value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
-            </label>
-          </div>
+          </Modal>
+        )}
+        {rejecting && (
+          <Modal
+            title={t('reject')}
+            onClose={() => setRejecting(false)}
+            actions={
+              <button className="btn danger" disabled={busy} onClick={() => decide('rejected').then(() => setRejecting(false))}>
+                {t('reject')}
+              </button>
+            }
+          >
+            <div className="form">
+              <label>
+                {lang === 'ko' ? '반려 사유 (담당 직원에게 전달됩니다)' : 'Reason (sent to the employee)'}
+                <textarea value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
+              </label>
+            </div>
+          </Modal>
+        )}
+      </div>
+      {big && (
+        <Modal wide title={a.summary} onClose={() => setBig(false)}>
+          <ApprovalItem a={a} full />
         </Modal>
       )}
     </div>

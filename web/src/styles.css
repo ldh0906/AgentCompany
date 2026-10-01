@@ -2290,3 +2290,18 @@ details.advanced[open] summary {
     margin-top: 2px;
   }
 }
+
+/* 승인 카드: 대시보드에서는 일정 높이 안에서 스크롤, "크게 보기"는 넓은 창에서 페이지로 나눠 본다.
+   대표 요청(2026-10-01): 사진 13장·녹화 3개·의견이 한 카드에 다 펼쳐져 길었다. */
+.approval-scroll {
+  max-height: 460px;
+  overflow: auto;
+  padding-right: 4px;
+  margin-top: 4px;
+}
+.modal.wide {
+  width: min(1100px, 100%);
+}
+.approval-pages {
+  margin: 10px 0 4px;
+}
