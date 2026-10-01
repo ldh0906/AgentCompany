@@ -257,7 +257,12 @@ ${
       ? `- This is a document for a non-developer reader: judge the content (does it answer the ticket, is it correct and consistent, are numbers and claims supported), not only the format.
 `
       : ''
-}- Problems you notice outside this ticket's scope are not reasons to request changes: list them in "followUps" (title + reason) so the CEO can turn them into tickets with one click.
+}${
+    i.ticket.type === 'research' || deliverableOf(i.project) === 'document'
+      ? `- Request changes only for errors that would change a conclusion or a key number the CEO will rely on (a wrong or misattributed statistic, a missing required part, a calculation that does not add up). Small slips that do not change the picture (a label, a minor fee left out, one menu price) go in your summary as "minor fixes", with met=true. Measured: a research ticket used all 3 rounds and 8.8M tokens while the last round only fixed a cold-brew label and an electricity surcharge.
+`
+      : ''
+  }- Problems you notice outside this ticket's scope are not reasons to request changes: list them in "followUps" (title + reason) so the CEO can turn them into tickets with one click.
 
 ${dataBlock('System-generated evidence', evidenceText)}
 

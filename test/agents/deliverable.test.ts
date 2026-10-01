@@ -134,3 +134,21 @@ test('파이썬 검사 추천: pytest라고 적힌 곳만 pytest, 아니면 표�
   assert.equal(pythonTests(files({ 'main.py': '' }), false), null);
   assert.equal(pythonTests(files({}), true), null);
 });
+
+test('조사·문서 검수: 결론·핵심 숫자를 바꾸는 오류만 반려, 작은 실수는 "minor fixes"', () => {
+  const review = (p: Project, t: Ticket) =>
+    buildReviewPrompt({
+      employee: emp,
+      project: p,
+      ticket: t,
+      nonce: 'n',
+      diff: '',
+      changedPaths: [],
+      evidence: [],
+      assigneeSummary: '',
+      language: 'ko',
+    });
+  assert.match(review(doc, ticket('doc', 'inspection')), /Request changes only for errors that would change a conclusion/);
+  assert.match(review(project(), ticket('research', 'inspection')), /minor fixes/);
+  assert.doesNotMatch(review(project(), ticket('impl', 'unit_test')), /minor fixes/);
+});
