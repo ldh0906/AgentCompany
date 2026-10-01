@@ -8,8 +8,11 @@ import { Modal } from './ui.tsx';
 
 // ---------- 마크다운(자주 쓰는 문법만) ----------
 
+// 순서: 코드 · 굵게 · 웹 링크 · 맨 주소 · 기울임 · 각주 표시 [^n] · 프로젝트 안 파일 링크 [이름](경로)
+// 실측(2026-10-02, 카페 사업계획서): 각주 [^d1]과 [조사](research/x.md)가 글자 그대로 보였다.
 const INLINE =
-  /(`[^`]+`)|(\*\*[^*]+\*\*|__[^_]+__)|(\[[^\]]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s<>()\]]+[^\s<>()\].,;:!?'"])|(\*[^*\s][^*]*\*)/g;
+  /(`[^`]+`)|(\*\*[^*]+\*\*|__[^_]+__)|(\[[^\]]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s<>()\]]+[^\s<>()\].,;:!?'"])|(\*[^*\s][^*]*\*)|(\[\^[^\]\s]+\])|(\[[^\]]+\]\([^)\s]+\))/g;
+const FOOTNOTE = /^\[\^([^\]\s]+)\]:\s*(.*)$/;
 
 export function inline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
@@ -33,7 +36,21 @@ export function inline(text: string): ReactNode[] {
           {tok}
         </a>,
       );
-    else out.push(<em key={key}>{inline(tok.slice(1, -1))}</em>);
+    else if (m[6])
+      out.push(
+        <sup key={key} className="fn">
+          {tok.slice(2, -1)}
+        </sup>,
+      );
+    else if (m[7]) {
+      // 프로젝트 안 다른 파일: 이름만 보이고 경로는 마우스를 올리면(문서 보기에서 그 파일을 고르면 된다)
+      const sep = tok.lastIndexOf('](');
+      out.push(
+        <span key={key} className="doc-ref" title={tok.slice(sep + 2, -1)}>
+          {inline(tok.slice(1, sep))}
+        </span>,
+      );
+    } else out.push(<em key={key}>{inline(tok.slice(1, -1))}</em>);
     last = m.index! + tok.length;
   }
   if (last < text.length) out.push(text.slice(last));
@@ -145,8 +162,26 @@ export function Markdown({ text }: { text: string }) {
       );
       continue;
     }
+    const fn = line.match(FOOTNOTE);
+    if (fn) {
+      blocks.push(
+        <p key={key} className="footnote">
+          <sup className="fn">{fn[1]}</sup> {inline(fn[2]!)}
+        </p>,
+      );
+      i++;
+      continue;
+    }
     const para: string[] = [];
-    for (; i < lines.length && lines[i]!.trim() && !/^(#{1,6}\s|\s*```|\s*>)/.test(lines[i]!) && !LIST.test(lines[i]!); i++) {
+    for (
+      ;
+      i < lines.length &&
+      lines[i]!.trim() &&
+      !/^(#{1,6}\s|\s*```|\s*>)/.test(lines[i]!) &&
+      !LIST.test(lines[i]!) &&
+      !FOOTNOTE.test(lines[i]!);
+      i++
+    ) {
       if (para.length && lines[i]!.includes('|') && i + 1 < lines.length && isTableRule(lines[i + 1]!)) break;
       para.push(lines[i]!.trim());
     }
@@ -370,18 +405,26 @@ export function ProjectDocsButton({ projectId }: { projectId: string }) {
   const [list, setList] = useState<{ path: string; kind: DeliverableFile['kind'] }[] | null>(null);
   const [file, setFile] = useState<DeliverableFile | null>(null);
   const [error, setError] = useState('');
-  const pick = (p: string) =>
-    api<{ file: DeliverableFile }>(`projects/${projectId}/docs?path=${encodeURIComponent(p)}`)
+  const [loading, setLoading] = useState(false);
+  const pick = (p: string, sha: string) => {
+    setLoading(true);
+    return api<{ file: DeliverableFile }>(`projects/${projectId}/docs?path=${encodeURIComponent(p)}&sha=${sha}`)
       .then((r) => (setFile(r.file), setError('')))
-      .catch((e: Error) => setError(e.message));
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
+  };
+  const [sha, setSha] = useState('');
   useEffect(() => {
     if (!open) return;
-    api<{ files: { path: string; kind: DeliverableFile['kind'] }[] }>(`projects/${projectId}/docs`)
+    setLoading(true);
+    api<{ sha: string; files: { path: string; kind: DeliverableFile['kind'] }[] }>(`projects/${projectId}/docs`)
       .then((r) => {
         setList(r.files);
-        if (r.files[0]) void pick(r.files[0].path);
+        setSha(r.sha);
+        if (r.files[0]) void pick(r.files[0].path, r.sha);
+        else setLoading(false);
       })
-      .catch((e: Error) => setError(e.message));
+      .catch((e: Error) => (setError(e.message), setLoading(false)));
   }, [open, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
@@ -395,13 +438,14 @@ export function ProjectDocsButton({ projectId }: { projectId: string }) {
       {open && (
         <Modal title={ko ? '문서 보기' : 'Documents'} onClose={() => setOpen(false)} wide>
           {error && <div className="banner warn">{error}</div>}
+          {loading && !file && <div className="hint">{ko ? '내 폴더의 최신 문서를 불러오는 중…' : 'Loading the latest documents…'}</div>}
           {list && !list.length && (
             <div className="hint">{ko ? '아직 문서가 없습니다. 업무가 승인되어 반영되면 여기에 보입니다.' : 'No documents yet.'}</div>
           )}
           {list && list.length > 1 && (
             <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
               {list.map((x) => (
-                <button key={x.path} className={`btn small ${file?.path === x.path ? 'on' : ''}`} onClick={() => void pick(x.path)}>
+                <button key={x.path} className={`btn small ${file?.path === x.path ? 'on' : ''}`} onClick={() => void pick(x.path, sha)}>
                   {x.path}
                 </button>
               ))}

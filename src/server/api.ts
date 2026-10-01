@@ -208,7 +208,11 @@ export class Api {
         return trackedDirs(p.originPath, p.baseBranch, query.get('sub') ?? '');
       }
       case 'GET projects/:id/docs':
-        return this.orch.projectDocs(id!, query.get('path') || null);
+        return this.orch.projectDocs(
+          id!,
+          query.get('path') || null,
+          /^[0-9a-f]{40}$/.test(query.get('sha') ?? '') ? query.get('sha') : null,
+        );
 
       case 'POST employees': {
         const cli = oneOf(b, 'cli', CLIS);

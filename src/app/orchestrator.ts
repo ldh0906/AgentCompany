@@ -281,10 +281,11 @@ export class Orchestrator {
    * 프로젝트 문서 보기: 내 폴더(기준 브랜치)의 최신 문서·표·그림. 파일을 고르면 그 내용을 돌려준다.
    * 문서·프로그램 프로젝트의 "실행해 보기" 대신(대표 요청 2026-10-01: 결과물을 앱 안에서 바로 보기).
    */
-  async projectDocs(projectId: string, file: string | null) {
+  async projectDocs(projectId: string, file: string | null, atSha: string | null = null) {
     const project = this.company.requireProject(projectId);
     const paths = projectPaths(this.opts.dataDir, project.id);
-    const sha = await this.withProjectLock(project.id, () => this.syncMirrorRecorded(project, paths));
+    // 목록을 받을 때 맞춘 커밋(sha)으로 파일을 읽으면 다시 맞추지 않는다(실측: 맞추기만 3초, 파일마다 기다렸다).
+    const sha = atSha ?? (await this.withProjectLock(project.id, () => this.syncMirrorRecorded(project, paths)));
     if (!file) return { sha, files: await projectDocList(paths.mirror, sha) };
     const doc = await projectDoc(paths.mirror, sha, file);
     if (!doc) throw new DomainError(tr(`읽을 수 없는 파일입니다: ${file}`, `Cannot read file: ${file}`));
