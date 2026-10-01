@@ -5,6 +5,7 @@ import { useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
 import { empName, Icon, Modal, useAction } from './ui.tsx';
 import { verdictsOf } from '../../../src/core/verdicts.ts';
+import { ProjectDocsButton } from './deliverable.tsx';
 
 export function PreviewButton({ projectId, ticketId = null }: { projectId: string; ticketId?: string | null }) {
   const { state, reload } = useCompany();
@@ -25,6 +26,10 @@ export function PreviewButton({ projectId, ticketId = null }: { projectId: strin
       else if (info.state === 'failed')
         throw new Error(ko ? '실행하지 못했습니다. 아래 기록을 확인하세요.' : 'Could not start. See the log below.');
     });
+  // 화면이 없는 결과물(문서·프로그램)은 띄울 것이 없다: 프로젝트에서는 문서 보기, 업무에서는 결과물 보기가 대신한다.
+  // 실측(2026-10-01): 문서 프로젝트에서 "실행해 보기"가 "띄울 화면을 찾지 못했습니다"로만 끝났다.
+  if ((state?.projects.find((p) => p.id === projectId)?.profile?.deliverable ?? 'screen') !== 'screen')
+    return ticketId ? null : <ProjectDocsButton projectId={projectId} />;
   const stop = () =>
     run(async () => {
       await api(`projects/${projectId}/preview-stop`, { body: ticketId ? { ticketId } : {} });

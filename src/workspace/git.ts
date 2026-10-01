@@ -47,6 +47,18 @@ export function git(
   });
 }
 
+/** 커밋 속 파일 내용을 바이트로(그림 등). 없으면 null. */
+export function gitShowBytes(cwd: string, ref: string, file: string, maxBytes = 8 * 1024 * 1024): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    execFile(
+      'git',
+      [...BASE_ARGS, 'show', `${ref}:${file}`],
+      { cwd, windowsHide: true, maxBuffer: maxBytes, encoding: 'buffer', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
+      (error, stdout) => resolve(error ? null : stdout),
+    );
+  });
+}
+
 export async function gitOut(args: string[], cwd: string): Promise<string> {
   return (await git(args, cwd)).stdout.trim();
 }

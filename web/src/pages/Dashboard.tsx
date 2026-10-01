@@ -8,6 +8,7 @@ import { CliConnect, Segmented, useCliStatus } from '../components/kit.tsx';
 import { UsagePanel } from '../components/usage.tsx';
 import { RequestBox } from './Requests.tsx';
 import { PlaytestPanel, PreviewButton, QuickCheckLink, quickQueries, ScreenCheckPanel } from '../components/preview.tsx';
+import { DeliverableView } from '../components/deliverable.tsx';
 
 const ACTIVE = ['assigned', 'in_progress', 'verifying', 'in_review', 'changes_requested', 'integrating'];
 
@@ -217,6 +218,8 @@ export function ApprovalItem({ a, full = false }: { a: Approval; full?: boolean 
   const unchecked = ceoChecks.some((r) => !checked.includes(r.id) && !later.includes(r.id));
   const ko = lang === 'ko';
   const proj = tk ? state?.projects.find((p) => p.id === tk.projectId) : undefined;
+  // 결과물 종류: 화면이 아니면 "실행해 보기"·화면 점검 대신 결과물(문서·실행 결과)을 읽는다.
+  const kind = proj?.profile?.deliverable ?? 'screen';
   // 이 승인을 기다리는 뒤 업무(실측: T-19가 T-18 승인 대기로 멈춘 줄 대표가 몰랐다)
   const waiting = tk
     ? (state?.tickets ?? []).filter((x) => x.dependsOn.includes(tk.id) && !['done', 'cancelled', 'failed'].includes(x.status))
@@ -296,7 +299,21 @@ export function ApprovalItem({ a, full = false }: { a: Approval; full?: boolean 
             onChange={(v) => setPage(v as typeof page)}
             options={[
               { value: 'summary', label: ko ? '1. 요약' : '1. Summary' },
-              { value: 'screen', label: ko ? '2. 화면 점검' : '2. Screen check' },
+              {
+                value: 'screen',
+                label:
+                  kind === 'document'
+                    ? ko
+                      ? '2. 결과물 읽기'
+                      : '2. Read results'
+                    : kind === 'program'
+                      ? ko
+                        ? '2. 실행 결과'
+                        : '2. Demo output'
+                      : ko
+                        ? '2. 화면 점검'
+                        : '2. Screen check',
+              },
               { value: 'check', label: ko ? `3. 확인하고 승인 (${ceoChecks.length})` : `3. Check & approve (${ceoChecks.length})` },
             ]}
           />
@@ -337,17 +354,23 @@ export function ApprovalItem({ a, full = false }: { a: Approval; full?: boolean 
                 : 'No review verdict (review skipped by the CEO, or an older approval request)'}
           </div>
         )}
+        {/* 결과물 보기: 문서·표·그림(문서 프로젝트·문서·조사 업무는 펼쳐서) */}
+        {tk && a.kind === 'integrate' && d.mode !== 'review' && (paged ? page === 'screen' : showSummary) && (
+          <DeliverableView
+            ticketId={tk.id}
+            open={paged || kind === 'document' || tk.type === 'doc' || tk.type === 'research'}
+            version={a.id}
+          />
+        )}
         {tk && ceoChecks.length > 0 && (showScreen || showCheck) && (
           <div className="ceo-checks">
             <div className="spread">
               <b>{lang === 'ko' ? '대표 직접 확인' : 'Your own check'}</b>
-              <PreviewButton projectId={tk.projectId} ticketId={tk.id} />
+              {kind === 'screen' && <PreviewButton projectId={tk.projectId} ticketId={tk.id} />}
             </div>
-            {showScreen && <ScreenCheckPanel ticketId={tk.id} />}
+            {showScreen && kind === 'screen' && <ScreenCheckPanel ticketId={tk.id} />}
             {/* 직접 플레이는 게임만(실측: 메모 앱 승인 카드에 "고급 QA (직접 플레이)"가 떴다) */}
-            {showScreen && (state?.projects.find((p) => p.id === tk.projectId)?.profile?.game || state?.playtests?.[tk.id]) && (
-              <PlaytestPanel ticketId={tk.id} />
-            )}
+            {showScreen && kind === 'screen' && (proj?.profile?.game || state?.playtests?.[tk.id]) && <PlaytestPanel ticketId={tk.id} />}
             {paged && page === 'screen' && (
               <button className="btn small primary" onClick={() => setPage('check')}>
                 {ko ? '다음: 확인하고 승인 →' : 'Next: check & approve →'}
@@ -401,7 +424,7 @@ export function ApprovalItem({ a, full = false }: { a: Approval; full?: boolean 
               <div className="spread">
                 <span className="hint">
                   {lang === 'ko'
-                    ? '실행해 보고 확인한 항목을 체크하세요. 지금 확인할 수 없으면 "나중에"를 누르세요(할 일에 남습니다).'
+                    ? `${kind === 'document' ? '결과물을 읽고' : kind === 'program' ? '실행 결과를 보고' : '실행해 보고'} 확인한 항목을 체크하세요. 지금 확인할 수 없으면 "나중에"를 누르세요(할 일에 남습니다).`
                     : 'Run it, then tick what you confirmed. All items must be ticked to approve.'}
                 </span>
                 {/* 체크한 바로 옆에서 승인(실측: 체크는 카드 맨 아래, 승인 버튼은 맨 위라 다시 올라가야 했다) */}

@@ -14,6 +14,7 @@ import { doctor, type DoctorReport, installInfo, openLoginWindow } from '../app/
 import { listModels } from '../app/models.ts';
 import { requestTokens } from '../app/cost.ts';
 import { createRepo, inspectRepo, listDirs, trackedDirs } from '../app/repo-inspect.ts';
+import { deliverableFiles } from '../app/deliverables.ts';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -122,6 +123,8 @@ export class Api {
         return this.ticketDetail(id!);
       case 'GET tickets/:id/diff':
         return this.ticketDiff(id!);
+      case 'GET tickets/:id/files':
+        return this.ticketFiles(id!);
       case 'GET tickets/:id/clips':
         return this.orch.screens.screenClip(this.company.requireTicket(id!).id, Number(query.get('n') ?? 0));
       case 'GET tickets/:id/screens':
@@ -204,6 +207,8 @@ export class Api {
         const p = this.company.requireProject(id!);
         return trackedDirs(p.originPath, p.baseBranch, query.get('sub') ?? '');
       }
+      case 'GET projects/:id/docs':
+        return this.orch.projectDocs(id!, query.get('path') || null);
 
       case 'POST employees': {
         const cli = oneOf(b, 'cli', CLIS);
@@ -529,7 +534,8 @@ export class Api {
     };
   }
 
-  async ticketDiff(id: string) {
+  /** 업무의 마지막 제출(이번 회차 제출이 없으면 가장 최근 작업 실행). */
+  private shownSubmission(id: string) {
     const t = this.company.requireTicket(id);
     const sub =
       this.orch.records.latestSubmission(t) ??
@@ -537,9 +543,26 @@ export class Api {
         .runsForTicket(id)
         .filter((x) => x.kind === 'work' && x.headSha)
         .at(-1);
-    if (!sub?.headSha || !sub.baseSha) return { diff: '', changedPaths: [] };
+    return { t, sub: sub?.headSha && sub.baseSha ? sub : null };
+  }
+
+  async ticketDiff(id: string) {
+    const { t, sub } = this.shownSubmission(id);
+    if (!sub) return { diff: '', changedPaths: [] };
     const paths = projectPaths(this.dataDir, t.projectId);
-    return { diff: await diffText(paths.mirror, sub.baseSha, sub.headSha, 400_000), changedPaths: sub.changedPaths, headSha: sub.headSha };
+    return {
+      diff: await diffText(paths.mirror, sub.baseSha!, sub.headSha!, 400_000),
+      changedPaths: sub.changedPaths,
+      headSha: sub.headSha,
+    };
+  }
+
+  /** 결과물 보기: 바뀐 문서·표·그림(앱 안에서 읽기용). */
+  async ticketFiles(id: string) {
+    const { t, sub } = this.shownSubmission(id);
+    if (!sub) return { files: [] };
+    const paths = projectPaths(this.dataDir, t.projectId);
+    return { headSha: sub.headSha, files: await deliverableFiles(paths.mirror, sub.baseSha!, sub.headSha!, sub.changedPaths) };
   }
 
   async runLog(id: string, stream: 'stdout' | 'stderr') {

@@ -88,6 +88,7 @@ import { CeoDesk } from './ceo-desk.ts';
 import type { OrchHost } from './orch-host.ts';
 import { Playtests } from './playtests.ts';
 import { ScreenQa } from './screen-qa.ts';
+import { projectDoc, projectDocList } from './deliverables.ts';
 
 const ORCH: Actor = { kind: 'orchestrator' };
 const CEO: Actor = { kind: 'ceo' };
@@ -270,6 +271,20 @@ export class Orchestrator {
     const rep = t ? this.records.latestSubmission(t)?.report : null;
     const page = rep?.kind === 'work' ? (rep.previewPage ?? null) : null;
     return this.previews.start({ projectId, ticketId, sha, dir, page });
+  }
+
+  /**
+   * 프로젝트 문서 보기: 내 폴더(기준 브랜치)의 최신 문서·표·그림. 파일을 고르면 그 내용을 돌려준다.
+   * 문서·프로그램 프로젝트의 "실행해 보기" 대신(대표 요청 2026-10-01: 결과물을 앱 안에서 바로 보기).
+   */
+  async projectDocs(projectId: string, file: string | null) {
+    const project = this.company.requireProject(projectId);
+    const paths = projectPaths(this.opts.dataDir, project.id);
+    const sha = await this.withProjectLock(project.id, () => this.syncMirrorRecorded(project, paths));
+    if (!file) return { sha, files: await projectDocList(paths.mirror, sha) };
+    const doc = await projectDoc(paths.mirror, sha, file);
+    if (!doc) throw new DomainError(tr(`읽을 수 없는 파일입니다: ${file}`, `Cannot read file: ${file}`));
+    return { sha, file: doc };
   }
 
   /** 모든 진행 중 비동기 작업이 끝날 때까지 기다린다(테스트용). */

@@ -2305,3 +2305,106 @@ details.advanced[open] summary {
 .approval-pages {
   margin: 10px 0 4px;
 }
+
+/* 결과물 보기: 문서·표·그림을 앱 안에서 읽는다 (components/deliverable.tsx) */
+.deliverables {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+}
+.doc-scroll {
+  max-height: 60vh;
+  overflow: auto;
+  padding: 4px 14px 10px;
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.doc {
+  line-height: 1.7;
+  color: var(--text);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.doc h2,
+.doc h3,
+.doc h4,
+.doc h5,
+.doc h6 {
+  margin: 18px 0 6px;
+  line-height: 1.35;
+}
+.doc h2 {
+  font-size: 20px;
+}
+.doc h3 {
+  font-size: 17px;
+}
+.doc h4,
+.doc h5,
+.doc h6 {
+  font-size: 15px;
+}
+.doc p,
+.doc ul,
+.doc ol {
+  margin: 8px 0;
+}
+.doc ul,
+.doc ol {
+  padding-left: 22px;
+}
+.doc blockquote {
+  margin: 8px 0;
+  padding: 2px 12px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-2);
+}
+.doc code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--panel-hover);
+}
+.doc a {
+  color: var(--info);
+}
+.doc hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 14px 0;
+}
+.doc-table {
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.doc-table table {
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 50%;
+}
+.doc-table th,
+.doc-table td {
+  border: 1px solid var(--border);
+  padding: 5px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+.doc-table th {
+  background: var(--panel-hover);
+  font-weight: 600;
+}
+.doc-image {
+  display: block;
+  max-width: 100%;
+  margin: 8px auto;
+  border-radius: 6px;
+}
+.doc-text,
+.doc-changes {
+  margin: 8px 0;
+  white-space: pre-wrap;
+}

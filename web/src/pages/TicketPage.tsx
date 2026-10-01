@@ -6,6 +6,7 @@ import { fmtTokens } from '../components/usage.tsx';
 import { CliChip, DiffView, empName, HoldChip, Icon, Modal, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
 import { ApprovalItem, describeEvent, isNoiseEvent } from './Dashboard.tsx';
 import { PreviewButton } from '../components/preview.tsx';
+import { DeliverableView } from '../components/deliverable.tsx';
 
 interface Detail {
   ticket: Ticket;
@@ -585,6 +586,8 @@ export function TicketPage({ id }: { id: string }) {
                 ))}
               </div>
             ) : null}
+            {/* 문서·표·그림은 읽기 좋게 먼저(원문 diff는 아래) */}
+            <DeliverableView ticketId={tk.id} open version={latestHead ?? undefined} />
             <DiffView text={diff?.diff ?? ''} />
           </div>
         )}

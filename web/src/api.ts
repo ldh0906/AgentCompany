@@ -163,6 +163,17 @@ export interface ActivityItem {
   detail?: string;
 }
 
+/** 결과물 보기: 제출물에서 바뀐 문서·표·그림(src/app/deliverables.ts). */
+export interface DeliverableFile {
+  path: string;
+  kind: 'markdown' | 'text' | 'table' | 'image';
+  status: 'added' | 'modified' | 'deleted';
+  text?: string;
+  before?: string;
+  dataUrl?: string;
+  truncated?: boolean;
+}
+
 /** 실행해 보기(대표 직접 확인용으로 띄운 개발 서버). */
 export interface PreviewInfo {
   key: string;

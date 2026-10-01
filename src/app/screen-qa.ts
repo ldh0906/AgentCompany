@@ -7,8 +7,8 @@ import { readFile, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { buildScreenCheckPrompt } from '../agents/prompt.ts';
 import { extractLastJson, screenStepsOf } from '../agents/report.ts';
-import type { Employee, Ticket } from '../core/types.ts';
-import { DEFAULT_BUDGET, TERMINAL_STATUSES } from '../core/types.ts';
+import type { Employee, Project, Ticket } from '../core/types.ts';
+import { DEFAULT_BUDGET, TERMINAL_STATUSES, deliverableOf } from '../core/types.ts';
 import { verdictsOf } from '../core/verdicts.ts';
 import { ticketChannelId } from './chat.ts';
 import { DomainError } from './company.ts';
@@ -65,6 +65,8 @@ export class ScreenQa {
   maybeScreenCheck(t: Ticket): void {
     if (!this.h.screenCheckOn || this.h.paused() || t.type === 'review' || t.hold) return;
     if (!t.requirements.some((r) => r.evidenceType === 'human_attest')) return;
+    // 화면이 없는 결과물(문서·프로그램)은 찍을 화면이 없다.
+    if (deliverableOf(this.h.company.store.get<Project>('projects', t.projectId)) !== 'screen') return;
     const sha = this.h.records.latestSubmission(t)?.headSha;
     if (!sha || this.screenBusy.has(t.id)) return;
     const prev = this.screenCheckOf(t.id);
