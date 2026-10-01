@@ -2408,3 +2408,17 @@ details.advanced[open] summary {
   margin: 8px 0;
   white-space: pre-wrap;
 }
+/* 확인용 실행(화면 없는 프로그램) 출력 */
+.demo-run {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.demo-output {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  margin: 0;
+}

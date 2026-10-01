@@ -3,9 +3,9 @@
 import { tr } from '../core/i18n.ts';
 
 import { randomBytes } from 'node:crypto';
-import { readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { buildScreenCheckPrompt } from '../agents/prompt.ts';
+import { buildDemoCheckPrompt, buildScreenCheckPrompt } from '../agents/prompt.ts';
 import { extractLastJson, screenStepsOf } from '../agents/report.ts';
 import type { Employee, Project, Ticket } from '../core/types.ts';
 import { DEFAULT_BUDGET, TERMINAL_STATUSES, deliverableOf } from '../core/types.ts';
@@ -15,6 +15,9 @@ import { DomainError } from './company.ts';
 import type { OrchHost } from './orch-host.ts';
 import type { RunRecord } from './records.ts';
 import { captureScreens, findChrome, type DownloadedFile, type ScreenClip } from './screen-check.ts';
+import { demoCommandsOf, demoResultLine, runDemos, type DemoResult } from './demo-run.ts';
+import { installDependencies } from './verify-setup.ts';
+import { ensureDetachedWorktree, projectPaths } from '../workspace/workspace.ts';
 
 export interface ScreenQaHost extends OrchHost {
   readonly screenCheckOn: boolean;
@@ -38,6 +41,8 @@ export interface ScreenCheck {
   downloads?: DownloadedFile[];
   /** 확인 순서의 조작 직후 몇 초 녹화(사진 파일 목록) */
   clips?: ScreenClip[];
+  /** 화면 없는 프로그램: 확인용 실행 명령과 출력(사진 대신) */
+  demos?: DemoResult[];
 }
 
 export class ScreenQa {
@@ -65,8 +70,9 @@ export class ScreenQa {
   maybeScreenCheck(t: Ticket): void {
     if (!this.h.screenCheckOn || this.h.paused() || t.type === 'review' || t.hold) return;
     if (!t.requirements.some((r) => r.evidenceType === 'human_attest')) return;
-    // 화면이 없는 결과물(문서·프로그램)은 찍을 화면이 없다.
-    if (deliverableOf(this.h.company.store.get<Project>('projects', t.projectId)) !== 'screen') return;
+    // 문서는 찍을 화면도 돌릴 것도 없다(대표가 결과물 보기로 읽는다). 화면 없는 프로그램은 확인용 실행을 돌린다.
+    const kind = deliverableOf(this.h.company.store.get<Project>('projects', t.projectId));
+    if (kind === 'document') return;
     const sha = this.h.records.latestSubmission(t)?.headSha;
     if (!sha || this.screenBusy.has(t.id)) return;
     const prev = this.screenCheckOf(t.id);
@@ -74,7 +80,7 @@ export class ScreenQa {
     this.screenBusy.add(t.id);
     this.h.track(
       `screen:${t.id}`,
-      this.screenCheck(t, sha)
+      (kind === 'program' ? this.demoCheck(t, sha) : this.screenCheck(t, sha))
         .catch((e: unknown) => {
           this.saveScreenCheck(t.id, { ...this.blankCheck(sha), state: 'failed', note: String((e as Error)?.message ?? e).slice(0, 500) });
         })
@@ -189,6 +195,84 @@ export class ScreenQa {
   }
 
   /**
+   * 확인용 실행(화면 없는 프로그램): 담당자가 남긴 실행 명령을 제출본 사본에서 돌리고, QA 직원이 출력을 읽고 의견을 단다.
+   * 화면 점검과 같은 기록(screen:<업무>)을 써서 QA 의견·자동 돌려보내기·다시 하기를 그대로 쓴다.
+   */
+  private async demoCheck(t: Ticket, sha: string): Promise<void> {
+    const check = this.blankCheck(sha);
+    this.saveScreenCheck(t.id, check);
+    const attestIds = new Set(t.requirements.filter((r) => r.evidenceType === 'human_attest').map((r) => r.id));
+    const sub = this.h.records.latestSubmission(t);
+    const raw = sub?.finalText ? (extractLastJson(sub.finalText) as Record<string, unknown> | null) : null;
+    const star = attestIds.size === 1 ? [...attestIds][0]! : '*';
+    const cmds = demoCommandsOf(
+      raw?.demoCommands,
+      t.requirements.map((r) => r.id),
+    ).map((c) => (c.requirementId === '*' ? { ...c, requirementId: star } : c));
+    const project = this.h.company.requireProject(t.projectId);
+    const paths = projectPaths(this.h.dataDir, project.id);
+    const dir = await ensureDetachedWorktree(paths, 'preview', `demo-${t.id}`, sha);
+    // npm 프로젝트(node CLI 등)는 사본에 의존성이 없다: 검사 명령처럼 먼저 설치한다.
+    if (cmds.some((c) => c.argv[0] === 'node')) await installDependencies(dir);
+    const runRoot = path.join(this.h.dataDir, 'screens', t.id, sha.slice(0, 12), 'demo');
+    check.demos = cmds.length ? await runDemos(cmds, dir, runRoot) : [];
+    check.state = 'done';
+    check.scripted = cmds.length > 0;
+    check.note = cmds.length
+      ? tr(`확인용 실행 ${cmds.length}개`, `${cmds.length} demo runs`)
+      : tr('담당자가 확인용 실행 명령을 남기지 않았습니다.', 'The implementer left no demo commands.');
+    const room = this.h.chat.ensureTicketChannel(t.id);
+    const qa = this.pickScreenQa(t);
+    if (room)
+      this.h.chat.post(
+        room.id,
+        'system',
+        tr(
+          `확인용 실행: 담당자가 남긴 명령 ${cmds.length}개를 돌렸습니다.${qa ? ` ${qa.name}이(가) 출력을 보고 의견을 답니다.` : ''} 승인 카드에서 출력을 볼 수 있습니다.`,
+          `Demo run: ran ${cmds.length} commands left by the implementer.${qa ? ` ${qa.name} will comment.` : ''}`,
+        ),
+        'event',
+      );
+    if (qa && room) {
+      const nonce = randomBytes(6).toString('hex');
+      this.screenQaNonces.set(nonce, t.id);
+      const prompt = buildDemoCheckPrompt({
+        employee: qa,
+        ticket: t,
+        checks: t.requirements.filter((r) => attestIds.has(r.id)).map((r) => ({ id: r.id, text: r.text })),
+        demos: check.demos.map((d) => ({
+          requirementId: d.requirementId,
+          label: d.label,
+          command: d.argv.join(' '),
+          result: demoResultLine(d),
+          output: d.output,
+          errors: d.errors,
+        })),
+        notes:
+          sub?.report?.kind === 'work'
+            ? sub.report.requirements.filter((r) => attestIds.has(r.id) && r.notes).map((r) => `${r.id}: ${r.notes.slice(0, 1500)}`)
+            : [],
+        profile: project.profile,
+        nonce,
+        language: this.h.language,
+      });
+      await mkdir(runRoot, { recursive: true });
+      check.qaRunId = await this.h.launchChat({
+        ticket: { id: room.id, round: 1, budget: { ...DEFAULT_BUDGET, runTimeoutMs: 10 * 60_000 } },
+        employee: qa,
+        kind: 'chat',
+        cwd: runRoot,
+        prompt,
+        nonce,
+        accessLevel: 'read-only',
+        baseSha: null,
+      });
+      check.qaBy = qa.id;
+    }
+    this.saveScreenCheck(t.id, check);
+  }
+
+  /**
    * 화면 QA가 문제(⚠)를 찾으면 대표를 거치지 않고 담당자에게 바로 돌려보낸다(대표 요청: "QA가 바로 찔러버리게").
    * ❓(사진으로 판단 불가)는 돌려보내지 않는다. 업무당 2번까지만, 그다음은 대표에게 넘긴다.
    */
@@ -220,14 +304,18 @@ export class ScreenQa {
       return;
     }
     const qa = this.h.nameOf(run.employeeId);
+    // 화면 없는 프로그램은 사진 대신 확인용 실행 출력으로 점검했다.
+    const [kindKo, kindEn, whereKo, whereEn] = c.demos
+      ? ['실행 결과 QA', 'Demo QA', '확인용 실행 출력', 'demo output']
+      : ['화면 QA', 'Screen QA', '확인 순서', 'check steps'];
     const reason = tr(
-      `화면 QA(${qa})가 문제를 찾아 자동으로 돌려보냅니다(${used + 1}/2). 아래를 고치고, 확인 순서에서 고친 모습이 보이게 하세요.\n${warns.map((w) => `- ${w.id}: ${w.line}`).join('\n')}\n\nQA 의견 전문:\n${opinion.slice(0, 3000)}`,
-      `Screen QA (${qa}) found problems and sent this back automatically (${used + 1}/2). Fix these and show the fix in your check steps.\n${warns.map((w) => `- ${w.id}: ${w.line}`).join('\n')}\n\nFull QA notes:\n${opinion.slice(0, 3000)}`,
+      `${kindKo}(${qa})가 문제를 찾아 자동으로 돌려보냅니다(${used + 1}/2). 아래를 고치고, ${whereKo}에서 고친 모습이 보이게 하세요.\n${warns.map((w) => `- ${w.id}: ${w.line}`).join('\n')}\n\nQA 의견 전문:\n${opinion.slice(0, 3000)}`,
+      `${kindEn} (${qa}) found problems and sent this back automatically (${used + 1}/2). Fix these and show the fix in your ${whereEn}.\n${warns.map((w) => `- ${w.id}: ${w.line}`).join('\n')}\n\nFull QA notes:\n${opinion.slice(0, 3000)}`,
     );
     this.h.decideIntegration(a.id, 'rejected', { reason, by: `qa:${run.employeeId}` });
     this.h.company.store.setSetting(`qa_rejects:${t.id}`, String(used + 1));
     const text = tr(
-      `🔁 ${qa}이(가) 화면에서 문제를 찾아 ${t.id}를 담당자에게 돌려보냈습니다: ${warns.map((w) => `${w.id} ${w.line}`).join(' / ')}`,
+      `🔁 ${qa}이(가) ${c.demos ? '실행 결과' : '화면'}에서 문제를 찾아 ${t.id}를 담당자에게 돌려보냈습니다: ${warns.map((w) => `${w.id} ${w.line}`).join(' / ')}`,
       `🔁 ${qa} sent ${t.id} back: ${warns.map((w) => `${w.id} ${w.line}`).join(' / ')}`,
     );
     if (room) this.h.chat.post(room.id, 'system', text, 'event');

@@ -129,6 +129,17 @@ export interface ScreenCheck {
   scripted?: boolean;
   downloads?: { name: string; size: number; verdict: string; text?: { preview: string } }[];
   clips?: { label: string; fps: number; count: number }[];
+  /** 화면 없는 프로그램: 확인용 실행 명령과 출력(src/app/demo-run.ts) */
+  demos?: {
+    requirementId: string;
+    argv: string[];
+    label: string;
+    exitCode: number | null;
+    timedOut: boolean;
+    output: string;
+    errors: string;
+    skipped?: string;
+  }[];
 }
 
 export interface Channel {

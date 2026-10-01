@@ -97,21 +97,72 @@ export function ScreenCheckPanel({ ticketId }: { ticketId: string }) {
   if (!c) return null;
   const again = () => run(() => api(`tickets/${ticketId}/screen-check`, { body: {} })).then(reload);
   const qaName = c.qaBy ? empName(state?.employees ?? [], c.qaBy) : null;
+  // 화면 없는 프로그램: 사진 대신 확인용 실행 출력(대표 요청 2026-10-01: API·CLI·파이썬에도 쓰고 싶다)
+  const tk = state?.tickets.find((x) => x.id === ticketId);
+  const program = state?.projects.find((p) => p.id === tk?.projectId)?.profile?.deliverable === 'program';
   return (
     <div className="screen-check">
       <div className="spread">
-        <b>{ko ? '자동 화면 점검' : 'Automatic screen check'}</b>
+        <b>{program ? (ko ? '확인용 실행' : 'Demo run') : ko ? '자동 화면 점검' : 'Automatic screen check'}</b>
         {c.state !== 'running' && (
           <button className="btn small" disabled={busy} onClick={() => void again()}>
-            {ko ? '다시 찍기' : 'Retake'}
+            {program ? (ko ? '다시 돌리기' : 'Run again') : ko ? '다시 찍기' : 'Retake'}
           </button>
         )}
       </div>
       {c.state === 'running' && (
-        <div className="hint">{ko ? '결과물을 띄워 화면을 찍는 중…' : 'Starting the submission and taking screenshots…'}</div>
+        <div className="hint">
+          {program
+            ? ko
+              ? '담당자가 남긴 확인용 명령을 돌리는 중…'
+              : 'Running the demo commands…'
+            : ko
+              ? '결과물을 띄워 화면을 찍는 중…'
+              : 'Starting the submission and taking screenshots…'}
+        </div>
       )}
       {c.state === 'failed' && <div className="hint">{c.note}</div>}
-      {c.state === 'done' && (
+      {c.state === 'done' && c.demos && (
+        <>
+          {!c.demos.length && <div className="hint">{c.note}</div>}
+          {c.demos.map((d, i) => (
+            <div key={i} className="demo-run">
+              <div className="spread">
+                <span>
+                  <b>{d.requirementId}</b> {d.label}
+                </span>
+                <span className={`chip ${d.skipped || d.timedOut || d.exitCode !== 0 ? 'warn' : 'ok'}`}>
+                  {d.skipped
+                    ? ko
+                      ? '돌리지 않음'
+                      : 'Not run'
+                    : d.timedOut
+                      ? ko
+                        ? '시간 초과'
+                        : 'Timed out'
+                      : d.exitCode === 0
+                        ? ko
+                          ? '정상 종료'
+                          : 'OK'
+                        : ko
+                          ? `오류(${d.exitCode ?? '-'})`
+                          : `Failed (${d.exitCode ?? '-'})`}
+                </span>
+              </div>
+              <code className="sub mono">$ {d.argv.join(' ')}</code>
+              {d.skipped && <div className="hint">{d.skipped}</div>}
+              {!d.skipped && <pre className="code demo-output">{d.output || (ko ? '(출력 없음)' : '(no output)')}</pre>}
+              {d.errors && (
+                <details className="advanced">
+                  <summary>{ko ? '오류 출력' : 'Error output'}</summary>
+                  <pre className="code">{d.errors}</pre>
+                </details>
+              )}
+            </div>
+          ))}
+        </>
+      )}
+      {c.state === 'done' && !c.demos && (
         <>
           <div className="shots">
             {c.shots.map((s, i) => (
@@ -151,6 +202,10 @@ export function ScreenCheckPanel({ ticketId }: { ticketId: string }) {
           ) : (
             <div className="hint">{ko ? '브라우저 콘솔 오류 없음' : 'No console errors'}</div>
           )}
+        </>
+      )}
+      {c.state === 'done' && (
+        <>
           {qaName && c.opinion && verdictsOf(c.opinion).length > 0 && (
             // 한 줄 결론: 요구사항마다 ✅/⚠/❓. 긴 의견은 아래에 접어 둔다(실측: 카드가 너무 길었다).
             <div className="verdicts">
@@ -177,8 +232,8 @@ export function ScreenCheckPanel({ ticketId }: { ticketId: string }) {
                 {c.opinion ??
                   (c.qaState === 'running' || c.qaState === 'prepared'
                     ? ko
-                      ? '화면을 보고 의견을 쓰는 중…'
-                      : 'Looking at the screenshots…'
+                      ? `${c.demos ? '출력을' : '화면을'} 보고 의견을 쓰는 중…`
+                      : 'Looking at the results…'
                     : ko
                       ? '의견을 받지 못했습니다. 업무방에서 불러 물어볼 수 있습니다.'
                       : 'No opinion. You can ask in the ticket room.')}
@@ -186,13 +241,17 @@ export function ScreenCheckPanel({ ticketId }: { ticketId: string }) {
             )
           )}
           <div className="hint">
-            {c.scripted
+            {c.demos
               ? ko
-                ? '담당 직원이 남긴 확인 순서대로 기계가 조작하고 찍었습니다. 사진과 의견은 참고용이고, 체크는 대표가 합니다.'
-                : 'The machine followed the check steps the implementer left. Use this as a hint; the ticks are yours.'
-              : ko
-                ? '담당 직원이 확인 순서를 남기지 않아, 기계가 흔한 조작(클릭·Enter·방향키·스페이스·Z)만 해 봤습니다. 사진과 의견은 참고용이고, 체크는 대표가 합니다.'
-                : 'No check steps were left, so the machine only clicked and pressed Enter/arrows/Space/Z. The ticks are yours.'}
+                ? '담당 직원이 남긴 확인용 명령을 제출본 사본에서 돌린 출력입니다. 출력과 의견은 참고용이고, 체크는 대표가 합니다.'
+                : 'Output of the demo commands, run on a clean copy of the submission. The ticks are yours.'
+              : c.scripted
+                ? ko
+                  ? '담당 직원이 남긴 확인 순서대로 기계가 조작하고 찍었습니다. 사진과 의견은 참고용이고, 체크는 대표가 합니다.'
+                  : 'The machine followed the check steps the implementer left. Use this as a hint; the ticks are yours.'
+                : ko
+                  ? '담당 직원이 확인 순서를 남기지 않아, 기계가 흔한 조작(클릭·Enter·방향키·스페이스·Z)만 해 봤습니다. 사진과 의견은 참고용이고, 체크는 대표가 합니다.'
+                  : 'No check steps were left, so the machine only clicked and pressed Enter/arrows/Space/Z. The ticks are yours.'}
           </div>
         </>
       )}

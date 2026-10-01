@@ -368,7 +368,7 @@ export function ApprovalItem({ a, full = false }: { a: Approval; full?: boolean 
               <b>{lang === 'ko' ? '대표 직접 확인' : 'Your own check'}</b>
               {kind === 'screen' && <PreviewButton projectId={tk.projectId} ticketId={tk.id} />}
             </div>
-            {showScreen && kind === 'screen' && <ScreenCheckPanel ticketId={tk.id} />}
+            {showScreen && kind !== 'document' && <ScreenCheckPanel ticketId={tk.id} />}
             {/* 직접 플레이는 게임만(실측: 메모 앱 승인 카드에 "고급 QA (직접 플레이)"가 떴다) */}
             {showScreen && kind === 'screen' && (proj?.profile?.game || state?.playtests?.[tk.id]) && <PlaytestPanel ticketId={tk.id} />}
             {paged && page === 'screen' && (
