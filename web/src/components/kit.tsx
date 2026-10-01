@@ -328,6 +328,7 @@ export function FolderPicker({ initial, onPick, onClose }: { initial: string; on
   const [cur, setCur] = useState<DirListing | null>(null);
   const [error, setError] = useState('');
   const [newName, setNewName] = useState('');
+  const createRef = useRef<HTMLButtonElement>(null);
   const [creating, setCreating] = useState(false);
   const load = (p: string): Promise<boolean> =>
     api<DirListing>(`dirs?path=${encodeURIComponent(p)}`)
@@ -401,9 +402,12 @@ export function FolderPicker({ initial, onPick, onClose }: { initial: string; on
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder={ko ? '새 프로젝트 폴더 이름 (예: my-game)' : 'New project folder name (e.g. my-game)'}
+              // 실측(2026-10-01): 이름을 쓰고 Enter를 눌렀는데 아무 일도 없었다.
+              onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && createRef.current?.click()}
+              placeholder={ko ? '새 프로젝트 폴더 이름 (예: my-game, 사업계획서)' : 'New project folder name (e.g. my-game)'}
             />
             <button
+              ref={createRef}
               className="btn small"
               disabled={!cur || !newName.trim() || creating}
               onClick={() => {

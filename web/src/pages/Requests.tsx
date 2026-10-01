@@ -58,9 +58,20 @@ export function RequestBox() {
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder={
-            ko
+            // 결과물 종류에 맞는 예시(실측: 문서 프로젝트를 골랐는데 "할 일 목록 페이지" 예시가 나왔다)
+            (
+              {
+                document: ko
+                  ? '예: 신제품 출시 기획서 써줘. 시장 규모는 실제 자료 찾아서 출처 달고'
+                  : 'e.g. Write a launch plan for the new product, with sourced market numbers',
+                program: ko
+                  ? '예: 주문 목록을 돌려주는 API 만들어줘. 추가·조회·삭제가 되게'
+                  : 'e.g. Build an API for orders with add, list and delete',
+              } as Record<string, string>
+            )[state.projects.find((p) => p.id === pid)?.profile?.deliverable ?? ''] ??
+            (ko
               ? '예: 할 일 목록 페이지를 만들어줘. 추가·완료 표시·삭제가 되게'
-              : 'e.g. Make a to-do list page with add, check off and delete'
+              : 'e.g. Make a to-do list page with add, check off and delete')
           }
           disabled={!state.chiefOfStaff}
         />

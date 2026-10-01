@@ -474,15 +474,18 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
             </span>
           </label>
         )}
-        <label className="check-row">
-          <input type="checkbox" checked={qaAutoReject} onChange={(e) => setQaAutoReject(e.target.checked)} />
-          <span>
-            {ko
-              ? 'QA가 화면에서 문제를 찾으면 나를 거치지 않고 담당자에게 바로 돌려보내기'
-              : 'Send back automatically when screen QA finds a problem'}{' '}
-            <span className="hint">{ko ? '— 업무당 최대 2번, 그다음은 나에게' : '— at most twice per ticket'}</span>
-          </span>
-        </label>
+        {/* 문서는 QA가 따로 보지 않는다(검수자가 읽고, 대표는 결과물 보기로 읽는다). */}
+        {deliverable !== 'document' && (
+          <label className="check-row">
+            <input type="checkbox" checked={qaAutoReject} onChange={(e) => setQaAutoReject(e.target.checked)} />
+            <span>
+              {ko
+                ? `QA가 ${screen ? '화면' : '실행 결과'}에서 문제를 찾으면 나를 거치지 않고 담당자에게 바로 돌려보내기`
+                : 'Send back automatically when QA finds a problem'}{' '}
+              <span className="hint">{ko ? '— 업무당 최대 2번, 그다음은 나에게' : '— at most twice per ticket'}</span>
+            </span>
+          </label>
+        )}
         {/* 비개발자용: 핵심 두 가지만 위에 두고, 개발 용어는 "고급 설정"에 접는다(실측: 기준 브랜치·보호 경로·검증 명령이 뭔지 몰라 멈칫). */}
         <label>
           {ko ? '승인한 결과를 어떻게 넣을까요?' : 'After approval'}

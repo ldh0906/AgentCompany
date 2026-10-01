@@ -61,6 +61,16 @@ agent-company shortcut   # Windows: desktop + Start menu icon that starts it wit
 
 **Ranks.** Duties decide *what kind* of work an employee takes; ranks (junior · senior · lead) decide *who* takes it. A ticket's difficulty sets the minimum rank, the duty-fit employee of the lowest adequate rank does the work, the highest-ranked other employee owns it, and the reviewer must be the same rank or higher. When nobody qualifies (say, the only lead does a hard ticket), the highest remaining rank on a different CLI reviews it and the CEO inbox flags it as a lower-rank review. The state machine enforces this for your manual assignments too.
 
+**Not only web pages and games.** Each project says what it produces, and checking follows it:
+
+| Project produces | How you check it at approval |
+|---|---|
+| Screens (web, app, game) | screenshots and short recordings taken by the app, QA notes, "Run it" |
+| Documents and research | the changed Markdown, tables and pictures rendered in the app; every source link in research is opened by the app, and broken ones go back to the employee |
+| Programs without a screen (API, CLI, Python) | the output of demo commands the employee leaves, run by the app on a clean copy and read by a QA colleague |
+
+Research tickets may use web search; other tickets cannot.
+
 By default employees run in **app-only CLI profiles** (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) so your personal plugins, hooks and MCP servers do not leak into employee runs. Log in once per profile — `doctor` prints the exact command. Agent Company never reads credential files.
 
 ## Access levels
