@@ -337,10 +337,10 @@ export class Records {
         if (other === ticket.id || !activeIds.has(other)) continue;
         if (scopesOverlap(ticket.writeScope, globs)) return { ok: false as const, conflictWith: other };
       }
-      if (!byTicket.has(ticket.id)) {
-        const ins = this.store.db.prepare('INSERT OR IGNORE INTO path_locks(ticket_id, glob) VALUES (?, ?)');
-        for (const g of ticket.writeScope) ins.run(ticket.id, g);
-      }
+      // 지금의 쓰기 범위 전체를 잠근다(이미 있는 것은 무시). 처음 한 번만 잠그면 나중에 넓힌 범위가 잠기지 않는다.
+      // 실측(2026-10-01, 물 마시기): T-34에 넓혀 준 tests/index.js가 잠기지 않아 T-33도 같은 파일을 만들었고, 반영 때 충돌했다.
+      const ins = this.store.db.prepare('INSERT OR IGNORE INTO path_locks(ticket_id, glob) VALUES (?, ?)');
+      for (const g of ticket.writeScope) ins.run(ticket.id, g);
       return { ok: true as const };
     });
   }

@@ -2423,6 +2423,7 @@ ${failure.detail.slice(0, 400)}`,
         }
         this.apply(ticketId, { type: 'integrated', commitSha: commit });
       });
+      if (result.kind === 'merged') await this.recheckWaiting(project, paths, ticketId, result.mergeSha).catch(() => {});
       // 그 밖의 강등(예: 내 폴더에 커밋하지 않은 변경)은 완료로 두되 대표에게 알린다(조용히 따로 보관되지 않게).
       if (result.kind === 'downgraded' && !result.sendBack)
         this.desk.notice(
@@ -2436,6 +2437,48 @@ ${failure.detail.slice(0, 400)}`,
         this.company.store.setSetting(`mergeverify_base:${ticketId}`, '');
         this.apply(ticketId, { type: 'integration_failed', reason: String((error as Error).message ?? error) });
       });
+    }
+  }
+
+  /**
+   * 반영 대기열: 한 업무가 내 폴더에 들어가면, 검수·승인을 기다리는 같은 프로젝트의 다른 업무를 새 기준과 미리 합쳐 본다
+   * (실제로 합치지 않고 git merge-tree로 계산만). 충돌이 예상되면 대표가 확인하기 전에 담당자에게 돌려보내고,
+   * 다음 작업 때 최신 기준을 업무 폴더에 합쳐 준다. 대표 요청(2026-10-01): Gas Town의 병합 대기열(Refinery)처럼.
+   */
+  private async recheckWaiting(project: Project, paths: ReturnType<typeof projectPaths>, mergedId: string, base: string): Promise<void> {
+    for (const t of this.company.tickets()) {
+      if (t.id === mergedId || t.projectId !== project.id || !['in_review', 'awaiting_approval'].includes(t.status) || t.hold) continue;
+      const head = this.records.latestSubmission(t)?.headSha;
+      if (!head) continue;
+      const r = await git(['merge-tree', '--write-tree', '--name-only', '--no-messages', base, head], paths.mirror, { allowFail: true });
+      if (r.code !== 1) continue; // 0이면 깨끗하다. 그 밖(판단 불가)은 반영할 때 다시 본다.
+      const files = r.stdout.trim().split('\n').slice(1).filter(Boolean);
+      const pending = this.records.pendingApprovalFor(t.id, 'integrate');
+      this.company.store.transact(() => {
+        if (pending)
+          this.records.setApprovalState(pending.id, 'expired', 'orchestrator', {
+            reason: tr(`${mergedId} 반영으로 충돌 예상`, `Conflict expected after ${mergedId} merged`),
+          });
+        this.company.store.setSetting(`catch_up:${t.id}`, '1');
+        this.apply(t.id, {
+          type: 'base_conflict',
+          reason: tr(
+            `${mergedId}가 먼저 내 폴더에 들어가면서 이 업무와 같은 곳이 바뀌었습니다(${files.join(', ')}). 대표가 확인하기 전에 돌려보냅니다: 이번 작업을 시작할 때 최신 기준을 업무 폴더에 합쳐 두었으니, 충돌 표시(<<<<<<< ======= >>>>>>>)를 정리해 양쪽 변경을 모두 살려 주세요.`,
+            `${mergedId} was merged first and changed the same places (${files.join(', ')}). Sent back before the CEO checks it: the latest base is merged into your folder at the start of this run; resolve the conflict markers keeping both sides.`,
+          ),
+        });
+      });
+      const room = ticketChannelId(t.id);
+      if (this.chat.channel(room))
+        this.chat.post(
+          room,
+          'system',
+          tr(
+            `🔀 ${mergedId}가 먼저 반영되어 충돌이 예상됩니다(${files.join(', ')}). 대표 확인 전에 담당자에게 돌려보냈습니다.`,
+            `🔀 ${mergedId} merged first; a conflict is expected (${files.join(', ')}). Sent back before the CEO's check.`,
+          ),
+          'event',
+        );
     }
   }
 
@@ -3128,6 +3171,20 @@ ${failure.detail.slice(0, 400)}`,
         tr(`보호된 파일은 더할 수 없습니다: ${protectedHit.join(', ')}`, `Protected paths cannot be added: ${protectedHit.join(', ')}`),
       );
     let out = this.company.extendWriteScope(t.id, clean);
+    // 다른 진행 중 업무가 같은 파일을 쓰고 있으면, 그 업무가 끝난 뒤 차례로 이어서 한다(동시에 쓰면 반영 때 충돌한다).
+    const busyWith = this.company
+      .tickets()
+      .find((x) => x.id !== t.id && x.projectId === t.projectId && LOCK_HOLDING.includes(x.status) && scopesOverlap(x.writeScope, clean));
+    if (busyWith && this.chat.channel(ticketChannelId(t.id)))
+      this.chat.post(
+        ticketChannelId(t.id),
+        'system',
+        tr(
+          `${busyWith.id}가 같은 파일을 쓰고 있어, 그 업무가 끝나면 차례로 이어서 합니다(동시에 고치면 반영 때 충돌합니다).`,
+          `${busyWith.id} is using the same files; this ticket continues after it finishes.`,
+        ),
+        'event',
+      );
     const requested = this.company.store.getSetting(`scope_request:${t.id}`);
     if (requested && out.hold?.reason === 'needs_decision') {
       this.company.store.setSetting(`scope_request:${t.id}`, '');
