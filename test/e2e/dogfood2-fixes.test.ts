@@ -63,7 +63,7 @@ test('비서실장 질문에 답하면 현재 결정으로 기록되고, 제안�
 test('다시 검증: 직원에게 한 회차 더 시키지 않고 마지막 제출물을 검증·검수부터 다시 한다', { timeout: 180_000 }, async (t) => {
   const env = await setup(t, { reviewer: 'harsh' });
   const tk = newImplTicket(env);
-  await driveUntil(env, tk.id, (x) => x.hold !== null);
+  await driveUntil(env, tk.id, (x) => x.hold !== null, 150_000); // 세 회차 반려: 실측 57~62초라 기본 60초가 빠듯했다
   const workRuns = () => env.orch.records.runsForTicket(tk.id).filter((r) => r.kind === 'work').length;
   const verifyEvidence = () => env.orch.records.evidenceFor(tk.id).filter((e) => e.label === 'unit tests').length;
   const [w0, v0] = [workRuns(), verifyEvidence()];
@@ -101,7 +101,7 @@ test('프롬프트: 비서실장은 검증 명령과 같은 종류의 증거만,
   const draft = buildDraftPrompt({ employee: emp!, project, requestId: 'Q', request: 'x', nonce: 'n', decisions: [], language: 'ko' });
   assert.match(draft, /verifySuggestions/);
   assert.match(draft, /"proposal"/);
-  assert.match(draft, /human_attest" only for what a person must see, hear or play/);
+  assert.match(draft, /human_attest" only for what a person must see, hear, play or judge personally/);
   const tk = newImplTicket(env);
   const review = buildReviewPrompt({
     employee: emp!,

@@ -206,7 +206,12 @@ test(
     const dm = env.orch.chat.ensureDm(impl!.id);
     await env.orch.ceoMessage(dm.id, '이거 휴대폰에서도 돼야 해');
     await until(env, () => env.orch.profileProposal(env.projectId) !== null);
-    assert.deepEqual(env.orch.profileProposal(env.projectId)!.profile, { summary: '웹 앱(휴대폰 대응)', mobile: true, game: false });
+    assert.deepEqual(env.orch.profileProposal(env.projectId)!.profile, {
+      summary: '웹 앱(휴대폰 대응)',
+      mobile: true,
+      game: false,
+      deliverable: 'screen',
+    });
     assert.ok(
       env.orch.desk.ceoTodos().some((x) => x.link === '/projects'),
       '대표 할 일에 뜬다',
