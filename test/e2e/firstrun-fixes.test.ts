@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { agyAdapter } from '../../src/adapters/agy.ts';
-import { buildDraftPrompt, filesBlock } from '../../src/agents/prompt.ts';
+import { buildDraftPrompt, buildWorkPrompt, filesBlock } from '../../src/agents/prompt.ts';
 import { openLoginWindow } from '../../src/app/doctor.ts';
 import type { InvocationRequest } from '../../src/adapters/types.ts';
 import { setup } from './helpers.ts';
@@ -36,4 +36,31 @@ test('비서실장 초안: 프로젝트 파일 목록을 넣고, 빈 폴더면 �
 test('로그인 창: 로그인이 없는 CLI나 모르는 이름은 거부한다(창을 열지 않음)', async () => {
   await assert.rejects(openLoginWindow('.', 'fake'), /로그인할 수 없는|no login/);
   await assert.rejects(openLoginWindow('.', 'nope'), /로그인할 수 없는|no login/);
+});
+
+test('작업 지시: 확인 창은 자동으로 "확인", 앱 자체 파일은 보지 말고, 끝나지 않는 명령은 남기지 않기', async (t) => {
+  const env = await setup(t);
+  const [emp] = env.company.employees();
+  const ticket = env.company.createTicket({
+    projectId: env.projectId,
+    type: 'impl',
+    title: '메모 삭제',
+    purpose: '지우기 전에 확인',
+    requirements: [{ text: '삭제 확인 창 뒤 목록에서 사라진다', evidenceType: 'human_attest' }],
+    doneCriteria: '대표 확인',
+    writeScope: ['src/**'],
+  });
+  const prompt = buildWorkPrompt({
+    employee: emp!,
+    project: env.company.requireProject(env.projectId),
+    ticket,
+    nonce: 'n',
+    decisions: [],
+    feedback: null,
+    language: 'ko',
+    screenCheckCommand: 'node main.ts screen-check --url <dev-server-url> --steps <steps.json>',
+  });
+  assert.match(prompt, /alert \/ confirm \/ prompt\) are answered with OK automatically/);
+  assert.match(prompt, /Do not open, import or test the Agent Company app's own files/);
+  assert.match(prompt, /Never leave a command running in the background or waiting forever/);
 });

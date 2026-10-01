@@ -96,6 +96,8 @@ export interface State {
   mentions?: ChatMessage[];
   /** 지금 대표가 할 일 */
   ceoTodos?: { key: string; kind: string; title: string; link: string }[];
+  /** 출력이 오래 없는 실행(멈췄을 수 있음) */
+  stalledRuns?: { runId: string; ticketId: string; employeeId: string; quietMs: number }[];
   /** 최근 알림(QA 자동 반려, 요청 완료 등) */
   notices?: { id: string; at: string; title: string; body: string; link: string }[];
   /** 윈도우 토스트 알림 켬 */

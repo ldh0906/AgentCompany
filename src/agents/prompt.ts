@@ -107,6 +107,8 @@ ${
 }- To ask a colleague something (for example the owner of another area), add it to "ask" with their exact name; it is posted in this ticket's chat room and they will answer there (not within this run). Colleagues: ${(i.colleagues ?? []).join(', ') || '(none)'}.
 - Saying "done" does not complete the ticket. The system runs its own verification and an independent reviewer checks your work.
 - Never read credential or auth files (~/.claude, ~/.codex, tokens, .env secrets).
+- Stay in your directory (plus the OS temp directory for scratch files). Do not read other folders on this PC, in particular the Agent Company app itself; everything you need about the company's tools is in this prompt.
+- Never leave a command running in the background or waiting forever (a dev server, a watcher, a test script that does not exit): stop what you started before you finish, and give long commands a timeout. A run that waits on a stuck command stalls the ticket.
 
 ## Work efficiently (the company pays for every token you re-read)
 Every step re-reads your whole conversation, so large outputs make every later step expensive. Measured: runs whose tool output piled up to ~1 MB cost 2-3x more than similar runs.
@@ -125,6 +127,8 @@ For each "human_attest" requirement add a scenario to "screenSteps", shaped [{"r
 - Show the requirement working, not just the first screen: before/after pairs (full bar → reduced bar; closed → open window; result message).
 - Steps: {"do":"key","key":"ArrowRight|Space|Enter|KeyZ|Digit1|...","holdMs":800,"times":3} (KeyboardEvent.code), {"do":"click","text":"Start"} or {"do":"click","selector":"#play"} or {"do":"click","x":0.5,"y":0.5} (fraction of the viewport), {"do":"type","text":"..."} (typed one character at a time), {"do":"wait","ms":1000}, {"do":"reload"}, {"do":"setStorage","key":"...","value":"..."} (localStorage), {"do":"shot","label":"what the CEO should see"}.
 - Clicking a download/export button captures the file: the system reports its name, encoding (UTF-8 BOM for Excel) and first and last lines.
+- Browser dialogs (alert / confirm / prompt) are answered with OK automatically and their text is reported to QA. Pictures never show the dialog itself, so shoot the state after it (for example the list after a confirmed delete).
+- This guide is the whole contract of the checker. Do not open, import or test the Agent Company app's own files, and do not build your own browser harness to find out how the checker behaves (measured: an employee did that, its test script hung, and the ticket stalled for 10 minutes).${i.screenCheckCommand ? ' If unsure, run the self-check command once.' : ''}
 ${i.screenCheckCommand ? `- Self-check before submitting (runs the same machine, prints which shots were taken and which steps were skipped): save your screenSteps array to a file in the OS temp directory, start the dev server, then run: ${i.screenCheckCommand}\n` : ''}`
     : ''
 }

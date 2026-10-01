@@ -12,6 +12,8 @@ import { newId, type CeoRequest } from './records.ts';
 export interface CeoDeskHost extends Pick<OrchHost, 'company' | 'records' | 'paused' | 'changed'> {
   /** 요청 하나의 업무가 모두 끝났을 때(게임이면 고급 QA 자동 실행) */
   onRequestDone(req: CeoRequest, tickets: Ticket[]): void;
+  /** 출력이 오래 없는 실행(멈췄을 수 있음) */
+  stalled(): { runId: string; ticketId: string; employeeId: string; quietMs: number }[];
 }
 
 export class CeoDesk {
@@ -57,6 +59,16 @@ export class CeoDesk {
           title: tr(`${p.name} 프로필 변경 제안 확인`, `Review the profile proposal for ${p.name}`),
           link: '/projects',
         });
+    for (const s of this.h.stalled())
+      out.push({
+        key: `stall:${s.runId}`,
+        kind: 'stalled',
+        title: tr(
+          `${s.ticketId} ${this.h.company.employees().find((e) => e.id === s.employeeId)?.name ?? ''}: ${Math.round(s.quietMs / 60_000)}분째 아무 신호 없음 — 멈췄을 수 있습니다`,
+          `${s.ticketId}: silent for ${Math.round(s.quietMs / 60_000)} minutes — may be stuck`,
+        ),
+        link: `/live/${s.runId}`,
+      });
     if (this.h.paused() && (this.h.company.store.getSetting('paused_reason') ?? '').startsWith('daily:'))
       out.push({
         key: 'paused:daily',

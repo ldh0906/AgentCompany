@@ -44,6 +44,8 @@ export interface ScreenCapture {
   downloads: DownloadedFile[];
   /** 확인 순서의 조작 직후 몇 초 녹화(움직임·반응 속도를 보려고) */
   clips: ScreenClip[];
+  /** 조작 중 뜬 확인 창(alert/confirm/prompt): 자동으로 "확인"을 눌렀다 */
+  dialogs: string[];
 }
 
 export interface DownloadedFile {
@@ -474,7 +476,7 @@ export async function captureScreens(
     const withDialogs = dialogs.length
       ? `${text}\n\n[Dialogs shown during the steps; the checker clicked OK]\n${dialogs.join('\n')}`
       : text;
-    return { shots, errors, text: withDialogs, downloads, clips: clips.filter((c) => c.frames.length > 0) };
+    return { shots, errors, text: withDialogs, downloads, clips: clips.filter((c) => c.frames.length > 0), dialogs };
   } finally {
     cdp?.close();
     // 크롬은 자식 프로세스를 여럿 띄우므로 트리째 끈다.

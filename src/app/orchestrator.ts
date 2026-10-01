@@ -3,7 +3,7 @@
 import { tr } from '../core/i18n.ts';
 
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { adapterFor } from '../adapters/index.ts';
@@ -39,7 +39,15 @@ import { pickPanel, pickStaff } from '../core/staffing.ts';
 import { commandOf, judgeToolRequest } from '../core/guard.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
 import { locateExecutable } from '../runner/locate.ts';
-import { abandonAndTerminate, isSameProcessAlive, readExitRecord, reapGroup, startProcess, waitForExit } from '../runner/process.ts';
+import {
+  abandonAndTerminate,
+  isSameProcessAlive,
+  killTree,
+  readExitRecord,
+  reapGroup,
+  startProcess,
+  waitForExit,
+} from '../runner/process.ts';
 import { AGENT_IDENTITY, git } from '../workspace/git.ts';
 import {
   changedPaths,
@@ -161,7 +169,11 @@ export class Orchestrator {
       track: (key, p) => this.track(key, p),
       notice: (title, body, link) => this.desk.notice(title, body, link),
     };
-    this.desk = new CeoDesk({ ...host, onRequestDone: (req, tickets) => this.onRequestDone(req, tickets) });
+    this.desk = new CeoDesk({
+      ...host,
+      onRequestDone: (req, tickets) => this.onRequestDone(req, tickets),
+      stalled: () => this.stalledRuns(),
+    });
     this.playtests = new Playtests(host);
     this.screens = new ScreenQa({
       ...host,
@@ -432,6 +444,7 @@ export class Orchestrator {
       await this.pollToolApprovals();
       this.checkDailyLimit();
       await this.screens.sweepScreens().catch(() => {});
+      await this.checkStalled();
       this.desk.notifyNewTodos();
       // 우선순위(1 높음 → 3 낮음) 순, 같으면 먼저 만든 순: 쓰기 범위가 겹칠 때 높은 업무가 먼저 잠금을 잡는다.
       for (const t of [...this.company.tickets()].sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2))) {
@@ -1327,6 +1340,86 @@ export class Orchestrator {
     }
     this.changed('chat', channelId);
     this.changed('run', run.id);
+  }
+
+  // ======================= 멈춘 실행 =======================
+
+  /** 이만큼 아무 출력이 없으면 멈췄을 수 있다고 대표에게 알린다(라이브 화면은 5분부터 ⚠). */
+  static readonly STALL_MS = 10 * 60_000;
+  private stalled = new Map<string, number>();
+  private lastStallCheck = 0;
+
+  /**
+   * 1분마다: 실행 중인데 출력이 STALL_MS 넘게 없는 직원을 찾는다. 처음 찾으면 대표에게 알린다.
+   * 실측(첫 사용, 2026-10-01): 직원이 띄운 시험 스크립트가 끝나지 않아 실행이 10분 넘게 멈췄는데,
+   * 대표에게 보이는 곳은 라이브 화면의 작은 ⚠뿐이었다(그대로 두면 30분 시간 제한까지 기다린다).
+   */
+  private async checkStalled(): Promise<void> {
+    if (Date.now() - this.lastStallCheck < 60_000) return;
+    this.lastStallCheck = Date.now();
+    const next = new Map<string, number>();
+    for (const runId of this.liveRuns.keys()) {
+      const run = this.records.run(runId);
+      if (!run || run.status !== 'running') continue;
+      const out = await stat(path.join(run.runDir, 'stdout.log'))
+        .then((s) => s.mtimeMs)
+        .catch(() => 0);
+      const quiet = Date.now() - Math.max(out, Date.parse(run.startedAt));
+      if (quiet < Orchestrator.STALL_MS) continue;
+      next.set(runId, quiet);
+      if (!this.stalled.has(runId))
+        this.desk.notice(
+          tr(
+            `${this.nameOf(run.employeeId)}이(가) ${Math.round(quiet / 60_000)}분째 아무 신호가 없습니다`,
+            `${this.nameOf(run.employeeId)} has been silent for ${Math.round(quiet / 60_000)} minutes`,
+          ),
+          tr(
+            `${run.ticketId}: 끝나지 않는 명령을 기다리고 있을 수 있습니다. 라이브 화면에서 "끊고 다시 시키기"를 누를 수 있습니다.`,
+            `${run.ticketId}: it may be waiting on a command that never ends. Use "Cut and restart" on the Live page.`,
+          ),
+          `/live/${run.id}`,
+        );
+    }
+    this.stalled = next;
+  }
+
+  /** 멈췄을 수 있는 실행: 실행 ID → 조용했던 시간(ms) */
+  stalledRuns(): { runId: string; ticketId: string; employeeId: string; quietMs: number }[] {
+    return [...this.stalled].flatMap(([runId, quietMs]) => {
+      const run = this.records.run(runId);
+      return run?.status === 'running' ? [{ runId, ticketId: run.ticketId, employeeId: run.employeeId, quietMs }] : [];
+    });
+  }
+
+  /**
+   * 대표가 멈춘 실행을 끊는다: 직원 AI 프로세스(와 그것이 띄운 명령)만 끝내면, 실행은 보통의 실패로 처리되어
+   * 작업이면 다음 차례에 다시 시키고(실행 1회 소모), 대화·초안은 다시 시도할 수 있다.
+   * 작업이면 다음 지시에 "끝나지 않는 명령을 기다리지 말 것"을 대표 메모로 남긴다.
+   */
+  async restartRun(runId: string): Promise<{ ok: true }> {
+    const run = this.records.run(runId);
+    if (!run || run.status !== 'running' || !this.liveRuns.has(runId))
+      throw new DomainError(tr('이미 끝난 실행입니다.', 'This run has already finished.'));
+    const pid = await readFile(path.join(run.runDir, 'pid.json'), 'utf8')
+      .then((x) => (JSON.parse(x) as { cliPid?: number | null }).cliPid ?? null)
+      .catch(() => null);
+    if (!pid) throw new DomainError(tr('직원 프로세스를 찾지 못했습니다.', 'Employee process not found.'));
+    const quietMin = Math.round((this.stalled.get(runId) ?? 0) / 60_000);
+    this.company.store.appendEvent('ceo', 'run.restarted', run.ticketId, { runId, quietMin });
+    if (run.kind === 'work' && this.chat.channel(ticketChannelId(run.ticketId)))
+      this.chat.post(
+        ticketChannelId(run.ticketId),
+        'ceo',
+        tr(
+          `지난 실행이 ${quietMin ? `${quietMin}분 동안 ` : ''}아무 신호 없이 멈춰서 끊었습니다. 끝나지 않는 명령(서버·감시·시험 스크립트)을 기다리지 말고, 직접 띄운 것은 끄고, 오래 걸릴 명령에는 시간 제한을 두세요.`,
+          `The last run went silent${quietMin ? ` for ${quietMin} minutes` : ''}, so I cut it. Don't wait on commands that never end (servers, watchers, test scripts): stop what you start and put a timeout on long commands.`,
+        ),
+        'chat',
+      );
+    await killTree(pid);
+    this.stalled.delete(runId);
+    this.changed('run', runId);
+    return { ok: true };
   }
 
   /**

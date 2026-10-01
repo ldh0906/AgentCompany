@@ -391,6 +391,7 @@ async function screenCheckCmd(args: string[]): Promise<void> {
   for (const s of cap.shots) console.log(`  ${s.file}  ${s.label}`);
   console.log(`recordings: ${cap.clips.map((c) => `${c.label} ${c.frames.length} frames`).join(', ') || 'none'}`);
   for (const d of cap.downloads) console.log(`download: ${d.name} (${d.size} bytes) ${d.verdict}`);
+  for (const d of cap.dialogs) console.log(`dialog (clicked OK): ${d}`);
   console.log(`problems (${cap.errors.length}):`);
   for (const e of cap.errors) console.log(`  ${e}`);
 }

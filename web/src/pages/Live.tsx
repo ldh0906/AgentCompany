@@ -217,6 +217,31 @@ function RunLog({ runId }: { runId: string }) {
         </span>
       </div>
       <div className="body">
+        {/* 오래 조용하면(10분+) 멈췄을 수 있다: 대표가 끊고 다시 시킬 수 있다 */}
+        {r.status === 'running' && state.stalledRuns?.some((s) => s.runId === r.id) && (
+          <div className="banner warn" style={{ marginBottom: 10 }}>
+            <div>
+              {ko
+                ? `⚠ ${Math.round((state.stalledRuns.find((s) => s.runId === r.id)!.quietMs ?? 0) / 60000)}분째 아무 신호가 없습니다. 끝나지 않는 명령(서버·시험 스크립트 등)을 기다리고 있을 수 있습니다.`
+                : '⚠ No output for a long time; it may be waiting on a command that never ends.'}
+            </div>
+            <div className="sub">
+              {ko
+                ? '끊으면 이 실행은 실패로 처리되고, 작업이면 "끝나지 않는 명령을 기다리지 말 것"이라는 메모와 함께 다시 시킵니다(실행 1회 사용). 그냥 두면 30분 시간 제한에서 끝납니다.'
+                : 'Cutting it ends this run; work is retried with a note not to wait on endless commands. Otherwise it ends at the 30-minute limit.'}
+            </div>
+            <button
+              className="btn small"
+              style={{ marginTop: 8 }}
+              disabled={busy}
+              onClick={() =>
+                run(() => api(`runs/${r.id}/restart`, { body: {} }), ko ? '끊었습니다. 곧 다시 시킵니다.' : 'Cut. It will be retried.')
+              }
+            >
+              {ko ? '끊고 다시 시키기' : 'Cut and restart'}
+            </button>
+          </div>
+        )}
         <label className="check-row small">
           <input type="checkbox" checked={hideThinking} onChange={() => setHideThinking(!hideThinking)} />
           {ko ? '생각 과정 숨기기' : 'Hide thinking'}

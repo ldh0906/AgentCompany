@@ -118,6 +118,8 @@ export class Api {
         return this.runLog(id!, query.get('stream') === 'stderr' ? 'stderr' : 'stdout');
       case 'GET runs/:id/activity':
         return this.runActivity(id!);
+      case 'POST runs/:id/restart':
+        return this.orch.restartRun(id!);
       case 'POST runs/:id/steer':
         return { delivered: await this.orch.steerRun(id!, str(b, 'text', { max: 4000 })) };
 
@@ -457,6 +459,8 @@ export class Api {
       previews: this.orch.previewList(),
       // 대표 알림: 지금 할 일, 최근 알림, 윈도우 토스트 켬 여부
       ceoTodos: this.orch.desk.ceoTodos(),
+      // 출력이 오래 없는 실행(라이브 화면의 "끊고 다시 시키기")
+      stalledRuns: this.orch.stalledRuns(),
       // 고급 QA(직접 플레이) 기록: 업무별·요청별(Q:요청 ID)
       playtests: Object.fromEntries(
         [...this.company.tickets().map((t) => t.id), ...r.requests(30).map((q) => `Q:${q.id}`)]
