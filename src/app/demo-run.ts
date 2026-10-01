@@ -74,7 +74,8 @@ export function demoResultLine(d: DemoResult): string {
 }
 
 const tail = async (f: string, n: number) => {
-  const s = await readFile(f, 'utf8').catch(() => '');
+  // 윈도우 줄바꿈(\r\n)은 \n으로(실측 2026-10-02: 빵집 데모 출력 줄마다 \r이 남았다)
+  const s = (await readFile(f, 'utf8').catch(() => '')).replace(/\r\n?/g, '\n');
   return s.length > n ? `…\n${s.slice(-n)}` : s;
 };
 
