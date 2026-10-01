@@ -218,6 +218,8 @@ async function main(): Promise<void> {
     approvalPolicy: policy,
     approvalsReviewer: 'user',
     ...(env.AC_CODEX_MODEL ? { model: env.AC_CODEX_MODEL } : {}),
+    // 조사 업무: 실시간 웹 검색(설정 web_search, 0.159 스키마의 WebSearchMode)
+    ...(env.AC_CODEX_WEB ? { config: { web_search: 'live' } } : {}),
   };
   // 이어서 하기(수정 회차): 이전 대화를 되살린다.
   const thread = env.AC_CODEX_RESUME

@@ -1,6 +1,6 @@
-import type { Approval, Claim, Decision, DomainEvent, Employee, Evidence, Project, Ticket } from '../../src/core/types.ts';
+import type { Approval, Claim, Decision, DomainEvent, Employee, Evidence, Project, ProjectProfile, Ticket } from '../../src/core/types.ts';
 
-export type { Approval, Claim, Decision, DomainEvent, Employee, Evidence, Project, Ticket };
+export type { Approval, Claim, Decision, DomainEvent, Employee, Evidence, Project, ProjectProfile, Ticket };
 import type { UsageSummary } from '../../src/core/types.ts';
 export type { UsageSummary };
 
@@ -56,7 +56,7 @@ export interface CeoRequest {
   proposals?: (string | null)[];
   answers?: (string | null)[];
   verifySuggestions?: { label: string; argv: string[]; evidenceType: string }[];
-  profile?: { summary: string; mobile: boolean; game: boolean } | null;
+  profile?: ProjectProfile | null;
   error: string | null;
   ticketIds: string[];
   createdAt: string;
@@ -106,7 +106,7 @@ export interface State {
   /** 승인 대기 업무의 대표 확인 항목별 "확인하는 법"(담당자 메모): 업무 ID → 요구사항 ID → 메모 */
   checkNotes?: Record<string, Record<string, string>>;
   /** 대화에서 직원이 낸 프로젝트 프로필 변경 제안(프로젝트 ID별) */
-  profileProposals?: Record<string, { profile: { summary: string; mobile: boolean; game: boolean }; by: string; at: string }>;
+  profileProposals?: Record<string, { profile: ProjectProfile; by: string; at: string }>;
   /** 요청별 사용 토큰(초안 + 업무 + 업무방 대화) */
   requestTokens?: Record<string, { total: number; byTicket: Record<string, number> }>;
   playtests?: Record<

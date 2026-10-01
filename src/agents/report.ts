@@ -1,7 +1,7 @@
 // 직원 보고서: 실행 마지막에 nonce가 들어간 JSON을 내야 한다. 형식은 코드로 검증한다.
 // 보고서는 "주장"일 뿐이다. 완료 판정은 오케스트레이터가 만든 증거로 한다.
 import { tr } from '../core/i18n.ts';
-import { DIFFICULTIES, type Difficulty } from '../core/types.ts';
+import { DELIVERABLE_KINDS, DIFFICULTIES, type DeliverableKind, type Difficulty, type ProjectProfile } from '../core/types.ts';
 
 export interface WorkReport {
   kind: 'work';
@@ -242,14 +242,19 @@ export interface DraftReport {
   proposals: (string | null)[];
   verifySuggestions: VerifySuggestion[];
   /** 프로젝트 프로필이 없을 때 비서실장이 제안하는 프로필 */
-  profile?: { summary: string; mobile: boolean; game: boolean } | null;
+  profile?: ProjectProfile | null;
 }
 
 /** 프로필 제안: 한두 줄 요약이 있을 때만. */
-export function profileOf(v: unknown): { summary: string; mobile: boolean; game: boolean } | null {
+export function profileOf(v: unknown): ProjectProfile | null {
   const o = v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
   if (!o || !isStr(o.summary) || !o.summary.trim()) return null;
-  return { summary: o.summary.trim().slice(0, 300), mobile: o.mobile === true, game: o.game === true };
+  const deliverable = (DELIVERABLE_KINDS as readonly string[]).includes(String(o.deliverable))
+    ? (o.deliverable as DeliverableKind)
+    : 'screen';
+  // 화면이 없는 결과물에는 휴대폰·게임 점검이 의미가 없다.
+  const screen = deliverable === 'screen';
+  return { summary: o.summary.trim().slice(0, 300), mobile: screen && o.mobile === true, game: screen && o.game === true, deliverable };
 }
 
 const DRAFT_TYPES = ['impl', 'doc', 'review', 'research'];
@@ -283,7 +288,9 @@ export function parseDrafts(
         detail: tr(`초안 ${i + 1}의 형식이 잘못되었습니다.`, `Invalid format for draft ${i + 1}.`),
       };
     }
-    const writeScope = Array.isArray(d.writeScope) ? (d.writeScope as unknown[]).filter(isStr) : [];
+    const scope = Array.isArray(d.writeScope) ? (d.writeScope as unknown[]).filter(isStr) : [];
+    // 조사 결과는 보고서 파일로 남긴다(대표가 앱에서 읽고, 시스템이 링크를 확인한다). 범위를 빠뜨리면 기본 폴더를 준다.
+    const writeScope = type === 'research' && !scope.length ? ['research/**'] : scope;
     if ((type === 'impl' || type === 'doc') && !writeScope.length) {
       return {
         ok: false,
@@ -457,7 +464,7 @@ export interface ChatReply {
   mentions: string[];
   openRoom: { name: string; members: string[]; topic: string; message: string } | null;
   /** 대화에서 프로젝트 성격이 바뀌었을 때 직원이 제안하는 새 프로필(대표가 반영) */
-  profile?: { summary: string; mobile: boolean; game: boolean } | null;
+  profile?: ProjectProfile | null;
 }
 
 /**

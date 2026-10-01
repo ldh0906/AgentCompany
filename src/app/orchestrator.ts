@@ -34,7 +34,16 @@ import type {
   TicketStatus,
   VerifyCommand,
 } from '../core/types.ts';
-import { DEFAULT_BUDGET, DIFFICULTIES, DIFFICULTY_RANK, RANK_ORDER, TERMINAL_STATUSES, difficultyOf, rankOf } from '../core/types.ts';
+import {
+  DEFAULT_BUDGET,
+  DIFFICULTIES,
+  DIFFICULTY_RANK,
+  RANK_ORDER,
+  TERMINAL_STATUSES,
+  deliverableOf,
+  difficultyOf,
+  rankOf,
+} from '../core/types.ts';
 import { pickPanel, pickStaff } from '../core/staffing.ts';
 import { commandOf, judgeToolRequest } from '../core/guard.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
@@ -686,6 +695,7 @@ export class Orchestrator {
         originBefore,
         originRefsBefore,
         moveSeqBefore,
+        web: next.type === 'research',
       });
     };
     // 작업공간에 의존성을 미리 깐다(실측: 직원이 "vitest 미설치로 테스트 실행 불가"). 설치는 몇 분 걸릴 수 있어
@@ -767,6 +777,8 @@ export class Orchestrator {
     moveSeqBefore?: number;
     phase?: DeliberationPhase;
     claimIds?: string[];
+    /** 웹 검색·읽기 허용(조사 업무와 그 검수). 실측(2026-10-01): 웹 도구가 늘 막혀 조사 업무가 출처를 찾을 수 없었다. */
+    web?: boolean;
   }): Promise<string> {
     const adapter = adapterFor(p.employee.cli);
     const runId = newId('R');
@@ -781,6 +793,7 @@ export class Orchestrator {
       allowedCommands: p.employee.allowedCommands,
       profileEnv: this.profileEnv(p.employee),
       ...(approvalDir ? { approvalDir } : {}),
+      ...(p.web ? { web: true } : {}),
       runDir,
     });
     await mkdir(runDir, { recursive: true });
@@ -1502,7 +1515,14 @@ export class Orchestrator {
     const project = projectId ? this.company.store.get<Project>('projects', projectId) : null;
     if (!project) return;
     const cur = project.profile;
-    if (cur && cur.summary === profile.summary && cur.mobile === profile.mobile && cur.game === profile.game) return;
+    if (
+      cur &&
+      cur.summary === profile.summary &&
+      cur.mobile === profile.mobile &&
+      cur.game === profile.game &&
+      deliverableOf(project) === profile.deliverable
+    )
+      return;
     this.company.store.setSetting(`profile_proposal:${project.id}`, JSON.stringify({ profile, by, at: new Date().toISOString() }));
     this.chat.post(
       channelId,
@@ -2128,6 +2148,7 @@ ${failure.detail.slice(0, 400)}`,
         nonce,
         accessLevel: 'read-only',
         baseSha: sub.baseSha,
+        web: t.type === 'research',
       });
     });
   }

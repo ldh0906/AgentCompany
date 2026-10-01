@@ -106,7 +106,20 @@ export interface ProjectProfile {
   mobile: boolean;
   /** 게임인가(고급 QA 플레이 테스트 대상) */
   game: boolean;
+  /** 결과물 종류(없으면 화면): 대표가 무엇으로 확인하는지, 직원 지시와 앱 점검이 이것을 따른다. */
+  deliverable?: DeliverableKind;
 }
+
+/**
+ * 결과물 종류. 대표 요청(2026-10-01): 게임·웹만이 아니라 문서·조사, 화면 없는 프로그램(API·CLI·파이썬)에도 쓰고 싶다.
+ * - screen: 웹·앱·게임(화면 점검·실행해 보기)
+ * - document: 문서·보고서·기획서·조사(앱 안에서 문서를 읽어 확인, 조사는 링크 확인)
+ * - program: 화면 없는 프로그램(확인용 실행 명령의 출력을 보고 확인)
+ */
+export type DeliverableKind = 'screen' | 'document' | 'program';
+export const DELIVERABLE_KINDS: readonly DeliverableKind[] = ['screen', 'document', 'program'];
+export const deliverableOf = (p: { profile?: ProjectProfile | null } | null | undefined): DeliverableKind =>
+  p?.profile?.deliverable ?? 'screen';
 
 // ---- 티켓 상태기계 ----
 

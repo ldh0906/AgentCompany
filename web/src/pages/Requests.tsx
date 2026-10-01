@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, type CeoRequest } from '../api.ts';
 import { Link, useCompany } from '../App.tsx';
-import { EVIDENCE, useT } from '../i18n.ts';
+import { EVIDENCE, profileTraits, useT } from '../i18n.ts';
 import { empName, useAction, when } from '../components/ui.tsx';
 import { Segmented } from '../components/kit.tsx';
 import { fmtTokens } from '../components/usage.tsx';
@@ -478,9 +478,8 @@ function DraftReview({ r }: { r: CeoRequest }) {
         <div className="banner info" style={{ marginTop: 8 }}>
           <b>{ko ? '프로젝트 프로필 제안' : 'Suggested project profile'}</b> {r.profile.summary}
           <div className="sub">
-            {ko
-              ? `${r.profile.mobile ? '휴대폰 화면도 신경 씀' : 'PC 전용(휴대폰 신경 안 씀)'}${r.profile.game ? ' · 게임' : ''} — 모든 직원이 이 성격을 기억하고, 앱의 화면 점검도 이에 맞춥니다.`
-              : `${r.profile.mobile ? 'Phones too' : 'Desktop only'}${r.profile.game ? ' · game' : ''}`}
+            {profileTraits(r.profile, lang)}
+            {ko ? ' — 모든 직원이 이 성격을 기억하고, 앱의 점검 방식도 이에 맞춥니다.' : ''}
           </div>
           <label className="check-row" style={{ marginTop: 4 }}>
             <input type="checkbox" checked={saveProfile} onChange={(e) => setSaveProfile(e.target.checked)} />

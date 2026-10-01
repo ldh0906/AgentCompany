@@ -1,10 +1,23 @@
 import { useEffect, useState } from 'react';
-import { api, type Project } from '../api.ts';
+import { api, type Project, type ProjectProfile } from '../api.ts';
 import { useCompany } from '../App.tsx';
-import { EVIDENCE, useT } from '../i18n.ts';
+import { DELIVERABLE, EVIDENCE, profileTraits, useT } from '../i18n.ts';
 import { EmptyState, Icon, Modal, useAction, Skeleton } from '../components/ui.tsx';
 import { ChipToggles, FolderPicker, Segmented } from '../components/kit.tsx';
 import { PreviewButton } from '../components/preview.tsx';
+
+type Deliverable = NonNullable<ProjectProfile['deliverable']>;
+
+/**
+ * 설명으로 결과물 종류를 짐작한다(대표가 고르기 전 기본값).
+ * 대표 요청(2026-10-01): 게임·웹만이 아니라 문서·조사, 화면 없는 프로그램에도 쓰고 싶다.
+ */
+export function guessDeliverable(text: string): Deliverable {
+  if (/게임|game/i.test(text)) return 'screen';
+  if (/\bapi\b|\bcli\b|서버|백엔드|스크립트|파이썬|python|명령줄|크롤링|server|backend|script/i.test(text)) return 'program';
+  if (/문서|보고서|기획서|계획서|제안서|조사|리서치|원고|매뉴얼|document|report|research|proposal|article/i.test(text)) return 'document';
+  return 'screen';
+}
 
 export function Projects() {
   const { state, reload } = useCompany();
@@ -75,7 +88,12 @@ export function Projects() {
                       : 'Branch only (manual merge)'}
                 </span>
                 {p.profile?.summary && <span className="chip">{p.profile.summary.slice(0, 40)}</span>}
-                {p.profile && !p.profile.mobile && <span className="chip">{ko ? 'PC 전용' : 'Desktop only'}</span>}
+                {p.profile && (p.profile.deliverable ?? 'screen') !== 'screen' && (
+                  <span className="chip info">{DELIVERABLE[lang]![p.profile.deliverable!]}</span>
+                )}
+                {p.profile && (p.profile.deliverable ?? 'screen') === 'screen' && !p.profile.mobile && (
+                  <span className="chip">{ko ? 'PC 전용' : 'Desktop only'}</span>
+                )}
                 {p.autoApprove && (
                   <span className="chip ok" title={ko ? '내가 직접 확인할 항목이 없는 업무는 검수 통과 시 바로 반영' : ''}>
                     {ko ? '검수 통과하면 자동 반영' : 'Auto-merge after review'}
@@ -90,16 +108,7 @@ export function Projects() {
                     {state.employees.find((e) => e.id === state.profileProposals![p.id]!.by)?.name ?? ''}
                   </div>
                   <div>{state.profileProposals[p.id]!.profile.summary}</div>
-                  <div className="sub">
-                    {state.profileProposals[p.id]!.profile.mobile
-                      ? ko
-                        ? '휴대폰에서도 돼야 함'
-                        : 'Must work on phones'
-                      : ko
-                        ? 'PC 전용(휴대폰 신경 안 씀)'
-                        : 'Desktop only'}
-                    {state.profileProposals[p.id]!.profile.game ? (ko ? ' · 게임' : ' · Game') : ''}
-                  </div>
+                  <div className="sub">{profileTraits(state.profileProposals[p.id]!.profile, lang)}</div>
                   <div className="row" style={{ marginTop: 8 }}>
                     <button
                       className="btn small primary"
@@ -261,6 +270,9 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
   const [profileMobile, setProfileMobile] = useState(project?.profile?.mobile ?? true);
   const [mobileTouched, setMobileTouched] = useState(Boolean(project?.profile));
   const [profileGame, setProfileGame] = useState(project?.profile?.game ?? false);
+  const [deliverable, setDeliverable] = useState<Deliverable>(project?.profile?.deliverable ?? 'screen');
+  const [deliverableTouched, setDeliverableTouched] = useState(Boolean(project?.profile));
+  const screen = deliverable === 'screen';
   const [qaAutoReject, setQaAutoReject] = useState(project?.qaAutoReject ?? true);
   const [autoPlaytest, setAutoPlaytest] = useState(project?.autoPlaytest ?? false);
   const [picking, setPicking] = useState(false);
@@ -309,9 +321,9 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
     docRules,
     autoApprove,
     qaAutoReject,
-    autoPlaytest: profileGame && autoPlaytest,
-    ...(profileSummary.trim() || project?.profile
-      ? { profile: { summary: profileSummary.trim(), mobile: profileMobile, game: profileGame } }
+    autoPlaytest: screen && profileGame && autoPlaytest,
+    ...(profileSummary.trim() || project?.profile || !screen
+      ? { profile: { summary: profileSummary.trim(), mobile: screen && profileMobile, game: screen && profileGame, deliverable } }
       : {}),
   };
   const save = () =>
@@ -404,8 +416,14 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
                 if (pc && !phone) setProfileMobile(false);
                 else if (phone) setProfileMobile(true);
               }
+              // 설명으로 결과물 종류를 짐작한다(대표가 직접 고른 뒤에는 건드리지 않음).
+              if (!deliverableTouched) setDeliverable(guessDeliverable(e.target.value));
             }}
-            placeholder={ko ? '예: PC용 픽셀 RPG(메이플 느낌), 키보드 조작, 한국어' : 'e.g. PC pixel RPG, keyboard controls, Korean'}
+            placeholder={
+              ko
+                ? '예: PC용 픽셀 RPG(메이플 느낌) / 카페 창업 사업계획서 / 가계부 CSV를 정리하는 파이썬 도구'
+                : 'e.g. PC pixel RPG / business plan for a cafe / Python tool that tidies a budget CSV'
+            }
             rows={2}
           />
           <span className="hint">
@@ -414,15 +432,40 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
               : 'Every employee keeps this in mind. Leave empty and the chief of staff suggests one.'}
           </span>
         </label>
-        <label className="check-row">
-          <input type="checkbox" checked={profileMobile} onChange={(e) => (setProfileMobile(e.target.checked), setMobileTouched(true))} />
-          <span>{ko ? '휴대폰 화면도 신경 쓰기 (끄면 휴대폰 폭 점검·경고를 하지 않음)' : 'Also care about phone screens'}</span>
+        <label>
+          {ko ? '결과물은 무엇인가요?' : 'What does it produce?'}
+          <Segmented<Deliverable>
+            value={deliverable}
+            onChange={(v) => (setDeliverable(v), setDeliverableTouched(true))}
+            options={(['screen', 'document', 'program'] as const).map((k) => ({ value: k, label: DELIVERABLE[lang]![k]! }))}
+          />
+          <span className="hint">
+            {deliverable === 'document'
+              ? ko
+                ? '직원이 문서(.md)로 써서 냅니다. 승인할 때 앱 안에서 바로 읽고, 조사 결과의 출처 링크는 앱이 하나씩 열어 확인합니다.'
+                : 'Employees write Markdown documents; you read them in the app. Research links are checked by the app.'
+              : deliverable === 'program'
+                ? ko
+                  ? '화면이 없는 프로그램입니다. 승인할 때 확인용 실행 결과(요청과 응답, 입력과 결과)를 앱 안에서 읽습니다.'
+                  : 'No screen: at approval you read the output of demo commands the app runs.'
+                : ko
+                  ? '웹 페이지·앱·게임. 승인할 때 화면 점검 사진을 보고 "실행해 보기"로 직접 확인합니다.'
+                  : 'Web pages, apps and games: screen check pictures and "Run it".'}
+          </span>
         </label>
-        <label className="check-row">
-          <input type="checkbox" checked={profileGame} onChange={(e) => setProfileGame(e.target.checked)} />
-          <span>{ko ? '게임입니다 (손맛·플레이감도 봄)' : 'This is a game'}</span>
-        </label>
-        {profileGame && (
+        {screen && (
+          <label className="check-row">
+            <input type="checkbox" checked={profileMobile} onChange={(e) => (setProfileMobile(e.target.checked), setMobileTouched(true))} />
+            <span>{ko ? '휴대폰 화면도 신경 쓰기 (끄면 휴대폰 폭 점검·경고를 하지 않음)' : 'Also care about phone screens'}</span>
+          </label>
+        )}
+        {screen && (
+          <label className="check-row">
+            <input type="checkbox" checked={profileGame} onChange={(e) => setProfileGame(e.target.checked)} />
+            <span>{ko ? '게임입니다 (손맛·플레이감도 봄)' : 'This is a game'}</span>
+          </label>
+        )}
+        {screen && profileGame && (
           <label className="check-row">
             <input type="checkbox" checked={autoPlaytest} onChange={(e) => setAutoPlaytest(e.target.checked)} />
             <span>

@@ -221,6 +221,20 @@ export const EVIDENCE: Record<Lang, Record<string, string>> = {
   },
 };
 
+/** 결과물 종류(프로젝트 프로필). 없으면 화면. */
+export const DELIVERABLE: Record<Lang, Record<string, string>> = {
+  ko: { screen: '화면 (웹·앱·게임)', document: '문서·조사', program: '화면 없는 프로그램 (API·CLI·파이썬)' },
+  en: { screen: 'Screen (web, app, game)', document: 'Documents & research', program: 'Program without a screen (API, CLI)' },
+};
+
+/** 프로필의 성격을 한 줄로: "문서·조사" / "PC 전용 · 게임" 등. */
+export function profileTraits(p: { deliverable?: string; mobile: boolean; game: boolean }, lang: Lang): string {
+  const kind = p.deliverable ?? 'screen';
+  if (kind !== 'screen') return DELIVERABLE[lang][kind] ?? kind;
+  const ko = lang === 'ko';
+  return `${p.mobile ? (ko ? '휴대폰 화면도 신경 씀' : 'Phones too') : ko ? 'PC 전용(휴대폰 신경 안 씀)' : 'Desktop only'}${p.game ? (ko ? ' · 게임' : ' · game') : ''}`;
+}
+
 export const LangContext = createContext<{ lang: Lang; setLang: (l: Lang) => void }>({ lang: 'ko', setLang: () => {} });
 
 export function useT() {

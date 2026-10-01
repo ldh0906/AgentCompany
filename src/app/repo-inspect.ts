@@ -1,5 +1,5 @@
 // 프로젝트 등록·업무 작성 도우미: 폴더 찾아보기와 저장소 자동 분석(읽기만), 새 프로젝트용 빈 저장소 만들기.
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -130,9 +130,39 @@ async function suggestVerify(repo: string): Promise<VerifySuggestion[]> {
   }
   if (existsSync(path.join(repo, 'Cargo.toml'))) out.push({ label: 'cargo test', evidenceType: 'unit_test', argv: ['cargo', 'test'] });
   if (existsSync(path.join(repo, 'go.mod'))) out.push({ label: 'go test', evidenceType: 'unit_test', argv: ['go', 'test', './...'] });
-  if (['pyproject.toml', 'pytest.ini', 'setup.cfg'].some((f) => existsSync(path.join(repo, f))))
-    out.push({ label: 'pytest', evidenceType: 'unit_test', argv: ['python', '-m', 'pytest'] });
+  const py = pythonTests(
+    (f) => (existsSync(path.join(repo, f)) ? readFileSafe(path.join(repo, f)) : null),
+    existsSync(path.join(repo, 'tests')),
+  );
+  if (py) out.push(py);
   return out;
+}
+
+function readFileSafe(f: string): string {
+  try {
+    return readFileSync(f, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 파이썬 테스트 명령: pytest를 쓴다고 적힌 프로젝트만 pytest, 아니면 표준 라이브러리 unittest.
+ * 실측(2026-10-01, 이 PC): Python 3.14에 pytest가 없어 "python -m pytest" 추천이 늘 실패한다.
+ */
+export function pythonTests(read: (f: string) => string | null, hasTestsDir: boolean): VerifySuggestion | null {
+  const pytestIni = read('pytest.ini');
+  const pyproject = read('pyproject.toml') ?? '';
+  const setupCfg = read('setup.cfg') ?? '';
+  if (pytestIni !== null || /pytest/.test(pyproject) || /\[tool:pytest\]/.test(setupCfg))
+    return { label: 'pytest', evidenceType: 'unit_test', argv: ['python', '-m', 'pytest'] };
+  if (hasTestsDir && (pyproject || read('requirements.txt') !== null || read('main.py') !== null || read('app.py') !== null))
+    return {
+      label: 'Python unittest',
+      evidenceType: 'unit_test',
+      argv: ['python', '-m', 'unittest', 'discover', '-s', 'tests', '-t', '.'],
+    };
+  return null;
 }
 
 /**
@@ -152,8 +182,11 @@ export async function suggestVerifyAt(repo: string, ref: string): Promise<(Verif
     if (scripts[s]) out.push({ label: s, evidenceType: 'static_check', argv: ['npm', 'run', s], runs: scripts[s]!.trim() });
   if (await show('Cargo.toml')) out.push({ label: 'cargo test', evidenceType: 'unit_test', argv: ['cargo', 'test'] });
   if (await show('go.mod')) out.push({ label: 'go test', evidenceType: 'unit_test', argv: ['go', 'test', './...'] });
-  if ((await show('pyproject.toml')) || (await show('pytest.ini')))
-    out.push({ label: 'pytest', evidenceType: 'unit_test', argv: ['python', '-m', 'pytest'] });
+  const files: Record<string, string | null> = {};
+  for (const f of ['pytest.ini', 'pyproject.toml', 'setup.cfg', 'requirements.txt', 'main.py', 'app.py']) files[f] = await show(f);
+  const testsDir = (await git(['ls-tree', '-d', '--name-only', ref, 'tests'], repo, { allowFail: true })).stdout.trim() === 'tests';
+  const py = pythonTests((f) => files[f] ?? null, testsDir);
+  if (py) out.push(py);
   return out;
 }
 

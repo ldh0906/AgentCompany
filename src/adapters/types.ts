@@ -13,6 +13,8 @@ export interface InvocationRequest {
   resumeSessionId?: string;
   /** 실행 중 권한 요청을 GUI로 중계할 때 쓰는 파일 큐 폴더(지원하는 CLI만). */
   approvalDir?: string;
+  /** 웹 검색·페이지 읽기 허용(조사 업무). 없으면 막는다. */
+  web?: boolean;
   runDir: string;
 }
 

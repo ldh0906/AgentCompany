@@ -8,8 +8,8 @@ import path from 'node:path';
 import { ADAPTERS } from '../adapters/index.ts';
 import type { Orchestrator } from '../app/orchestrator.ts';
 import { diffText, projectPaths } from '../workspace/workspace.ts';
-import { DIFFICULTIES, RANKS } from '../core/types.ts';
-import type { AccessLevel, CliKind, EvidenceType, RoleTemplate, TicketType, VerifyCommand } from '../core/types.ts';
+import { DELIVERABLE_KINDS, DIFFICULTIES, RANKS } from '../core/types.ts';
+import type { AccessLevel, CliKind, EvidenceType, ProjectProfile, RoleTemplate, TicketType, VerifyCommand } from '../core/types.ts';
 import { doctor, type DoctorReport, installInfo, openLoginWindow } from '../app/doctor.ts';
 import { listModels } from '../app/models.ts';
 import { requestTokens } from '../app/cost.ts';
@@ -68,6 +68,18 @@ function verifyCommands(b: Body): VerifyCommand[] | undefined {
       throw new ApiError(400, tr(`검증 명령 ${i + 1}의 argv가 올바르지 않습니다.`, `Invalid argv for verification command ${i + 1}.`));
     return { label: str(o, 'label'), argv: argv as string[], evidenceType: oneOf(o, 'evidenceType', EVIDENCE, 'unit_test') };
   });
+}
+
+/** 프로젝트 프로필 입력. 화면이 없는 결과물(문서·프로그램)이면 휴대폰·게임 점검은 끈다. */
+function profileBody(pr: Body): ProjectProfile {
+  const deliverable = oneOf(pr, 'deliverable', DELIVERABLE_KINDS, 'screen');
+  const screen = deliverable === 'screen';
+  return {
+    summary: str(pr, 'summary', { optional: true, max: 500 }),
+    mobile: screen && pr.mobile === true,
+    game: screen && pr.game === true,
+    deliverable,
+  };
 }
 
 export class Api {
@@ -271,13 +283,7 @@ export class Api {
           qaAutoReject: b.qaAutoReject !== false,
           autoPlaytest: b.autoPlaytest === true,
           ...(b.profile && typeof b.profile === 'object' && str(b.profile as Body, 'summary', { optional: true, max: 500 })
-            ? {
-                profile: {
-                  summary: str(b.profile as Body, 'summary', { max: 500 }),
-                  mobile: (b.profile as Body).mobile === true,
-                  game: (b.profile as Body).game === true,
-                },
-              }
+            ? { profile: profileBody(b.profile as Body) }
             : {}),
         });
       case 'POST projects/:id/preview':
@@ -299,8 +305,7 @@ export class Api {
         if (b.qaAutoReject !== undefined) patch.qaAutoReject = b.qaAutoReject === true;
         if (b.autoPlaytest !== undefined) patch.autoPlaytest = b.autoPlaytest === true;
         if (b.profile !== undefined) {
-          const pr = (b.profile ?? {}) as Body;
-          patch.profile = { summary: str(pr, 'summary', { optional: true, max: 500 }), mobile: pr.mobile === true, game: pr.game === true };
+          patch.profile = profileBody((b.profile ?? {}) as Body);
         }
         return this.company.updateProject(id!, patch);
       }

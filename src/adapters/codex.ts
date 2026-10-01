@@ -77,6 +77,7 @@ export const codexAdapter: CliAdapter = {
         ...(req.resumeSessionId ? { AC_CODEX_RESUME: req.resumeSessionId } : {}),
         ...(req.model ? { AC_CODEX_MODEL: req.model } : {}),
         ...(req.effort ? { AC_CODEX_EFFORT: req.effort } : {}),
+        ...(req.web ? { AC_CODEX_WEB: '1' } : {}),
       },
       stdinText: req.prompt,
       files: [],
