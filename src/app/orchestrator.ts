@@ -3226,7 +3226,7 @@ ${failure.detail.slice(0, 400)}`,
    * 직원이 "대표 결정 필요"로 멈췄을 때: 대표가 답하거나(answer) 직원 판단에 맡기고(null) 바로 재개한다.
    * 답은 프로젝트의 현재 결정으로 기록되어 다음 실행부터 모든 직원에게 전달된다.
    */
-  answerTicket(ticketId: string, answer: string | null): Ticket {
+  answerTicket(ticketId: string, answer: string | null, remember = true): Ticket {
     const t = this.company.requireTicket(ticketId);
     if (t.hold?.reason !== 'needs_decision')
       throw new DomainError(tr('대표 결정을 기다리는 업무가 아닙니다.', 'This ticket is not waiting for a decision.'));
@@ -3236,7 +3236,9 @@ ${failure.detail.slice(0, 400)}`,
     // 이 업무에만 전하는 업무방 메모로 남긴다(다음 작업 지시에 들어간다).
     // 실측(2026-09-30): 보류 메모(작업 보고 전문)가 통째로 "규칙"이 되어 이후 모든 업무 지시에 섞였다.
     const listed = questions.map((q) => `- ${q}`).join('\n');
-    if (answer?.trim() && questions.length)
+    // 일회성 허락("이 파일 두 개 지워도 돼")은 규칙으로 남기지 않는다(대표가 고른다).
+    // 실측(2026-10-02, 가계부 T-47): 파일 삭제 허락까지 모든 직원 지시에 들어가는 규칙이 될 뻔했다.
+    if (answer?.trim() && questions.length && remember)
       this.records.recordDecision(t.projectId, questions.map((q) => `${q} → ${answer.trim()}`).join('\n'), [t.id]);
     else {
       const room = this.chat.ensureTicketChannel(t.id);

@@ -351,7 +351,7 @@ export class Api {
       case 'POST pause':
         return this.orch.setPaused(b.paused !== false);
       case 'POST tickets/:id/answer':
-        return this.orch.answerTicket(id!, str(b, 'answer', { optional: true, max: 4000 }) || null);
+        return this.orch.answerTicket(id!, str(b, 'answer', { optional: true, max: 4000 }) || null, b.remember !== false);
       case 'POST tickets/:id/reverify':
         return this.orch.reverify(id!);
       case 'POST tickets/:id/skip-review':

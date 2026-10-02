@@ -33,6 +33,15 @@ test('대표가 직접 답하면 그 답이 결정으로 기록된다', { timeou
   assert.throws(() => env.orch.answerTicket(tk.id, 'x'), /결정|decision/, '보류가 아니면 거부');
 });
 
+test('규칙으로 남기지 않은 답(일회성 허락)은 이 업무방에만 전한다', { timeout: 120_000 }, async (t) => {
+  const env = await setup(t, { implementer: 'asker' });
+  const tk = newImplTicket(env);
+  await driveUntil(env, tk.id, (x) => x.hold !== null);
+  env.orch.answerTicket(tk.id, '이번만 그 파일 지워도 됩니다', false);
+  assert.ok(!env.orch.records.decisions(env.projectId, 'current').some((x) => x.text.includes('이번만')), '규칙이 되지 않는다');
+  assert.ok(env.orch.chat.messages(`t:${tk.id}`, 50).some((m) => m.author === 'ceo' && m.text.includes('이번만 그 파일 지워도 됩니다')));
+});
+
 test('작업 지시: 업무가 값을 정하라고 하면 직원이 합리적인 값을 정한다(결정이 없다고 멈추지 않는다)', async (t) => {
   const env = await setup(t);
   const [emp] = env.company.employees();

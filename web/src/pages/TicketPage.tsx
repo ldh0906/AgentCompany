@@ -33,6 +33,7 @@ export function TicketPage({ id }: { id: string }) {
   const [log, setLog] = useState<{ id: string; text: string; reportError: string | null } | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [answer, setAnswer] = useState('');
+  const [remember, setRemember] = useState(true);
   const [scopeAdd, setScopeAdd] = useState('');
   const { busy, run } = useAction();
   const ko = lang === 'ko';
@@ -298,12 +299,17 @@ export function TicketPage({ id }: { id: string }) {
               <textarea
                 value={answer}
                 onChange={(e) => setAnswer(e.target.value)}
-                placeholder={
-                  ko
-                    ? '직원의 질문에 답하세요. 답은 프로젝트 규칙으로 남아 모든 직원이 따릅니다.'
-                    : 'Answer the questions. Recorded as a decision for everyone.'
-                }
+                placeholder={ko ? '직원의 질문에 답하세요.' : 'Answer the questions.'}
               />
+              {/* 일회성 허락은 규칙으로 남기지 않게(실측 2026-10-02: 파일 삭제 허락까지 규칙이 될 뻔했다) */}
+              <label className="check-row">
+                <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+                <span>
+                  {ko
+                    ? '프로젝트 규칙으로 남기기 (끄면 이번 업무에만 전합니다: 일회성 허락 등)'
+                    : 'Keep as a project rule (off: this ticket only)'}
+                </span>
+              </label>
               <div className="row" style={{ justifyContent: 'flex-end' }}>
                 <button
                   className="btn"
@@ -322,7 +328,7 @@ export function TicketPage({ id }: { id: string }) {
                   disabled={busy || !answer.trim()}
                   onClick={() =>
                     run(
-                      () => api(`tickets/${tk.id}/answer`, { body: { answer } }),
+                      () => api(`tickets/${tk.id}/answer`, { body: { answer, remember } }),
                       ko ? '답을 기록하고 재개했습니다.' : 'Answered; resumed.',
                     ).then((ok) => ok && (setAnswer(''), reload()))
                   }
