@@ -39,7 +39,10 @@ export class Acceptance {
 
   /** 시험 담당: 업무를 가장 많이 한 AI와 다른 AI의 QA(직급 높은 순). 없으면 아무 QA, 그다음 최고 직급. */
   private pickTester(tickets: Ticket[], screen: boolean): Employee | null {
-    const all = this.h.company.activeEmployees().sort((a, b) => RANK_ORDER[rankOf(b)] - RANK_ORDER[rankOf(a)]);
+    // 덜 바쁜 사람부터, 같으면 직급 높은 순(늘 팀장 한 명에게 몰리지 않게, 대표 요청 2026-10-03)
+    const all = this.h.company
+      .activeEmployees()
+      .sort((a, b) => this.h.loadOf(a.id) - this.h.loadOf(b.id) || RANK_ORDER[rankOf(b)] - RANK_ORDER[rankOf(a)]);
     // 화면 결과물은 사진을 봐야 한다: 사진을 읽는 Claude 직원이 있으면 그중에서 고른다(화면 점검 QA와 같은 기준).
     const claude = all.filter((e) => e.cli === 'claude');
     const active = screen && claude.length ? claude : all;

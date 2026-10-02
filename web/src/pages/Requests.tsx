@@ -138,7 +138,9 @@ export function RequestBox() {
                 </span>
               </div>
               <div className="meta">
-                {when(r.createdAt)} · {r.summary}
+                {when(r.createdAt)} ·{' '}
+                {ko ? `초안 ${empName(state.employees, r.employeeId)}` : `drafted by ${empName(state.employees, r.employeeId)}`}
+                {r.summary ? ` · ${r.summary}` : ''}
               </div>
               {r.error &&
                 (retrying ? (

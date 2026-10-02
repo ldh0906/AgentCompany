@@ -71,3 +71,14 @@ test('초안 작성 중인 요청을 버리면 비서실장 실행을 끊고, �
   assert.equal(after.drafts.length, 0, '초안이 붙지 않는다');
   assert.notEqual(env.orch.records.run(run.id)!.status, 'running');
 });
+
+test('초안은 비서실장·기획 중 한가한 사람에게: 비서실장이 쓰는 중이면 기획 직원이 받는다', { timeout: 60_000 }, async (t) => {
+  const env = await setup(t);
+  const chief = env.company.hireEmployee({ name: '비서실장', roles: ['chief-of-staff'], cli: 'fake', model: 'slow', rank: 'lead' });
+  const planner = env.company.hireEmployee({ name: '기획', roles: ['planner'], cli: 'fake', model: 'diligent' });
+  const a = await env.orch.submitRequest(env.projectId, '파티 해산 기능');
+  const b = await env.orch.submitRequest(env.projectId, '길드 채팅');
+  assert.equal(a.employeeId, chief.id, '한가하면 비서실장이 먼저');
+  assert.equal(b.employeeId, planner.id, '비서실장이 바쁘면 기획 직원');
+  await env.orch.idle();
+});

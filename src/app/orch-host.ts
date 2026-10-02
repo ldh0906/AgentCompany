@@ -29,4 +29,6 @@ export interface OrchHost {
   launchChat(p: ChatLaunch): Promise<string>;
   track(key: string, p: Promise<void>): void;
   notice(title: string, body: string, link?: string): void;
+  /** 지금 돌고 있는 이 직원의 실행 수(일을 고르게 나누는 데 쓴다) */
+  loadOf(employeeId: string): number;
 }

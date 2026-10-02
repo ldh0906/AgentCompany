@@ -190,6 +190,7 @@ export class Orchestrator {
       dataDir: this.opts.dataDir,
       language: this.opts.language,
       paused: () => this.paused,
+      loadOf: (id) => this.loadOf(id),
       changed: (kind, id) => this.changed(kind, id),
       preview: (projectId, ticketId) => this.preview(projectId, ticketId),
       // 답에서 누구를 불러도 연쇄 대화로 번지지 않게 최대 깊이로 둔다.
@@ -3241,6 +3242,27 @@ ${failure.detail.slice(0, 400)}`,
     return this.company.activeEmployees().find((e) => e.roles.includes('chief-of-staff')) ?? null;
   }
 
+  /** 지금 돌고 있는 이 직원의 실행 수 */
+  loadOf(employeeId: string): number {
+    return [...this.liveRuns.keys()].filter((id) => this.records.run(id)?.employeeId === employeeId).length;
+  }
+
+  /**
+   * 초안 담당: 비서실장·기획 역할 중 지금 덜 바쁜 사람(같으면 비서실장, 그다음 직급 높은 순).
+   * 대표 요청(2026-10-03): 업무를 비서실장에게 모두 몰면 병목이 된다. 실측(4777): 최근 초안 14개를 모두 팀장 한 명이 썼다.
+   */
+  drafter(): Employee | null {
+    const pool = this.company.activeEmployees().filter((e) => e.roles.includes('chief-of-staff') || e.roles.includes('planner'));
+    return (
+      pool.sort(
+        (a, b) =>
+          this.loadOf(a.id) - this.loadOf(b.id) ||
+          Number(b.roles.includes('chief-of-staff')) - Number(a.roles.includes('chief-of-staff')) ||
+          RANK_ORDER[rankOf(b)] - RANK_ORDER[rankOf(a)],
+      )[0] ?? null
+    );
+  }
+
   /** 대표 요청을 비서실장에게 보낸다. 비서실장은 읽기 전용으로 저장소를 보고 티켓 초안만 낸다. */
   /** 실패한 초안 요청을 같은 내용으로 다시 보낸다(예전 요청은 버린 것으로 남긴다). */
   async retryRequest(requestId: string): Promise<CeoRequest> {
@@ -3257,11 +3279,11 @@ ${failure.detail.slice(0, 400)}`,
 
   async submitRequest(projectId: string, text: string): Promise<CeoRequest> {
     const project = this.company.requireProject(projectId);
-    const chief = this.chiefOfStaff();
+    const chief = this.drafter();
     if (!chief)
       throw new DomainError(
         tr(
-          '비서실장 역할의 활성 직원이 없습니다. 직원에게 비서실장 역할을 주거나 업무를 직접 만드세요.',
+          '비서실장·기획 역할의 활성 직원이 없습니다. 직원에게 비서실장 역할을 주거나 업무를 직접 만드세요.',
           'No active chief of staff. Assign that role to an employee or create a ticket directly.',
         ),
       );

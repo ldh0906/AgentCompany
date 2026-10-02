@@ -337,7 +337,11 @@ export class ScreenQa {
 
   /** 화면을 볼 직원: 사진을 읽을 수 있는 Claude QA를 먼저, 없으면 다른 Claude, 그다음 아무 QA·검수자. 담당자는 피한다. */
   private pickScreenQa(t: Ticket): Employee | null {
-    const pool = this.h.company.employees().filter((e) => e.active && !e.removedAt && e.id !== t.assigneeId);
+    // 덜 바쁜 사람부터(같으면 원래 순서): 늘 같은 한 사람(팀장)에게 몰리지 않게(대표 요청 2026-10-03)
+    const pool = this.h.company
+      .employees()
+      .filter((e) => e.active && !e.removedAt && e.id !== t.assigneeId)
+      .sort((a, b) => this.h.loadOf(a.id) - this.h.loadOf(b.id));
     return (
       pool.find((e) => e.cli === 'claude' && e.roles.includes('qa')) ??
       pool.find((e) => e.cli === 'claude') ??
