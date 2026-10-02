@@ -364,7 +364,9 @@ function DraftReview({ r }: { r: CeoRequest }) {
     run(() => api(`requests/${r.id}/answer`, { body: { items } }), ko ? '답을 규칙으로 남겼습니다.' : 'Recorded as a decision.').then(
       reload,
     );
-  const confirm = () => {
+  // withVerify=false: 제안된 검사 명령을 켜지 않고, 그 검사가 있어야 하는 요구사항은 검수자 판단(inspection)으로 바꿔 만든다.
+  // 대표 요청(2026-10-03): "자동 검사도 함께 켜고 만들기" 하나뿐이라 선택지가 없었다.
+  const confirm = (withVerify = true) => {
     const remap = new Map(kept.map((i, n) => [i, n]));
     const drafts = kept.map((i) => {
       const d = r.drafts[i]!;
@@ -372,7 +374,10 @@ function DraftReview({ r }: { r: CeoRequest }) {
       return {
         ...d,
         title: ed.title.trim() || d.title,
-        requirements: ed.reqs.map((q, j) => ({ text: q.text.trim() || d.requirements[j]!.text, evidenceType: q.evidenceType })),
+        requirements: ed.reqs.map((q, j) => ({
+          text: q.text.trim() || d.requirements[j]!.text,
+          evidenceType: !withVerify && missingType(q.evidenceType) ? 'inspection' : q.evidenceType,
+        })),
         difficulty: diffs[i] ?? d.difficulty ?? 'normal',
         dependsOn: d.dependsOn.filter((x) => remap.has(x)).map((x) => remap.get(x)!),
       };
@@ -384,7 +389,7 @@ function DraftReview({ r }: { r: CeoRequest }) {
         // 비서실장이 제안한 프로젝트 프로필: 대표가 확정하면 저장해 모든 직원이 기억하게 한다.
         if (r.profile && !project.profile && saveProfile)
           await api(`projects/${project.id}`, { method: 'PATCH', body: { profile: r.profile } });
-        if (fixable)
+        if (fixable && withVerify)
           await api(`projects/${project.id}`, {
             method: 'PATCH',
             body: {
@@ -687,7 +692,25 @@ function DraftReview({ r }: { r: CeoRequest }) {
         <button className="btn" disabled={busy} onClick={() => run(() => api(`requests/${r.id}/dismiss`, { body: {} })).then(reload)}>
           {ko ? '버리기' : 'Dismiss'}
         </button>
-        <button className={`btn ${mismatches.length && !fixable ? 'danger' : 'ok'}`} disabled={busy || kept.length === 0} onClick={confirm}>
+        {fixable && (
+          <button
+            className="btn"
+            disabled={busy || kept.length === 0}
+            onClick={() => confirm(false)}
+            title={
+              ko
+                ? '자동 검사를 켜지 않습니다. 그 검사가 있어야 하는 요구사항은 검수 직원이 읽고 판단하는 것으로 바꿉니다.'
+                : 'Skip the verify command; requirements that needed it are judged by the reviewer instead.'
+            }
+          >
+            {ko ? `검사 없이 ${kept.length}개 만들기` : `Create ${kept.length} without it`}
+          </button>
+        )}
+        <button
+          className={`btn ${mismatches.length && !fixable ? 'danger' : 'ok'}`}
+          disabled={busy || kept.length === 0}
+          onClick={() => confirm()}
+        >
           {fixable
             ? ko
               ? `자동 검사도 함께 켜고 ${project.name} 업무 ${kept.length}개 만들기`
