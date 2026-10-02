@@ -65,9 +65,21 @@ export const dmChannelId = (employeeId: string) => `dm:${employeeId}`;
 const REF_RE = /\b(T-\d+|D-[0-9a-f]{6,})\b/g;
 
 /** 본문에서 멘션을 찾는다. 이름에 공백이 있으므로(예: "Codex 검수") 긴 이름부터 맞춘다. */
-export function parseMentions(text: string, employees: Pick<Employee, 'id' | 'name'>[], members: string[]): string[] {
+export function parseMentions(
+  text: string,
+  employees: (Pick<Employee, 'id' | 'name'> & { active?: boolean; removedAt?: string | null })[],
+  members: string[],
+): string[] {
   const out = new Set<string>();
-  const names = [...employees].sort((a, b) => b.name.length - a.name.length);
+  // 삭제한 직원은 빼고, 같은 이름이면 활성 직원을 고른다.
+  // 실측(2026-10-03, 4777): 9/30에 지운 "Claude 팀장"과 새 "Claude 팀장"이 같은 이름이라 @멘션이 옛 직원으로 가서
+  // "비활성 상태라 답할 수 없습니다"만 뜨고 아무도 답하지 않았다.
+  const seen = new Set<string>();
+  const names = [...employees]
+    .filter((e) => !e.removedAt)
+    .sort((a, b) => Number(b.active ?? true) - Number(a.active ?? true))
+    .filter((e) => (seen.has(e.name) ? false : (seen.add(e.name), true)))
+    .sort((a, b) => b.name.length - a.name.length);
   let rest = text;
   for (const e of names) {
     const tag = `@${e.name}`;

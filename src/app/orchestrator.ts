@@ -28,7 +28,7 @@ import {
   type TicketDraft,
   type WorkReport,
 } from '../agents/report.ts';
-import { Chat, ticketChannelId, type ChatMessage } from './chat.ts';
+import { Chat, ticketChannelId, type Channel, type ChatMessage } from './chat.ts';
 import { writeDecision } from '../approvals/file-queue.ts';
 import type { Actor } from '../core/ticket-machine.ts';
 import type {
@@ -1317,6 +1317,18 @@ export class Orchestrator {
     if (!text.trim()) throw new DomainError(tr('내용이 비어 있습니다.', 'Message is empty.'));
     const m = this.chat.post(channelId, 'ceo', text.trim(), 'chat');
     const responders = c.kind === 'dm' ? c.members.filter((x) => x !== 'ceo') : m.mentions.filter((x) => x !== 'ceo');
+    // @멘션이 없으면 그 방의 담당이 답한다. 실측(2026-10-03, 4777 T-4): 업무방에 "이거뭐야"라고 썼는데 아무도 답하지 않았다.
+    if (!responders.length && c.kind !== 'dm') {
+      const d = this.defaultResponder(c);
+      if (d) responders.push(d);
+      else
+        this.chat.post(
+          channelId,
+          'system',
+          tr('답할 직원이 없습니다. @이름으로 불러 주세요.', 'Nobody to answer here. Mention someone with @name.'),
+          'event',
+        );
+    }
     for (const id of responders) {
       if (c.ticketId) {
         const live = this.liveWorkRun(c.ticketId, id);
@@ -1328,6 +1340,27 @@ export class Orchestrator {
       await this.dispatchChat(channelId, id, 0, m);
     }
     return m;
+  }
+
+  /**
+   * 멘션 없는 대표 말에 답할 사람. 업무방: 지금 그 업무를 작업 중이 아닌 담당 → 책임자 → 검수자 → 비서실장.
+   * 토론방: 사회자. 그룹 방: 연 사람(직원이면) → 첫 직원. 전체 방: 비서실장.
+   */
+  private defaultResponder(c: Channel): string | null {
+    const ok = (id: string | null | undefined): id is string => Boolean(id) && this.company.activeEmployees().some((e) => e.id === id);
+    const chief = this.chiefOfStaff()?.id ?? null;
+    if (c.kind === 'ticket' && c.ticketId) {
+      const t = this.company.store.get<Ticket>('tickets', c.ticketId);
+      const free = (id: string | null | undefined) => ok(id) && !this.liveWorkRun(c.ticketId!, id!);
+      return [t?.assigneeId, t?.ownerId, t?.reviewerId, chief, ...c.members].find(free) ?? null;
+    }
+    if (c.kind === 'group') {
+      const debate = this.debates.list(50).find((d) => d.channelId === c.id);
+      if (debate && ok(debate.moderator)) return debate.moderator;
+      if (ok(c.createdBy) && c.members.includes(c.createdBy)) return c.createdBy;
+      return c.members.find((x) => x !== 'ceo' && ok(x)) ?? null;
+    }
+    return ok(chief) ? chief : null;
   }
 
   /** 작업 중인 직원에게 지시: Codex는 진행 중인 턴에 끼워 넣고(turn/steer), 나머지 CLI는 다음 회차 지시에 넣는다. */

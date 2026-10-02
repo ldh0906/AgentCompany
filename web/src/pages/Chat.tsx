@@ -557,7 +557,7 @@ function Composer({ channel, quote, onSent }: { channel: Channel; quote: string;
         ? `${channel.name}에게 보내기 — 늘 답합니다`
         : `Message ${channel.name} — they always reply`
       : ko
-        ? '@이름 으로 부르면 그 직원이 답합니다. 작업 중이면 지시로 전달 · # 업무 · / 명령'
+        ? '@이름으로 부르면 그 직원이, 안 부르면 이 방 담당이 답합니다 · # 업무 · / 명령'
         : '@name gets a reply (steers them if working) · # ticket · / commands';
   return (
     <div className="composer">
@@ -716,7 +716,7 @@ function NewRoomModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
         </label>
         <div className="hint">
           {ko
-            ? '대표는 모든 방을 봅니다. 방에서 @이름으로 부르면 그 직원이 답합니다.'
+            ? '대표는 모든 방을 봅니다. @이름으로 부르면 그 직원이, 안 부르면 방 담당(업무 담당자·사회자·방을 연 직원·비서실장)이 답합니다.'
             : 'You can see every room. Mention someone with @name to get their reply.'}
         </div>
       </div>

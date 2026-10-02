@@ -26,6 +26,14 @@ test('멘션 찾기: 공백 있는 이름, 긴 이름 먼저, @대표·@전체',
   assert.deepEqual(parseMentions('@Codex 와 @Claude 팀장', emps, []).sort(), ['B', 'C']);
   assert.deepEqual(parseMentions('@대표 확인 부탁', emps, []), ['ceo']);
   assert.deepEqual(parseMentions('@전체 공지', emps, ['ceo', 'A']).sort(), ['A', 'ceo']);
+  // 지운 직원과 이름이 같으면 지금 직원으로(실측 2026-10-03: 옛 "Claude 팀장"으로 가서 "비활성"만 떴다)
+  const withOld = [
+    { id: 'OLD', name: 'Claude 팀장', active: false, removedAt: '2026-09-30T00:00:00Z' },
+    { id: 'OFF', name: 'Claude 검수', active: false, removedAt: null },
+    { id: 'NEW', name: 'Claude 팀장', active: true, removedAt: null },
+    { id: 'ON', name: 'Claude 검수', active: true, removedAt: null },
+  ];
+  assert.deepEqual(parseMentions('@Claude 팀장 @Claude 검수 이거 봐', withOld, []).sort(), ['NEW', 'ON']);
 });
 
 test('업무방: 작업 보고·검수 의견·진행 상황이 대화로 쌓인다(직원끼리의 대화를 대표가 본다)', { timeout: 120_000 }, async (t) => {
@@ -258,4 +266,22 @@ test('1:1 방은 그 직원만: 답에서 동료를 불러도 아무도 들어�
   assert.deepEqual(env.orch.chat.channel(dm.id)!.members, ['ceo', impl!.id]);
   assert.throws(() => env.orch.chat.addMembers(dm.id, [qa!.id]), /1:1/);
   assert.ok(!env.orch.chat.channels().some((c) => c.kind === 'group'), '1:1 방에서 다른 방을 열지 않는다');
+});
+
+test('멘션 없이 써도 방 담당이 답한다: 업무방은 담당자, 그룹 방은 연 직원', { timeout: 60_000 }, async (t) => {
+  const env = await setup(t);
+  const [impl, qa] = env.company.employees();
+  const tk = newImplTicket(env);
+  await driveUntil(env, tk.id, (x) => x.assigneeId !== null);
+  const room = env.orch.chat.ensureTicketChannel(tk.id)!;
+  const assignee = env.company.requireTicket(tk.id).assigneeId!;
+  // 담당자가 아직 일을 시작하지 않았으면 담당자가 답한다(일하는 중이면 책임자·검수자·비서실장)
+  await env.orch.ceoMessage(room.id, '이거뭐야');
+  await until(env, () => env.orch.chat.messages(room.id).some((m) => m.kind === 'chat' && m.author !== 'ceo' && m.author !== 'system'));
+  const answered = env.orch.chat.messages(room.id).find((m) => m.kind === 'chat' && m.author !== 'ceo' && m.author !== 'system')!;
+  assert.ok([assignee, env.company.requireTicket(tk.id).ownerId, env.company.requireTicket(tk.id).reviewerId].includes(answered.author));
+  const group = env.orch.chat.createGroup({ name: '기획', members: [impl!.id, qa!.id], createdBy: qa!.id });
+  await env.orch.ceoMessage(group.id, '어떻게 생각해?');
+  await until(env, () => env.orch.chat.messages(group.id).some((m) => m.author === qa!.id));
+  await env.orch.idle();
 });
