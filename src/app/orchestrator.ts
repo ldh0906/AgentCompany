@@ -480,7 +480,11 @@ export class Orchestrator {
       await this.checkStalled();
       this.desk.notifyNewTodos();
       // 우선순위(1 높음 → 3 낮음) 순, 같으면 먼저 만든 순: 쓰기 범위가 겹칠 때 높은 업무가 먼저 잠금을 잡는다.
-      for (const t of [...this.company.tickets()].sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2))) {
+      this.expireOrphanApprovals();
+      for (const snap of [...this.company.tickets()].sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2))) {
+        // 앞 업무를 처리하는 동안(await) 대표가 승인하는 등 상태가 바뀌었을 수 있다: 매번 최신 상태로 판단한다.
+        // 실측(2026-10-02, 식단 T-52): 6초 전 목록의 "승인 대기"를 보고, 대표가 막 승인한 업무에 승인 요청을 또 만들었다.
+        const t = this.company.store.get<Ticket>('tickets', snap.id) ?? snap;
         if (t.hold?.reason === 'waiting_dependency' && t.dependsOn.every((d) => this.company.requireTicket(d).status === 'done')) {
           this.apply(t.id, { type: 'release_hold' }); // 선행 업무가 끝나면 오케스트레이터가 스스로 해제
           continue;
@@ -2233,6 +2237,18 @@ ${failure.detail.slice(0, 400)}`,
 
   private integrationSubject(t: Ticket, sub: RunRecord): string {
     return [t.id, sub.baseSha, sub.headSha, sha256(sub.changedPaths.join('\n'))].join('|');
+  }
+
+  /** 업무가 이미 승인 대기가 아닌데 남은 반영 승인 요청은 만료한다(대표 승인함에 끝난 일이 남지 않게). */
+  private expireOrphanApprovals(): void {
+    for (const a of this.records.approvals('pending')) {
+      if (a.kind !== 'integrate' || !a.ticketId) continue;
+      const t = this.company.store.get<Ticket>('tickets', a.ticketId);
+      if (t && t.status !== 'awaiting_approval')
+        this.records.setApprovalState(a.id, 'expired', 'orchestrator', {
+          reason: tr('업무가 이미 승인 대기가 아닙니다.', 'The ticket is no longer awaiting approval.'),
+        });
+    }
   }
 
   private ensureIntegrationApproval(t: Ticket): void {
