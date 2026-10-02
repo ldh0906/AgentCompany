@@ -9,7 +9,7 @@ import { buildAcceptancePrompt } from '../agents/acceptance-prompts.ts';
 import { extractLastJson, screenStepsOf, type ScreenScenario } from '../agents/report.ts';
 import { tr } from '../core/i18n.ts';
 import type { Employee, EvidenceType, Project, Ticket } from '../core/types.ts';
-import { DEFAULT_BUDGET, DIFFICULTIES, RANK_ORDER, rankOf, type Difficulty } from '../core/types.ts';
+import { DEFAULT_BUDGET, DIFFICULTIES, RANK_ORDER, deliverableOf, rankOf, type Difficulty } from '../core/types.ts';
 import type { OrchHost } from './orch-host.ts';
 import type { AcceptanceRound, CeoRequest, RunRecord } from './records.ts';
 
@@ -37,11 +37,14 @@ export class Acceptance {
   }
 
   /** 시험 담당: 업무를 가장 많이 한 AI와 다른 AI의 QA(직급 높은 순). 없으면 아무 QA, 그다음 최고 직급. */
-  private pickTester(tickets: Ticket[]): Employee | null {
-    const active = this.h.company.activeEmployees().sort((a, b) => RANK_ORDER[rankOf(b)] - RANK_ORDER[rankOf(a)]);
+  private pickTester(tickets: Ticket[], screen: boolean): Employee | null {
+    const all = this.h.company.activeEmployees().sort((a, b) => RANK_ORDER[rankOf(b)] - RANK_ORDER[rankOf(a)]);
+    // 화면 결과물은 사진을 봐야 한다: 사진을 읽는 Claude 직원이 있으면 그중에서 고른다(화면 점검 QA와 같은 기준).
+    const claude = all.filter((e) => e.cli === 'claude');
+    const active = screen && claude.length ? claude : all;
     const byCli = new Map<string, number>();
     for (const t of tickets) {
-      const cli = active.find((e) => e.id === t.assigneeId)?.cli;
+      const cli = all.find((e) => e.id === t.assigneeId)?.cli;
       if (cli) byCli.set(cli, (byCli.get(cli) ?? 0) + 1);
     }
     const busiest = [...byCli.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -67,7 +70,7 @@ export class Acceptance {
     const project = this.h.company.store.get<Project>('projects', req.projectId);
     if (!project || project.removedAt) return;
     const round = (req.acceptanceRounds?.length ?? 0) + 1;
-    const tester = this.pickTester(tickets);
+    const tester = this.pickTester(tickets, deliverableOf(project) === 'screen');
     if (!tester) return;
     const record: AcceptanceRound = {
       round,
