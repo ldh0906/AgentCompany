@@ -152,3 +152,33 @@ test('조사·문서 검수: 결론·핵심 숫자를 바꾸는 오류만 반려
   assert.match(review(project(), ticket('research', 'inspection')), /minor fixes/);
   assert.doesNotMatch(review(project(), ticket('impl', 'unit_test')), /minor fixes/);
 });
+
+test('대표 요청 원문: 담당자와 검수자 모두 보고, 다른 조각의 조건과도 어긋나지 않게', () => {
+  const req = '일주일 식단 짜줘. 주말에 한 번 장보면 되게';
+  const w = buildWorkPrompt({
+    employee: emp,
+    project: doc,
+    ticket: ticket('doc'),
+    nonce: 'n',
+    decisions: [],
+    feedback: null,
+    request: req,
+    language: 'ko',
+  });
+  assert.match(w, /The CEO's original request[\s\S]*주말에 한 번 장보면 되게/);
+  assert.match(w, /must not contradict anything the CEO asked for/);
+  const r = buildReviewPrompt({
+    employee: emp,
+    project: doc,
+    ticket: ticket('doc'),
+    nonce: 'n',
+    diff: '',
+    changedPaths: [],
+    evidence: [],
+    assigneeSummary: '',
+    request: req,
+    language: 'ko',
+  });
+  assert.match(r, /does not contradict the original request/);
+  assert.doesNotMatch(work(doc, ticket('doc')), /original request/, '요청이 없으면(직접 만든 업무) 빼기');
+});

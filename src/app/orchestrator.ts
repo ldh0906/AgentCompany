@@ -690,6 +690,7 @@ export class Orchestrator {
         nonce,
         decisions: this.records.decisions(project.id, 'current'),
         feedback,
+        request: this.records.requestOfTicket(next)?.text ?? null,
         language: this.opts.language,
         colleagues: this.company
           .activeEmployees()
@@ -2210,6 +2211,7 @@ ${failure.detail.slice(0, 400)}`,
         evidence: this.records.evidenceFor(t.id, { submission: sub.id }),
         assigneeSummary: sub.summary,
         decisions: this.records.decisions(project.id, 'current'),
+        request: this.records.requestOfTicket(t)?.text ?? null,
         language: this.opts.language,
       });
       // 검수자는 항상 읽기 전용으로 실행한다.

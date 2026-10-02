@@ -186,6 +186,14 @@ export class Records {
   requests(limit = 30): CeoRequest[] {
     return this.store.list<CeoRequest>('requests', 'ORDER BY created_at DESC LIMIT ?', limit);
   }
+  /** 업무를 만든 대표 요청(초안에서 확정한 업무만; 직접 만든 업무·나눈 조각은 없음). */
+  requestOfTicket(t: { id: string; projectId: string }): CeoRequest | null {
+    return (
+      this.store
+        .list<CeoRequest>('requests', 'WHERE project_id = ? ORDER BY created_at DESC LIMIT 100', t.projectId)
+        .find((r) => r.ticketIds.includes(t.id)) ?? null
+    );
+  }
 
   // ---- 증거 ----
   saveEvidence(e: Evidence, runId: string | null): void {

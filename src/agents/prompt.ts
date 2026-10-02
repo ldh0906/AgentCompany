@@ -80,6 +80,21 @@ export interface WorkPromptInput {
   screenCheckCommand?: string | null;
   /** 혼자 하기엔 큰 업무를 나눌 수 있는가(나눈 조각·이미 나눈 업무는 불가) */
   canSplit?: boolean;
+  /** 이 업무를 만든 대표 요청 원문(초안에서 확정한 업무만) */
+  request?: string | null;
+}
+
+/**
+ * 대표 요청 원문: 업무는 요청의 한 조각이라, 다른 조각에만 적힌 조건을 놓치기 쉽다.
+ * 실측(2026-10-02, 식단): 요청은 "주말에 한 번 장보기"였는데 식단 업무에는 그 조건이 없어 "월요일 퇴근길 장보기"로 짰고 검수도 통과했다.
+ */
+function requestBlock(request: string | null | undefined, who: 'work' | 'review'): string {
+  if (!request) return '';
+  const rule =
+    who === 'work'
+      ? 'Your part must not contradict anything the CEO asked for in this request, even conditions written for other parts (for example when they shop, what they dislike, their budget).'
+      : 'Also check that the result does not contradict the original request above, including conditions that only appear there; a contradiction the CEO would notice is a reason to request changes.';
+  return `${dataBlock("The CEO's original request (this ticket is one part of it)", request)}\n${rule}`;
 }
 
 /** 대표 직접 확인 요구를 대표가 무엇으로 확인하는지(결과물 종류별). */
@@ -184,6 +199,8 @@ Done criteria: ${i.ticket.doneCriteria}
 
 ${profileBlock(i.project)}
 
+${requestBlock(i.request, 'work')}
+
 ${dataBlock('Project document rules', i.project.docRules)}
 
 ${dataBlock('Current decisions (only status=current are binding)', i.decisions.map((d) => `- [${d.id}] ${d.text}`).join('\n'))}
@@ -209,6 +226,8 @@ export interface ReviewPromptInput {
   evidence: Evidence[];
   assigneeSummary: string;
   decisions?: Decision[];
+  /** 이 업무를 만든 대표 요청 원문 */
+  request?: string | null;
   language: string;
 }
 
@@ -278,6 +297,8 @@ ${profileBlock(i.project)}
 ${dataBlock('Project document rules', i.project.docRules)}
 
 ${dataBlock('Current CEO decisions (binding)', (i.decisions ?? []).map((d) => `- [${d.id}] ${d.text}`).join('\n'))}
+
+${requestBlock(i.request, 'review')}
 
 ## Final answer format (required)
 Write reasons in language "${i.language}". End with exactly one JSON code block:
