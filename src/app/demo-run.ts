@@ -13,6 +13,7 @@ import { locateExecutable } from '../runner/locate.ts';
 import { startProcess } from '../runner/process.ts';
 import { deliverableKindOf, viewOf, type DeliverableFile } from './deliverables.ts';
 import { inspectDownload } from './screen-check.ts';
+import { git } from '../workspace/git.ts';
 
 export interface DemoCommand {
   requirementId: string;
@@ -183,13 +184,17 @@ export async function demoOutputFiles(dir: string, before: Map<string, number>, 
   // 출력에 적힌 파일도 결과물로 본다: 같은 내용을 다시 쓰면 바뀐 것으로 잡히지 않는다.
   // 실측(2026-10-02, 가계부): 직원이 데모 결과 CSV를 커밋해 두어, 데모가 같은 파일을 다시 써도 "바뀐 파일"이 0개였다.
   const mentioned = mentionedFiles(outputText, dir).filter((p) => now.has(p) && !changed.includes(p));
-  const picked = [...mentioned, ...changed.sort()].slice(0, max);
+  // 저장소에 들어 있고 바뀌지 않은 파일은 입력(예시 데이터·규칙 파일): 엑셀 판정 없이 뒤에 둔다.
+  // 실측(2026-10-02, 가계부): 입력 sample.csv에도 "엑셀에서 한글이 깨질 수 있습니다" ⚠가 붙어 결과 파일 판정이 묻혔다.
+  const tracked = new Set((await git(['ls-files', '-z'], dir, { allowFail: true })).stdout.split('\0').filter(Boolean));
+  const isInput = (p: string) => !changed.includes(p) && tracked.has(p);
+  const picked = [...changed.sort(), ...mentioned.filter((p) => !isInput(p)), ...mentioned.filter(isInput)].slice(0, max);
   const out: DemoFile[] = [];
   for (const p of picked) {
     const buf = await readFile(path.join(dir, p)).catch(() => null);
     if (!buf) continue;
     const kind = deliverableKindOf(p)!;
-    const verdict = kind === 'image' ? '' : inspectDownload(path.basename(p), buf).verdict;
+    const verdict = kind === 'image' || isInput(p) ? '' : inspectDownload(path.basename(p), buf).verdict;
     out.push({ path: p, kind, status: before.has(p) ? 'modified' : 'added', ...viewOf(p, kind, buf), ...(verdict ? { verdict } : {}) });
   }
   return out;

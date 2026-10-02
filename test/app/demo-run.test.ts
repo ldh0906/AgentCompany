@@ -14,6 +14,7 @@ import {
   runDemos,
 } from '../../src/app/demo-run.ts';
 import { locateExecutable } from '../../src/runner/locate.ts';
+import { AGENT_IDENTITY, git } from '../../src/workspace/git.ts';
 
 test('보고서의 demoCommands: 형식이 틀린 항목은 버리고, 모르는 요구사항은 *', () => {
   assert.deepEqual(
@@ -132,5 +133,25 @@ test('출력에 적힌 파일 경로(상대·전체·따옴표)도 결과물로 
   assert.deepEqual(
     files.map((f) => f.path),
     ['out/summary.csv'],
+  );
+});
+
+test('저장소에 있고 바뀌지 않은 입력 파일은 엑셀 판정 없이 뒤에, 결과 파일이 먼저', async (t) => {
+  const d = mkdtempSync(path.join(tmpdir(), 'ac-demo-'));
+  t.after(() => rmSync(d, { recursive: true, force: true }));
+  writeFileSync(path.join(d, 'sample.csv'), '날짜,금액\n');
+  await git(['init', '-q'], d);
+  await git(['add', '-A'], d);
+  await git([...AGENT_IDENTITY, 'commit', '-q', '-m', 'x'], d);
+  const before = fileTimes(d);
+  await new Promise((r) => setTimeout(r, 20));
+  writeFileSync(path.join(d, 'summary.csv'), '월,합계\n');
+  const files = await demoOutputFiles(d, before, 5, '입력: sample.csv\n결과: summary.csv');
+  assert.deepEqual(
+    files.map((f) => [f.path, Boolean(f.verdict)]),
+    [
+      ['summary.csv', true],
+      ['sample.csv', false],
+    ],
   );
 });
