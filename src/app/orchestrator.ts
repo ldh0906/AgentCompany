@@ -1977,8 +1977,25 @@ export class Orchestrator {
       );
   }
 
-  /** 후속 업무 제안 → 비서실장에게 요청(대표가 누름). */
-  async followUpToRequest(messageId: string): Promise<CeoRequest> {
+  /**
+   * 후속 업무 제안 → 비서실장에게 요청(대표가 누름). 한 제안은 요청 하나만 만든다.
+   * 실측(2026-10-03, 대표): 버튼을 여러 번 빨리 누르면 누를 때마다 초안 요청이 만들어져 같은 일을 여러 번 했다.
+   */
+  followUpToRequest(messageId: string): Promise<CeoRequest> {
+    const done = this.company.store.get<ChatMessage>('chat', messageId)?.followUp?.requestId;
+    const existing = done ? this.records.request(done) : null;
+    if (existing) return Promise.resolve(existing);
+    // 처리 중에 또 누르면 같은 결과를 기다린다
+    const inFlight = this.followUpsInFlight.get(messageId);
+    if (inFlight) return inFlight;
+    const p = this.followUpToRequestOnce(messageId).finally(() => this.followUpsInFlight.delete(messageId));
+    this.followUpsInFlight.set(messageId, p);
+    return p;
+  }
+
+  private readonly followUpsInFlight = new Map<string, Promise<CeoRequest>>();
+
+  private async followUpToRequestOnce(messageId: string): Promise<CeoRequest> {
     const m = this.company.store.get<ChatMessage>('chat', messageId);
     if (!m?.followUp) throw new DomainError(tr('후속 업무 제안이 아닙니다.', 'Not a follow-up suggestion.'));
     const projectId = m.followUp.projectId ?? this.company.projects().find((p) => !p.removedAt)?.id;

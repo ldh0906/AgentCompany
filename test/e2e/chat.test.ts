@@ -75,7 +75,12 @@ test('작업 보고의 후속 업무 제안은 업무방에 올라가고, 대표
   const m = env.orch.chat.post(room.id, env.company.employees()[0]!.id, '후속 업무 제안: 맵 레벨대', 'followup', {
     followUp: { title: '맵 레벨대 조정', reason: '골렘이 안 나옴', projectId: env.projectId, ticketId: tk.id },
   });
-  const req = await env.orch.followUpToRequest(m.id);
+  // 버튼을 빠르게 여러 번 눌러도 요청은 하나(실측 2026-10-03: 누를 때마다 초안 요청이 생겼다)
+  const reqs = await Promise.all([env.orch.followUpToRequest(m.id), env.orch.followUpToRequest(m.id), env.orch.followUpToRequest(m.id)]);
+  const req = reqs[0]!;
+  assert.deepEqual(new Set(reqs.map((r) => r.id)).size, 1);
+  assert.equal((await env.orch.followUpToRequest(m.id)).id, req.id, '이미 보낸 제안은 같은 요청을 돌려준다');
+  assert.equal(env.orch.records.requests(50).filter((r) => r.text.includes('맵 레벨대 조정')).length, 1);
   assert.match(req.text, /맵 레벨대 조정/);
   assert.match(req.text, new RegExp(tk.id));
   await env.orch.idle();
