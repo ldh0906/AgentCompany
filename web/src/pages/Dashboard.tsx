@@ -658,6 +658,29 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
 
         <div className="grid" style={{ alignContent: 'start' }}>
           <TeamPanel />
+          {/* 전권 위임 결정 기록: 대표는 이것만 읽으면 된다(대표 요청 2026-10-02) */}
+          {(state.delegation?.on || (state.delegation?.recent.length ?? 0) > 0) && (
+            <div className="card">
+              <h2>
+                <span className="row">🧭 {ko ? '대신 결정한 일' : 'Delegated decisions'}</span>
+                <span className="sub">{empName(state.employees, state.delegation!.delegate)}</span>
+              </h2>
+              <div className="list">
+                {state.delegation!.recent.length === 0 ? (
+                  <div className="hint" style={{ padding: 12 }}>
+                    {ko ? '아직 대신 결정한 일이 없습니다.' : 'Nothing decided yet.'}
+                  </div>
+                ) : (
+                  state.delegation!.recent.map((x, i) => (
+                    <div key={i} className="item">
+                      <div className="meta">{when(x.at)}</div>
+                      <div>{x.text}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
           <UsagePanel />
           <div className="card">
             <h2>

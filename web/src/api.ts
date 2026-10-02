@@ -80,6 +80,8 @@ export interface State {
   previews?: PreviewInfo[];
   /** 회사 전체 일시정지 */
   paused?: boolean;
+  /** 전권 위임 모드: 위임받은 직원과 최근 결정 기록 */
+  delegation?: { on: boolean; delegate: string | null; recent: { at: string; by: string; entityId: string; text: string }[] };
   pausedReason?: string;
   /** 하루 토큰 한도(0 = 없음) */
   dailyLimit?: number;

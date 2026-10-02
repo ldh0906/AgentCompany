@@ -223,6 +223,11 @@ export class Store {
     return rows.reverse().map(toEvent);
   }
 
+  /** 한 종류의 최근 이벤트(최신 먼저). 전권 위임 결정 기록 등. */
+  eventsOfType(type: string, limit = 50): DomainEvent[] {
+    return (this.db.prepare('SELECT * FROM events WHERE type = ? ORDER BY seq DESC LIMIT ?').all(type, limit) as Row[]).map(toEvent);
+  }
+
   /** 변조 탐지: 모든 이벤트의 해시를 다시 계산한다. */
   verifyEventChain(): { ok: true; count: number } | { ok: false; brokenAt: number; reason: string } {
     let prev = GENESIS_HASH;

@@ -171,6 +171,19 @@ function chat(h: TaskHeader, prompt: string): string {
       },
       L('플레이 결과.', 'Play result.'),
     );
+  // 전권 위임 흉내: 질문에 하나로 정해 답한다
+  if (prompt.includes('full delegation mode'))
+    return finalWith(
+      {
+        nonce: h.nonce,
+        kind: 'chat',
+        reply: L('1) 시작 레벨은 1로 합니다(가장 단순하고 나중에 바꾸기 쉬움)', '1) Start at level 1 (simplest)'),
+        mentions: [],
+        openRoom: null,
+        rule: true,
+      },
+      L('결정.', 'Decision.'),
+    );
   // 화면 QA 흉내: picky면 늘 문제(⚠)를 찾는다(자동 반려 테스트용)
   if (prompt.includes('doing a quick screen QA'))
     return finalWith(

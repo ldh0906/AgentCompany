@@ -350,6 +350,8 @@ export class Api {
         return this.orch.setDailyTokenLimit(Number(b.tokens ?? 0));
       case 'POST pause':
         return this.orch.setPaused(b.paused !== false);
+      case 'POST delegation':
+        return this.orch.delegation.set(b.on === true);
       case 'POST tickets/:id/answer':
         return this.orch.answerTicket(id!, str(b, 'answer', { optional: true, max: 4000 }) || null, b.remember !== false);
       case 'POST tickets/:id/reverify':
@@ -509,6 +511,11 @@ export class Api {
           .filter(([, v]) => v),
       ),
       paused: this.orch.paused,
+      delegation: {
+        on: this.orch.delegation.on,
+        delegate: this.orch.delegation.delegate()?.id ?? null,
+        recent: this.orch.delegation.recent(15),
+      },
       pausedReason: this.company.store.getSetting('paused_reason') ?? '',
       dailyLimit: Number(this.company.store.getSetting('daily_token_limit') ?? 0),
       estimates: this.orch.tokenEstimates(),

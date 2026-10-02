@@ -88,6 +88,7 @@ import { CeoDesk } from './ceo-desk.ts';
 import type { OrchHost } from './orch-host.ts';
 import { Playtests } from './playtests.ts';
 import { ScreenQa } from './screen-qa.ts';
+import { Delegation } from './delegation.ts';
 import { deliverableKindOf, projectDoc, projectDocList } from './deliverables.ts';
 import { checkLinks, extractLinks, linkSummary, type LinkResult } from './link-check.ts';
 
@@ -135,6 +136,8 @@ export class Orchestrator {
   readonly chat: Chat;
   /** 자동 화면 점검(screen-qa.ts) */
   readonly screens: ScreenQa;
+  /** 전권 위임 모드(delegation.ts) */
+  readonly delegation: Delegation;
   /** 대표 할 일·알림(ceo-desk.ts) */
   readonly desk: CeoDesk;
   /** 고급 QA 직접 플레이(playtests.ts) */
@@ -194,6 +197,25 @@ export class Orchestrator {
       screenCheckOn: this.opts.screenCheck,
       nameOf: (id) => this.nameOf(id),
       decideIntegration: (approvalId, decision, o) => this.decideIntegration(approvalId, decision, o),
+    });
+    this.delegation = new Delegation({
+      ...host,
+      nameOf: (id) => this.nameOf(id),
+      acceptRequest: (id) => this.acceptRequest(id),
+      answerTicket: (id, answer, remember) => this.answerTicket(id, answer, remember),
+      raiseTokenBudget: (id) => this.raiseTokenBudget(id),
+      addWriteScope: (id, paths) => this.addWriteScope(id, paths),
+      resolveScopeHold: (id, allow) => this.resolveScopeHold(id, allow),
+      decideIntegration: (approvalId, decision, o) => this.decideIntegration(approvalId, decision, o),
+      scopeRequestOf: (id) => this.scopeRequestOf(id),
+      qaCheck: (id) => this.screens.screenCheckView(id),
+      screenCheckOn: this.opts.screenCheck,
+      latestHead: (id) => {
+        const t = this.company.store.get<Ticket>('tickets', id);
+        return t ? (this.records.latestSubmission(t)?.headSha ?? null) : null;
+      },
+      profileProposal: (id) => this.profileProposal(id),
+      resolveProfileProposal: (id, accept) => this.resolveProfileProposal(id, accept),
     });
   }
 
@@ -505,6 +527,8 @@ export class Orchestrator {
           this.noteOnce(t.id, 'orchestrator.error', { error: String(error) });
         }
       }
+      // 전권 위임: 대표 할 일(초안 확정·질문·예산·범위·승인)을 최고 직급 직원이 대신 처리한다.
+      this.delegation.step();
     } finally {
       this.ticking = false;
     }
@@ -1373,6 +1397,7 @@ export class Orchestrator {
       const msg = this.chat.post(channelId, run.employeeId, parsed.reply, 'chat', { runId: run.id });
       const ticketId = this.chat.channel(channelId)?.ticketId;
       if (ticketId) this.screens.maybeQaReject(ticketId, run, parsed.reply);
+      this.delegation.onChatReply(run, parsed.reply, finalText);
       if (parsed.profile) this.proposeProfile(channelId, parsed.profile, run.employeeId);
       const byName = (n: string) => this.company.employees().find((e) => e.name === n.trim() && !e.removedAt)?.id;
       const called = new Set(
@@ -2356,6 +2381,8 @@ ${failure.detail.slice(0, 400)}`,
       deferred?: string[];
       auto?: boolean;
       by?: string;
+      /** 직접 확인 기록에 남길 말(전권 위임: 누가 무엇을 보고 대신 확인했는지) */
+      attestNote?: string;
     } = {},
   ): Ticket {
     const t = this.decideIntegrationCore(approvalId, decision, opts);
@@ -2367,7 +2394,15 @@ ${failure.detail.slice(0, 400)}`,
   private decideIntegrationCore(
     approvalId: string,
     decision: 'approved' | 'rejected',
-    opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[]; deferred?: string[]; auto?: boolean; by?: string },
+    opts: {
+      mode?: Project['integrationMode'];
+      reason?: string;
+      attested?: string[];
+      deferred?: string[];
+      auto?: boolean;
+      by?: string;
+      attestNote?: string;
+    },
   ): Ticket {
     const a = this.records.approval(approvalId);
     if (!a || a.kind !== 'integrate' || a.state !== 'pending' || !a.ticketId)
@@ -2421,7 +2456,13 @@ ${failure.detail.slice(0, 400)}`,
           `Check the items that need your own confirmation first: ${missing.map((r) => r.id).join(', ')}`,
         ),
       );
-    for (const r of checkedNow) this.attest(t.id, r.id, tr('승인하면서 대표가 직접 확인했습니다.', 'Confirmed by the CEO when approving.'));
+    for (const r of checkedNow)
+      this.attest(
+        t.id,
+        r.id,
+        opts.attestNote ?? tr('승인하면서 대표가 직접 확인했습니다.', 'Confirmed by the CEO when approving.'),
+        opts.by?.startsWith('delegate:') ? tr('전권 위임 확인', 'Delegated confirmation') : undefined,
+      );
     if (deferred.length) {
       this.company.store.setSetting(
         `later_checks:${t.id}`,
@@ -2432,7 +2473,10 @@ ${failure.detail.slice(0, 400)}`,
     const mode = opts.mode ?? (a.detail as { mode: Project['integrationMode'] }).mode;
     return tx(() => {
       // 자동 반영은 대표가 켠 설정에 따른 것: 기록에는 'auto'로 남겨 대표가 직접 누른 승인과 구분한다.
-      this.records.setApprovalState(approvalId, 'approved', opts.auto ? 'auto' : 'ceo', { mode, ...(opts.auto ? { auto: true } : {}) });
+      this.records.setApprovalState(approvalId, 'approved', opts.by ?? (opts.auto ? 'auto' : 'ceo'), {
+        mode,
+        ...(opts.auto ? { auto: true } : {}),
+      });
       return this.apply(t.id, { type: 'ceo_approve' }, CEO);
     });
   }
@@ -2644,6 +2688,8 @@ ${failure.detail.slice(0, 400)}`,
 
   /** 권한 요청 위임 처리자: 활성 직원 중 전체 자동(4) 등급, 직급이 가장 높은 직원. 없으면 대표가 처리한다. */
   permissionDelegate(): Employee | null {
+    // 전권 위임 중이면 위임받은 직원이 권한 요청도 처리한다(접근 등급과 상관없이 같은 가드로 판단).
+    if (this.delegation.on) return this.delegation.delegate();
     return (
       this.company
         .activeEmployees()
@@ -3146,7 +3192,7 @@ ${failure.detail.slice(0, 400)}`,
    * 대표 직접 확인: 자동 검증할 수 없는 요구(런타임 플레이, 시각 검수 등)를 대표가 확인한다.
    * 현재 제출 커밋에 묶인다. 검수 중 증거 부족으로 보류된 업무면 보류를 풀고 검수를 다시 돌린다.
    */
-  attest(ticketId: string, requirementId: string, note: string): Evidence {
+  attest(ticketId: string, requirementId: string, note: string, label?: string): Evidence {
     const t = this.company.requireTicket(ticketId);
     if (!t.requirements.some((r) => r.id === requirementId))
       throw new DomainError(tr(`요구사항 ${requirementId}이(가) 없습니다.`, `Requirement ${requirementId} not found.`));
@@ -3158,7 +3204,7 @@ ${failure.detail.slice(0, 400)}`,
       round: t.round,
       headSha: sub.headSha ?? sub.baseSha ?? '',
       type: 'human_attest',
-      label: tr('대표 직접 확인', 'CEO confirmation'),
+      label: label ?? tr('대표 직접 확인', 'CEO confirmation'),
       argv: null,
       exitCode: null,
       passed: true,

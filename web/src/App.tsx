@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api, ApiError, getToken, subscribe, type State } from './api.ts';
 import { LangContext, useT, type Lang } from './i18n.ts';
-import { Icon, needsCeo, ToastProvider } from './components/ui.tsx';
+import { empName, Icon, needsCeo, ToastProvider } from './components/ui.tsx';
 import { Dashboard } from './pages/Dashboard.tsx';
 import { Board } from './pages/Board.tsx';
 import { TicketPage } from './pages/TicketPage.tsx';
@@ -199,6 +199,34 @@ function Shell() {
           </Link>
         </nav>
         <div className="spacer" />
+        {/* 전권 위임: 대표 할 일을 최고 직급 직원이 대신 처리한다(대표 요청 2026-10-02). */}
+        <button
+          className={`btn ${state?.delegation?.on ? 'ok' : ''}`}
+          style={{ marginBottom: 8 }}
+          title={
+            lang === 'ko'
+              ? state?.delegation?.on
+                ? '다시 대표가 직접 확정·승인합니다.'
+                : '초안 확정·직원 질문·예산·범위·반영 승인을 최고 직급 직원이 대신 결정합니다. 결정은 모두 기록으로 남습니다.'
+              : state?.delegation?.on
+                ? 'Take decisions back.'
+                : 'Let the most senior employee make every CEO decision. All decisions are logged.'
+          }
+          onClick={() =>
+            void api('delegation', { body: { on: !state?.delegation?.on } })
+              .then(reload)
+              .catch(() => {})
+          }
+        >
+          🧭{' '}
+          {state?.delegation?.on
+            ? lang === 'ko'
+              ? `전권 위임 중 (${empName(state.employees, state.delegation.delegate)})`
+              : `Delegated (${empName(state.employees, state.delegation.delegate)})`
+            : lang === 'ko'
+              ? '전권 위임'
+              : 'Delegate all'}
+        </button>
         <button
           className={`btn ${state?.paused ? 'ok' : ''}`}
           style={{ marginBottom: 8 }}
@@ -290,6 +318,13 @@ function Shell() {
               ))}
             </ul>
           </details>
+        )}
+        {state?.delegation?.on && (
+          <div className="banner info" style={{ marginBottom: 14 }}>
+            {lang === 'ko'
+              ? `🧭 전권 위임 중: ${empName(state.employees, state.delegation.delegate)}이(가) 초안 확정·질문 답·예산·범위·반영 승인을 대신 결정합니다. 대표 직접 확인은 QA 의견으로 판단하고, 확신이 없는 항목은 "나중에 확인"으로 남깁니다. 결정 기록은 대시보드에 있습니다.`
+              : `🧭 Delegated to ${empName(state.employees, state.delegation.delegate)}: drafts, questions, budgets, scope and approvals are decided for you and logged on the dashboard.`}
+          </div>
         )}
         {state?.paused && (
           <div className="banner warn" style={{ marginBottom: 14 }}>
