@@ -212,11 +212,29 @@ function Shell() {
                 ? 'Take decisions back.'
                 : 'Let the most senior employee make every CEO decision. All decisions are logged.'
           }
-          onClick={() =>
+          onClick={() => {
+            // 켜는 순간 기다리던 결정(승인·초안·토론)이 바로 처리된다: 몇 개인지 알리고 묻는다.
+            // 실측(2026-10-02): 켜자마자 결정 대기 중이던 다른 토론까지 추천안으로 정해졌다.
+            if (!state?.delegation?.on) {
+              const d = state?.debates?.filter((x) => x.phase === 'decide').length ?? 0;
+              const pending =
+                (state?.approvals.filter((a) => a.state === 'pending' && a.kind === 'integrate').length ?? 0) +
+                (state?.requests.filter((r) => r.status === 'drafted').length ?? 0) +
+                d;
+              if (
+                pending > 0 &&
+                !confirm(
+                  lang === 'ko'
+                    ? `지금 기다리는 결정 ${pending}개(반영 승인·초안 확정·토론 결정)를 ${empName(state!.employees, state!.delegation?.delegate ?? null)}이(가) 바로 처리합니다. 켤까요?`
+                    : `${pending} pending decisions will be made right away. Turn on?`,
+                )
+              )
+                return;
+            }
             void api('delegation', { body: { on: !state?.delegation?.on } })
               .then(reload)
-              .catch(() => {})
-          }
+              .catch(() => {});
+          }}
         >
           🧭{' '}
           {state?.delegation?.on
