@@ -218,6 +218,24 @@ function RunLog({ runId, onClose }: { runId: string; onClose: () => void }) {
               ? `${ko ? '진행' : 'running'} ${elapsed(r.startedAt)}`
               : `${r.status} · ${elapsed(r.startedAt, r.endedAt)}`}
           </span>
+          {/* 대화·초안 실행은 대표가 바로 멈출 수 있다(대표 요청 2026-10-03). 작업·검수는 아래 "끊고 다시 시키기". */}
+          {r.status === 'running' && r.kind !== 'work' && r.kind !== 'review' && (
+            <button
+              className="btn small danger"
+              disabled={busy}
+              onClick={() =>
+                confirm(
+                  ko
+                    ? r.kind === 'analysis'
+                      ? '비서실장의 초안 작성을 멈추고 이 요청을 버릴까요?'
+                      : '이 실행을 멈출까요? 답이 오지 않고 끝납니다.'
+                    : 'Stop this run?',
+                ) && run(() => api(`runs/${r.id}/stop`, { body: {} }), ko ? '멈췄습니다.' : 'Stopped.')
+              }
+            >
+              {ko ? '중단' : 'Stop'}
+            </button>
+          )}
           <button className="btn small" onClick={onClose}>
             {ko ? '닫기' : 'Close'}
           </button>

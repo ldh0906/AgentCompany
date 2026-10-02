@@ -147,6 +147,8 @@ export class Api {
         return this.orch.resolveLaterCheck(id!, str(b, 'requirementId'), b.ok === true, str(b, 'note', { optional: true, max: 2000 }));
       case 'POST runs/:id/restart':
         return this.orch.restartRun(id!);
+      case 'POST runs/:id/stop':
+        return this.orch.stopRun(id!);
       case 'POST runs/:id/steer':
         return { delivered: await this.orch.steerRun(id!, str(b, 'text', { max: 4000 })) };
 
@@ -449,7 +451,7 @@ export class Api {
       case 'POST requests/:id/retry':
         return this.orch.retryRequest(id!);
       case 'POST requests/:id/dismiss':
-        this.orch.dismissRequest(id!);
+        await this.orch.dismissRequest(id!);
         return { ok: true };
 
       case 'POST decisions':

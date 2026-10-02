@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { driveUntil, setup, statusIs } from './helpers.ts';
 
 test('대표 요청 → 비서실장 초안(읽기 전용) → 대표 확정 → 선행 관계를 지키며 진행', { timeout: 240_000 }, async (t) => {
@@ -51,4 +53,21 @@ test('초안 난이도: 비서실장이 제안하고, 대표가 확정 전에 �
 test('비서실장이 없으면 요청을 거부하고 직접 업무를 만들라고 안내', { timeout: 60_000 }, async (t) => {
   const env = await setup(t);
   await assert.rejects(env.orch.submitRequest(env.projectId, 'x'), /비서실장/);
+});
+
+test('초안 작성 중인 요청을 버리면 비서실장 실행을 끊고, 끝난 실행이 요청을 되살리지 않는다', { timeout: 60_000 }, async (t) => {
+  const env = await setup(t);
+  env.company.hireEmployee({ name: '비서실장', roles: ['chief-of-staff'], cli: 'fake', model: 'slow' });
+  const req = await env.orch.submitRequest(env.projectId, '파티 해산 기능');
+  const run = env.orch.records.runsForTicket(req.id).find((r) => r.status === 'running');
+  assert.ok(run, '초안 실행이 돌고 있다');
+  // 프로세스가 pid를 남길 때까지 잠깐 기다린다
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline && !existsSync(join(run.runDir, 'pid.json'))) await new Promise((r) => setTimeout(r, 100));
+  await env.orch.stopRun(run.id);
+  await env.orch.idle();
+  const after = env.orch.records.request(req.id)!;
+  assert.equal(after.status, 'dismissed');
+  assert.equal(after.drafts.length, 0, '초안이 붙지 않는다');
+  assert.notEqual(env.orch.records.run(run.id)!.status, 'running');
 });

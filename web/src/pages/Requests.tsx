@@ -151,6 +151,23 @@ export function RequestBox() {
                 ) : (
                   <div className="note">{r.error}</div>
                 ))}
+              {/* 초안 작성 중에도 멈추고 버릴 수 있다(대표 요청 2026-10-03) */}
+              {(r.status === 'drafting' || retrying) && (
+                <div className="row" style={{ justifyContent: 'flex-end' }}>
+                  <button
+                    className="btn small danger"
+                    disabled={busy}
+                    onClick={() =>
+                      confirm(ko ? '비서실장의 초안 작성을 멈추고 이 요청을 버릴까요?' : 'Stop drafting and dismiss this request?') &&
+                      run(() => api(`requests/${r.id}/dismiss`, { body: {} }), ko ? '멈추고 버렸습니다.' : 'Stopped and dismissed.').then(
+                        reload,
+                      )
+                    }
+                  >
+                    {ko ? '중단하고 버리기' : 'Stop and dismiss'}
+                  </button>
+                </div>
+              )}
               {r.status === 'failed' && !retrying && (
                 <div className="row" style={{ justifyContent: 'flex-end' }}>
                   <button

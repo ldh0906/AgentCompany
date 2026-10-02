@@ -3312,6 +3312,11 @@ ${failure.detail.slice(0, 400)}`,
     run.reportError = parsed.ok ? null : `${parsed.detail}${stderr ? `\n${stderr.slice(-500)}` : ''}`;
     run.summary = parsed.ok ? parsed.report.summary : '';
     this.records.saveRun(run);
+    // 대표가 중단하고 버린 요청은 끝난 실행이 되살리지 않는다(재시도도 하지 않는다)
+    if (req?.status === 'dismissed') {
+      this.changed('request', req.id);
+      return;
+    }
     if (req) {
       this.records.saveRequest({
         ...req,
@@ -3444,12 +3449,47 @@ ${failure.detail.slice(0, 400)}`,
     return created;
   }
 
-  dismissRequest(requestId: string): void {
+  /**
+   * 요청 버리기. 비서실장이 아직 초안을 쓰는 중이면 그 실행을 끊고 버린다.
+   * 대표 요청(2026-10-03): 비서실장이 하는 일을 중단·삭제하는 방법이 있으면 좋겠다.
+   */
+  async dismissRequest(requestId: string): Promise<void> {
     const req = this.records.request(requestId);
     if (!req) throw new DomainError(tr('요청이 없습니다.', 'Request not found.'));
     this.records.saveRequest({ ...req, status: 'dismissed' });
-    this.company.store.appendEvent('ceo', 'request.dismissed', req.id, {});
+    this.company.store.appendEvent('ceo', 'request.dismissed', req.id, { stopped: req.status === 'drafting' });
+    const run = req.status === 'drafting' ? this.records.runsForTicket(req.id).find((r) => r.status === 'running') : null;
+    if (run && this.liveRuns.has(run.id)) await this.killRun(run).catch(() => {});
     this.changed('request', requestId);
+  }
+
+  /**
+   * 대화·초안 같은 실행을 끊는다(작업 실행은 "끊고 다시 시키기"를 쓴다). 끊긴 실행은 보통의 실패로 끝나:
+   * 대화는 답이 없고, 토론은 그 사람 몫을 비우고 넘어가며, 인수 시험은 그 회차를 실패로 남긴다.
+   */
+  async stopRun(runId: string): Promise<{ ok: true }> {
+    const run = this.records.run(runId);
+    if (!run || run.status !== 'running' || !this.liveRuns.has(runId))
+      throw new DomainError(tr('이미 끝난 실행입니다.', 'This run has already finished.'));
+    if (run.kind === 'work' || run.kind === 'review')
+      throw new DomainError(
+        tr('업무 실행은 "끊고 다시 시키기"나 업무 취소를 쓰세요.', 'Use "cut and restart" or cancel the ticket for work runs.'),
+      );
+    this.company.store.appendEvent('ceo', 'run.stopped', run.ticketId, { runId });
+    const req = run.kind === 'analysis' ? this.records.request(run.ticketId) : null;
+    if (req && req.status === 'drafting') return this.dismissRequest(req.id).then(() => ({ ok: true as const }));
+    await this.killRun(run);
+    return { ok: true };
+  }
+
+  private async killRun(run: RunRecord): Promise<void> {
+    const pid = await readFile(path.join(run.runDir, 'pid.json'), 'utf8')
+      .then((x) => (JSON.parse(x) as { cliPid?: number | null }).cliPid ?? null)
+      .catch(() => null);
+    if (!pid) throw new DomainError(tr('직원 프로세스를 찾지 못했습니다.', 'Employee process not found.'));
+    await killTree(pid);
+    this.stalled.delete(run.id);
+    this.changed('run', run.id);
   }
 
   // ======================= 대표 조작 =======================
