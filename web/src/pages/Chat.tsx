@@ -370,6 +370,10 @@ function Message({
 }) {
   // 누르자마자 버튼을 감춘다(서버 답을 기다리는 동안 여러 번 눌려 업무가 여러 개 생겼다, 대표 2026-10-03)
   const [acted, setActed] = useState<'sent' | 'dismissed' | null>(null);
+  // 긴 글(검증 실패 스택 등)은 앞 몇 줄만: 실측(2026-10-03, 4777 T-4) 업무방이 빨간 Node 스택 수십 줄로 가득 찼다.
+  const [expanded, setExpanded] = useState(false);
+  const lines = m.text.split('\n');
+  const long = lines.length > 12 || m.text.length > 1500;
   const { state } = useCompany();
   const { lang } = useT();
   const ko = lang === 'ko';
@@ -406,7 +410,12 @@ function Message({
           </div>
         )}
         <div className="msg-text">
-          <RichText text={m.text} />
+          <RichText text={long && !expanded ? `${(lines.length > 12 ? lines.slice(0, 6).join('\n') : m.text).slice(0, 600)}…` : m.text} />
+          {long && (
+            <button className="link-btn" onClick={() => setExpanded(!expanded)}>
+              {expanded ? (ko ? '접기' : 'Less') : ko ? `더 보기 (${lines.length}줄)` : `More (${lines.length} lines)`}
+            </button>
+          )}
         </div>
         {m.followUp && (
           <div className="row" style={{ marginTop: 6 }}>

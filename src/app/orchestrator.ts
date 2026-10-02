@@ -90,7 +90,7 @@ import {
 import { Company, DomainError } from './company.ts';
 import { newId, Records, sha256, type CeoRequest, type RunRecord } from './records.ts';
 import { appProfileDir } from './doctor.ts';
-import { dependencySetup, installDependencies } from './verify-setup.ts';
+import { dependencySetup, installDependencies, keyErrorLines } from './verify-setup.ts';
 import { estimates, ticketTokens, tokenBudget } from './cost.ts';
 import { nodeTestArgs, suggestVerifyAt } from './repo-inspect.ts';
 import { killStalePreviews, PreviewManager, type PreviewInfo } from './preview.ts';
@@ -2582,10 +2582,14 @@ ${failure.detail.slice(0, 400)}`,
     const o = await proc.done;
     if (ticketId) this.company.store.setSetting(`verify_proc:${ticketId}`, '');
     const tail = async (f: string) => (await readFile(f, 'utf8').catch(() => '')).slice(-1500);
-    const summary = `${await tail(proc.stdoutPath)}\n${await tail(proc.stderrPath)}`.trim().slice(-1500);
+    const raw = `${await tail(proc.stdoutPath)}\n${await tail(proc.stderrPath)}`.trim().slice(-1500);
+    const passed = o.exitCode === 0 && !o.timedOut;
+    // 실패면 핵심 오류 줄을 맨 앞에(대표·직원이 스택 수십 줄을 읽지 않아도 원인이 보이게)
+    const key = passed ? [] : keyErrorLines(raw);
+    const summary = key.length ? `${tr('핵심', 'Key')}: ${key.join(' / ')}\n${raw}` : raw;
     return {
       exitCode: o.exitCode,
-      passed: o.exitCode === 0 && !o.timedOut,
+      passed,
       outputPath: proc.stdoutPath,
       summary: o.timedOut ? tr(`시간 초과\n${summary}`, `Timed out\n${summary}`) : summary,
     };

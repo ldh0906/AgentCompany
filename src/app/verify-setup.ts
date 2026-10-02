@@ -51,3 +51,20 @@ export async function installDependencies(dir: string, timeoutMs = 10 * 60_000):
     child.once('exit', (code) => (clearTimeout(timer), resolve({ ran: true, ok: code === 0, output })));
   });
 }
+
+/**
+ * 실패한 검사 출력에서 원인을 말해 주는 줄(최대 3개). 스택 줄(at …, ^, throw)은 뺀다.
+ * 실측(2026-10-03, 4777): 업무방에 "throw err; ^" 같은 줄만 먼저 보이고 원인("Cannot find module 'playwright'")은 한참 아래였다.
+ */
+export function keyErrorLines(output: string): string[] {
+  const out: string[] = [];
+  for (const raw of output.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || /^(at |\^|throw |node:internal|\}|\{|code:|requireStack)/.test(line)) continue;
+    if (!/(error|err!|fail|✖|not ok|cannot|not found|traceback|exception|assert)/i.test(line)) continue;
+    const short = line.slice(0, 200);
+    if (!out.includes(short)) out.push(short);
+    if (out.length >= 3) break;
+  }
+  return out;
+}

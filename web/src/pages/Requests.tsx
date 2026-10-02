@@ -20,6 +20,8 @@ export function RequestBox() {
   const { busy, run } = useAction();
   const [text, setText] = useState('');
   const [projectId, setProjectId] = useState('');
+  // 확정 대기 초안은 하나만 펼친다(기본: 맨 위). 실측(2026-10-03, 4777): 초안 3개가 모두 펼쳐져 대시보드가 글자로 가득 찼다.
+  const [shownDraft, setShownDraft] = useState<string | null>(null);
   if (!state || state.projects.length === 0) return null;
   const ko = lang === 'ko';
   // 기본값은 가장 최근에 요청한 프로젝트(실측: 늘 첫 프로젝트가 골라져 있어 매번 바꿔야 했다).
@@ -211,7 +213,14 @@ export function RequestBox() {
                     </div>
                   );
                 })()}
-              {r.status === 'drafted' && <DraftReview r={r} />}
+              {r.status === 'drafted' &&
+                ((shownDraft ?? open.find((x) => x.status === 'drafted')?.id) === r.id ? (
+                  <DraftReview r={r} />
+                ) : (
+                  <button className="btn small" onClick={() => setShownDraft(r.id)}>
+                    {ko ? `초안 펼쳐 보기 (업무 ${r.drafts.length}개)` : `Show draft (${r.drafts.length} tickets)`}
+                  </button>
+                ))}
             </div>
           );
         })}

@@ -2600,3 +2600,18 @@ details.advanced[open] summary {
 .acceptance summary {
   cursor: pointer;
 }
+
+/* 글자처럼 보이는 작은 버튼(긴 메시지 "더 보기" 등) */
+.link-btn {
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  display: block;
+}
+.link-btn:hover {
+  text-decoration: underline;
+}

@@ -748,14 +748,17 @@ function TeamPanel() {
   const ko = lang === 'ko';
   const active = state.employees.filter((e) => e.active);
   const order = { lead: 0, senior: 1, junior: 2 } as const;
+  // 지금 실제로 돌고 있는 실행으로 판단한다. 실측(2026-10-03, 4777): 보류된 T-14·T-6을 "작업 중"으로 보여 줬다.
   const doing = (id: string) => {
-    const work = state.tickets.find((x) => x.assigneeId === id && ['in_progress', 'changes_requested'].includes(x.status));
-    if (work) return { tone: 'info', text: ko ? `${work.id} 작업 중` : `Working on ${work.id}`, to: work.id };
-    const review = state.tickets.find((x) => x.reviewerId === id && x.status === 'in_review');
-    if (review) return { tone: 'accent', text: ko ? `${review.id} 검수 중` : `Reviewing ${review.id}`, to: review.id };
-    const drafting = state.requests.filter((r) => r.employeeId === id && r.status === 'drafting').length;
-    if (drafting)
-      return { tone: 'info', text: ko ? `업무 초안 작성 중${drafting > 1 ? ` (${drafting}건)` : ''}` : `Drafting tickets`, to: null };
+    const live = state.runs.find((r) => r.employeeId === id && r.status === 'running');
+    if (live?.kind === 'work')
+      return { tone: 'info', text: ko ? `${live.ticketId} 작업 중` : `Working on ${live.ticketId}`, to: live.ticketId };
+    if (live?.kind === 'review')
+      return { tone: 'accent', text: ko ? `${live.ticketId} 검수 중` : `Reviewing ${live.ticketId}`, to: live.ticketId };
+    if (live?.kind === 'analysis') return { tone: 'info', text: ko ? '업무 초안 작성 중' : 'Drafting tickets', to: null };
+    if (live) return { tone: 'info', text: ko ? '대화 답하는 중' : 'Replying in chat', to: null };
+    const held = state.tickets.find((x) => x.assigneeId === id && x.hold && !['done', 'failed', 'cancelled'].includes(x.status));
+    if (held) return { tone: 'warn', text: ko ? `${held.id} 보류 · 대표 결정 기다림` : `${held.id} on hold`, to: held.id };
     const owns = state.tickets.filter((x) => x.ownerId === id && !['done', 'failed', 'cancelled'].includes(x.status)).length;
     if (owns) return { tone: '', text: ko ? `책임 업무 ${owns}개` : `Owns ${owns}`, to: null };
     return { tone: '', text: ko ? '대기 중' : 'Idle', to: null };
@@ -806,7 +809,7 @@ function TeamPanel() {
                     </div>
                   </div>
                   {d.to ? (
-                    <Link to={`/tickets/${d.to}`} className={`chip ${d.tone} pulse`}>
+                    <Link to={`/tickets/${d.to}`} className={`chip ${d.tone} ${d.tone === 'warn' ? '' : 'pulse'}`}>
                       {d.text}
                     </Link>
                   ) : (
