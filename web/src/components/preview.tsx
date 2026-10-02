@@ -53,7 +53,9 @@ export function PreviewButton({ projectId, ticketId = null }: { projectId: strin
           className="btn small"
           disabled={busy}
           onClick={() => void start()}
-          title={ko ? '설치 후 개발 서버를 띄웁니다' : 'Installs and starts the dev server'}
+          title={
+            ko ? '결과물을 띄워 브라우저로 엽니다 (필요하면 설치부터 합니다)' : 'Runs the result and opens it (installs first if needed)'
+          }
         >
           <Icon name="bolt" size={13} />{' '}
           {busy

@@ -136,9 +136,14 @@ export function Projects() {
                 <b>{ko ? '자동 검사' : 'Verify commands'}</b>
                 {p.verifyCommands.length === 0 ? (
                   <div className="sub">
-                    {ko
-                      ? '없음 — 단위 테스트 증거가 필요한 요구사항은 승인될 수 없습니다.'
-                      : 'None — requirements needing test evidence cannot pass.'}
+                    {/* 문서는 검사 명령이 필요 없다: 겁주는 경고 대신 어떻게 확인하는지 알린다(실측 2026-10-02, 독서모임 기획서). */}
+                    {p.profile?.deliverable === 'document'
+                      ? ko
+                        ? '없음 — 문서는 필요 없습니다. 검수 직원이 내용을 읽고, 출처 링크는 시스템이 열어 확인합니다.'
+                        : 'None needed — reviewers read documents and the system checks source links.'
+                      : ko
+                        ? '없음 — 단위 테스트 증거가 필요한 요구사항은 승인될 수 없습니다.'
+                        : 'None — requirements needing test evidence cannot pass.'}
                   </div>
                 ) : (
                   p.verifyCommands.map((v) => (
