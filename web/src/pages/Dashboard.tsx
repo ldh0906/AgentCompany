@@ -640,6 +640,26 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
                         <span className="row">
                           {/* 검증 실패로 멈춘 업무: 검사를 고친 뒤 직원을 다시 돌리지 않고 마지막 제출물을 다시 검증한다(토큰 없음).
                               실측(2026-10-03, 4777): 깨진 검사 하나로 7개가 멈췄는데 "다시 검증"은 업무 화면에만 있었다. */}
+                          {/* 범위 밖 파일 수정 요청: 대시보드에서 바로 허용(전에는 업무 화면에만 있어 "보류 해제"만 눌렀다) */}
+                          {(() => {
+                            const m = /^(?:이 파일도 고쳐야 한다고 요청했습니다|Asked to also edit): (.+)$/m.exec(x.hold!.note);
+                            const paths = m ? m[1]!.split(', ').filter(Boolean) : [];
+                            return paths.length ? (
+                              <button
+                                className="btn small primary"
+                                disabled={busy}
+                                title={paths.join(', ')}
+                                onClick={() =>
+                                  run(
+                                    () => api(`tickets/${x.id}/scope-add`, { body: { paths } }),
+                                    ko ? '허용했습니다. 이어서 진행합니다.' : 'Allowed; continuing.',
+                                  ).then(reload)
+                                }
+                              >
+                                {ko ? `파일 ${paths.length}개 허용하고 계속` : `Allow ${paths.length} file(s)`}
+                              </button>
+                            ) : null;
+                          })()}
                           {/검증 실패|verification failed|수정 회차 \d+회 초과|Revision limit/i.test(x.hold!.note) && (
                             <button
                               className="btn small primary"
