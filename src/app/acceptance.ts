@@ -4,8 +4,9 @@
 //   오른쪽: 단위 시험(업무 검사 명령) → 업무 검수 → 통합 시험(반영된 결과에서 검사 명령 다시) → 인수 시험(이 모듈)
 // 고치는 바퀴는 최대 MAX_FIX_ROUNDS번. 그다음에도 남으면 대표에게 알린다(끝없이 돌며 토큰을 쓰지 않게).
 import { randomBytes } from 'node:crypto';
+import path from 'node:path';
 import { buildAcceptancePrompt } from '../agents/acceptance-prompts.ts';
-import { extractLastJson } from '../agents/report.ts';
+import { extractLastJson, screenStepsOf, type ScreenScenario } from '../agents/report.ts';
 import { tr } from '../core/i18n.ts';
 import type { Employee, EvidenceType, Project, Ticket } from '../core/types.ts';
 import { DEFAULT_BUDGET, DIFFICULTIES, RANK_ORDER, rankOf, type Difficulty } from '../core/types.ts';
@@ -20,6 +21,12 @@ export interface AcceptanceHost extends OrchHost {
   snapshotDir(projectId: string, key: string): Promise<string>;
   /** 프로젝트 검사 명령을 사본에서 다시 돌린다(통합 시험) */
   integrationChecks(project: Project, dir: string, key: string): Promise<string[]>;
+  /** 화면 결과물: 반영된 결과를 띄워 찍은 사진(outDir에 저장). 화면이 아니거나 못 찍으면 null */
+  acceptanceScreens(
+    project: Project,
+    scenarios: ScreenScenario[],
+    outDir: string,
+  ): Promise<{ shots: { file: string; label: string }[]; errors: string[]; text: string } | null>;
 }
 
 export class Acceptance {
@@ -85,6 +92,20 @@ export class Acceptance {
     const key = `acc-${req.id}-${round}`;
     const dir = await this.h.snapshotDir(project.id, key);
     const checks = await this.h.integrationChecks(project, dir, key).catch((e: unknown) => [String((e as Error)?.message ?? e)]);
+    // 화면 결과물이면 반영된 결과를 띄워, 업무들이 남긴 점검 순서대로 사진을 찍어 함께 보게 한다.
+    const screens = await this.h
+      .acceptanceScreens(project, this.scenariosOf(tickets), path.join(dir, '.acceptance-shots'))
+      .catch(() => null);
+    if (screens)
+      this.h.chat.post(
+        room,
+        'system',
+        tr(
+          `📷 반영된 결과를 띄워 화면 ${screens.shots.length}장을 찍었습니다(콘솔 오류 ${screens.errors.length}개). 화면 항목은 사진으로 판정합니다.`,
+          `📷 Took ${screens.shots.length} screenshots of the merged result (${screens.errors.length} console errors).`,
+        ),
+        'event',
+      );
     const nonce = randomBytes(6).toString('hex');
     this.h.company.store.setSetting(`acceptance_nonce:${nonce}`, JSON.stringify({ requestId: req.id, round }));
     record.runId = await this.h.launchChat({
@@ -102,6 +123,7 @@ export class Acceptance {
           return `- ${t.id} [${t.status}] ${t.title}: ${(sub?.summary ?? '').slice(0, 600)}`;
         }),
         checks,
+        screens,
         decisions: this.h.records.decisions(project.id, 'current').map((d) => `- [${d.id}] ${d.text}`),
         round,
         maxRounds: MAX_FIX_ROUNDS + 1,
@@ -113,6 +135,22 @@ export class Acceptance {
       baseSha: null,
     });
     this.save(req, record);
+  }
+
+  /** 끝난 업무들이 남긴 화면 점검 순서(대표 직접 확인 항목 먼저, 모두 합쳐 최대 6개). 사진 이름에 업무 ID가 붙는다. */
+  private scenariosOf(tickets: Ticket[]): ScreenScenario[] {
+    const all = tickets
+      .filter((t) => t.status === 'done')
+      .flatMap((t) => {
+        const sub = this.h.records.latestSubmission(t);
+        const raw = sub?.finalText ? (extractLastJson(sub.finalText) as Record<string, unknown> | null) : null;
+        const attest = new Set(t.requirements.filter((r) => r.evidenceType === 'human_attest').map((r) => r.id));
+        return screenStepsOf(
+          raw?.screenSteps,
+          t.requirements.map((r) => r.id),
+        ).map((s) => ({ attest: attest.has(s.requirementId), s: { ...s, requirementId: `${t.id} ${s.requirementId}` } }));
+      });
+    return [...all.filter((x) => x.attest), ...all.filter((x) => !x.attest)].slice(0, 6).map((x) => x.s);
   }
 
   /** 요청마다 인수 시험 방(그룹 방) 하나 */

@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDraftPrompt, buildReviewPrompt, buildWorkPrompt, profileBlock } from '../../src/agents/prompt.ts';
+import { buildAcceptancePrompt } from '../../src/agents/acceptance-prompts.ts';
 import { parseDrafts, profileOf } from '../../src/agents/report.ts';
 import { claudeAdapter } from '../../src/adapters/claude.ts';
 import { codexAdapter } from '../../src/adapters/codex.ts';
@@ -181,4 +182,29 @@ test('대표 요청 원문: 담당자와 검수자 모두 보고, 다른 조각�
   });
   assert.match(r, /does not contradict the original request/);
   assert.doesNotMatch(work(doc, ticket('doc')), /original request/, '요청이 없으면(직접 만든 업무) 빼기');
+});
+
+test('인수 시험 지시문: 화면 사진이 있으면 사진으로 판정, 화면인데 못 찍었으면 ❓, 화면이 아니면 말하지 않는다', () => {
+  const base = {
+    employee: emp,
+    request: 'r',
+    tests: [{ id: 'A1', check: 'c', how: 'h' }],
+    tickets: [],
+    checks: [],
+    decisions: [],
+    round: 1,
+    maxRounds: 3,
+    nonce: 'n',
+    language: 'ko',
+  };
+  const shot = buildAcceptancePrompt({
+    ...base,
+    project: project(),
+    screens: { shots: [{ file: '.acceptance-shots/1.png', label: 'T-1 R2 첫 화면' }], errors: [], text: '단어 퀴즈' },
+  });
+  assert.match(shot, /\.acceptance-shots\/1\.png: T-1 R2 첫 화면/);
+  assert.match(shot, /from the pictures, not from reading CSS/);
+  assert.match(buildAcceptancePrompt({ ...base, project: project(), screens: null }), /No screenshots could be taken.*❓/);
+  const program = buildAcceptancePrompt({ ...base, project: project({ deliverable: 'program' } as ProjectProfile), screens: null });
+  assert.doesNotMatch(program, /screenshot/i);
 });

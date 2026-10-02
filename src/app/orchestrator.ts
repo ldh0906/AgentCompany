@@ -19,7 +19,15 @@ import {
   synthesize,
   type DeliberationPhase,
 } from '../agents/deliberation.ts';
-import { followUpsFromSummary, parseChatReply, parseDrafts, parseReport, type TicketDraft, type WorkReport } from '../agents/report.ts';
+import {
+  followUpsFromSummary,
+  parseChatReply,
+  parseDrafts,
+  parseReport,
+  type ScreenScenario,
+  type TicketDraft,
+  type WorkReport,
+} from '../agents/report.ts';
 import { Chat, ticketChannelId, type ChatMessage } from './chat.ts';
 import { writeDecision } from '../approvals/file-queue.ts';
 import type { Actor } from '../core/ticket-machine.ts';
@@ -84,6 +92,7 @@ import { dependencySetup, installDependencies } from './verify-setup.ts';
 import { estimates, ticketTokens, tokenBudget } from './cost.ts';
 import { nodeTestArgs, suggestVerifyAt } from './repo-inspect.ts';
 import { PreviewManager, type PreviewInfo } from './preview.ts';
+import { captureScreens, findChrome } from './screen-check.ts';
 import { CeoDesk } from './ceo-desk.ts';
 import type { OrchHost } from './orch-host.ts';
 import { Playtests } from './playtests.ts';
@@ -249,7 +258,37 @@ export class Orchestrator {
       nameOf: (id) => this.nameOf(id),
       snapshotDir: (projectId, key) => this.debateDir(projectId, null, key),
       integrationChecks: (project, dir, key) => this.integrationChecks(project, dir, key),
+      acceptanceScreens: (project, scenarios, outDir) => this.acceptanceScreens(project, scenarios, outDir),
     });
+  }
+
+  /**
+   * 인수 시험용 화면 사진: 반영된 결과(기준 브랜치)를 띄워 업무들이 남긴 점검 순서대로 찍는다.
+   * 실측(2026-10-02, 4790 단어 퀴즈): 인수 시험 직원이 CSS만 읽고 "화면이 보인다"를 ✅로 판정했다.
+   * 화면 결과물이 아니거나 크롬이 없거나 못 띄우면 null(직원은 코드로만 판단하고 화면 항목은 ❓로 둔다).
+   */
+  private async acceptanceScreens(
+    project: Project,
+    scenarios: ScreenScenario[],
+    outDir: string,
+  ): Promise<{ shots: { file: string; label: string }[]; errors: string[]; text: string } | null> {
+    if (deliverableOf(project) !== 'screen' || !this.opts.screenCheck) return null;
+    const chrome = findChrome();
+    if (!chrome) return null;
+    const key = `${project.id}:base`;
+    const wasRunning = this.previews.list().some((p) => `${p.projectId}:${p.ticketId ?? 'base'}` === key);
+    try {
+      const info = await this.preview(project.id, null);
+      if (!info.url) return null;
+      const cap = await captureScreens(info.url, outDir, chrome, scenarios, { mobile: project.profile?.mobile ?? true });
+      return {
+        shots: cap.shots.map((s) => ({ file: path.relative(path.dirname(outDir), s.file).replaceAll('\\', '/'), label: s.label })),
+        errors: cap.errors,
+        text: cap.text,
+      };
+    } finally {
+      if (!wasRunning) this.previews.stop(key); // 대표가 띄워 둔 것은 그대로 둔다
+    }
   }
 
   /**

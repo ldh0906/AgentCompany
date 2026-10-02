@@ -1,7 +1,12 @@
 // 요청 단위 V모델: 업무가 다 끝나면 인수 시험 → 떨어진 항목은 고칠 업무 → 끝나면 다시 시험(대표 요청 2026-10-02).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { AcceptanceHost } from '../../src/app/acceptance.ts';
 import { requestTokens } from '../../src/app/cost.ts';
+import { findChrome } from '../../src/app/screen-check.ts';
+import { AGENT_IDENTITY, git } from '../../src/workspace/git.ts';
 import { setup } from './helpers.ts';
 
 test('인수 시험: 1회차에서 떨어진 항목은 고칠 업무가 되고, 그 업무가 끝나면 2회차로 통과한다', { timeout: 420_000 }, async (t) => {
@@ -43,3 +48,38 @@ test('인수 시험: 1회차에서 떨어진 항목은 고칠 업무가 되고, 
   // 인수 시험 방에 든 토큰도 요청 비용에 들어간다
   assert.ok('acceptance' in requestTokens(env.orch.records, accepted).byTicket);
 });
+
+test(
+  '인수 시험 화면 사진: 반영된 결과를 띄워 찍고, 대표가 띄운 게 아니면 다시 끈다',
+  { skip: !findChrome(), timeout: 120_000 },
+  async (t) => {
+    const env = await setup(t, { screenCheck: true });
+    writeFileSync(join(env.origin, 'index.html'), '<!doctype html><body><h1>단어 퀴즈</h1></body>');
+    await git(['add', '-A'], env.origin);
+    await git([...AGENT_IDENTITY, 'commit', '-q', '-m', 'page'], env.origin);
+    const project = env.company.requireProject(env.projectId);
+    const out = join(env.dataDir, 'acc-shots', '.acceptance-shots');
+    const screens = await (env.orch as unknown as { acceptanceScreens: AcceptanceHost['acceptanceScreens'] }).acceptanceScreens(
+      project,
+      [{ requirementId: 'T-1 R2', steps: [{ do: 'shot', label: '첫 화면' }] }],
+      out,
+    );
+    assert.ok(screens && screens.shots.length > 0, '사진을 찍는다');
+    assert.ok(
+      screens.shots.every((s) => s.file.startsWith('.acceptance-shots/')),
+      '시험 직원 폴더 기준 경로',
+    );
+    assert.ok(
+      screens.shots.some((s) => s.label.includes('T-1 R2')),
+      '어느 업무의 점검 순서인지 사진 이름에 남는다',
+    );
+    assert.match(screens.text, /단어 퀴즈/);
+    assert.ok(!env.orch.previewList().some((p) => p.projectId === env.projectId && p.state === 'running'), '시험용으로 띄운 것은 끈다');
+    // 화면이 아닌 결과물은 찍지 않는다
+    const doc = { ...project, profile: { ...project.profile!, deliverable: 'document' as const } };
+    assert.equal(
+      await (env.orch as unknown as { acceptanceScreens: AcceptanceHost['acceptanceScreens'] }).acceptanceScreens(doc, [], out),
+      null,
+    );
+  },
+);
