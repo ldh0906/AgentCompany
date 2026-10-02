@@ -52,7 +52,13 @@ test('검수가 막히면(회차 초과) 대표가 검수를 건너뛰고 승인
 test('검증 실패한 제출물은 검수 건너뛰기로도 승인 단계에 못 간다', { timeout: 180_000 }, async (t) => {
   const env = await setup(t, {
     reviewer: 'harsh',
-    verify: [{ label: 'unit tests', argv: ['node', '-e', 'process.exit(1)'], evidenceType: 'unit_test' }],
+    verify: [
+      {
+        label: 'unit tests',
+        argv: ['node', '-e', "process.exit(require('fs').readdirSync('src').length > 1 ? 1 : 0)"],
+        evidenceType: 'unit_test',
+      },
+    ],
   });
   const tk = newImplTicket(env);
   await driveUntil(env, tk.id, (x) => x.hold !== null, 150_000); // 검증 실패로 세 회차를 돈다: 실측 55~62초라 기본 60초가 빠듯했다

@@ -284,6 +284,8 @@ export interface Evidence {
   requirementId?: string;
   /** 이 증거가 묶인 제출(작업 실행 ID). 다른 제출·회차의 증거는 재사용할 수 없다. */
   runId?: string;
+  /** 업무를 시작한 기준 커밋에서도 실패한 검사(업무 탓이 아님, 환경·검사 자체 문제) */
+  preexisting?: boolean;
   createdAt: string;
 }
 

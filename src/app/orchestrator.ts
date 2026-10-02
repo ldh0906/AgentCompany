@@ -5,7 +5,7 @@ import { tr } from '../core/i18n.ts';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { adapterFor } from '../adapters/index.ts';
 import { isTransient } from '../adapters/types.ts';
 import { buildChatPrompt, buildDraftPrompt, buildReviewPrompt, buildWorkPrompt } from '../agents/prompt.ts';
@@ -1844,7 +1844,8 @@ export class Orchestrator {
             stale.push(full);
             continue;
           }
-          if (/^debate-acc-/.test(name)) {
+          // 인수 시험 사본, 기준 커밋 검사 사본(failsOnBase): 한 시간 지나면 지운다
+          if (/^(debate-acc-|base-)/.test(name)) {
             const age = await stat(full)
               .then((s) => now - s.mtimeMs)
               .catch(() => 0);
@@ -2351,19 +2352,27 @@ ${failure.detail.slice(0, 400)}`,
         const steps = setup ? [setup, ...project.verifyCommands] : project.verifyCommands;
         for (const [i, vc] of steps.entries()) {
           const ev = await this.runVerifyCommand(vc, vwt, path.join(sub.runDir, 'verify', String(i)), ticketId);
+          // 실패하면 업무를 시작한 기준 커밋에서도 실패하는지 본다: 그렇다면 업무 탓이 아니다(환경·검사 자체 문제).
+          // 실측(2026-10-03, 4777 PUBG): playwright가 없어 "game-ui 배치 검사"가 모든 업무에서 실패했고,
+          // 그 스크립트를 건드리지도 않은 문서 업무 7개가 고칠 수 없는 실패로 돌다가 모두 대표 결정 보류에 걸렸다.
+          const preexisting =
+            !ev.passed && i >= (setup ? 1 : 0) && sub.baseSha ? await this.failsOnBase(project, paths, vc, sub.baseSha, ticketId) : false;
           const e: Evidence = {
             id: newId('EV'),
             ticketId,
             round: ticket.round,
             headSha: sub.headSha,
             type: vc.evidenceType,
-            label: vc.label,
+            label: preexisting
+              ? tr(`${vc.label} (기준에서도 실패 — 이 업무와 무관)`, `${vc.label} (fails on base too — not this ticket)`)
+              : vc.label,
             argv: vc.argv,
             ...ev,
+            ...(preexisting ? { preexisting: true } : {}),
             createdAt: now(),
           };
           this.records.saveEvidence(e, sub.id);
-          if (!e.passed)
+          if (!e.passed && !preexisting)
             failures.push(
               tr(
                 `${vc.label} 실패 (exit ${e.exitCode ?? '-'}):\n${e.summary}`,
@@ -2455,6 +2464,50 @@ ${failure.detail.slice(0, 400)}`,
         `Some source links do not open (no such address or 404). Replace them with pages you actually opened, or drop the claim:\n${summary}`,
       );
     return null;
+  }
+
+  /**
+   * 이 검사가 기준 커밋에서도 실패하는가(커밋·명령마다 한 번만 돌리고 기억한다). 처음 알게 되면 대표에게 한 번 알린다.
+   */
+  private async failsOnBase(
+    project: Project,
+    paths: ReturnType<typeof projectPaths>,
+    vc: VerifyCommand,
+    baseSha: string,
+    ticketId: string,
+  ): Promise<boolean> {
+    const id = createHash('sha1').update(vc.argv.join('\u0000')).digest('hex').slice(0, 12);
+    const key = `verify_on_base:${project.id}:${id}:${baseSha}`;
+    const known = this.company.store.getSetting(key);
+    if (known) return known === 'fail';
+    const dir = await ensureDetachedWorktree(paths, 'verify', `base-${baseSha.slice(0, 12)}`, baseSha);
+    const setup = dependencySetup(dir, project.verifyCommands);
+    if (setup)
+      await this.runVerifyCommand(
+        setup,
+        dir,
+        path.join(this.opts.dataDir, 'verify-base', `${id}-${baseSha.slice(0, 8)}`, 'setup'),
+        ticketId,
+      );
+    const r = await this.runVerifyCommand(
+      vc,
+      dir,
+      path.join(this.opts.dataDir, 'verify-base', `${id}-${baseSha.slice(0, 8)}`, 'run'),
+      ticketId,
+    );
+    this.company.store.setSetting(key, r.passed ? 'pass' : 'fail');
+    if (!r.passed && !this.company.store.getSetting(`verify_broken_notice:${project.id}:${id}`)) {
+      this.company.store.setSetting(`verify_broken_notice:${project.id}:${id}`, new Date().toISOString());
+      this.desk.notice(
+        tr(`자동 검사 "${vc.label}"가 업무와 상관없이 실패합니다`, `Check "${vc.label}" fails regardless of the work`),
+        tr(
+          `${project.name}: 업무를 시작하기 전 코드에서도 실패해서 업무 탓으로 보지 않고 막지 않습니다. 검사 환경을 고치거나 프로젝트 설정에서 이 검사를 빼 주세요.\n${r.summary.slice(0, 300)}`,
+          `${project.name}: it also fails before the work, so tickets are not blocked by it. Fix the check or remove it in project settings.\n${r.summary.slice(0, 300)}`,
+        ),
+        '/projects',
+      );
+    }
+    return !r.passed;
   }
 
   /** 검증 기준 스냅샷: 중단된 이전 시도의 기준이 남아 있으면 그것을 쓴다(가장 이른 기준). */

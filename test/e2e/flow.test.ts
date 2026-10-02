@@ -61,7 +61,14 @@ test('범위 밖 수정(보호 경로 README.md) → 결과 격리, 대표 권�
 
 test('검증 명령이 계속 실패하면 회차 한도 후 성공 처리 없이 대표 결정 보류', { timeout: 180_000 }, async (t) => {
   const env = await setup(t, {
-    verify: [{ label: 'always fails', argv: ['node', '-e', 'console.error("테스트 실패"); process.exit(1)'], evidenceType: 'unit_test' }],
+    // 업무가 만든 파일 때문에만 실패한다(기준 커밋에서는 통과: 기준에서도 실패하면 업무 탓이 아니라 막지 않는다)
+    verify: [
+      {
+        label: 'fails with the work',
+        argv: ['node', '-e', "if (require('fs').readdirSync('src').length > 1) { console.error('테스트 실패'); process.exit(1) }"],
+        evidenceType: 'unit_test',
+      },
+    ],
   });
   const ticket = newImplTicket(env);
   const held = await driveUntil(env, ticket.id, (x) => x.hold !== null, 150_000);

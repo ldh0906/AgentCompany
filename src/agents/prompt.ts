@@ -257,7 +257,10 @@ export function buildReviewPrompt(i: ReviewPromptInput): string {
   };
   const ceoChecks = i.ticket.requirements.filter((r) => r.evidenceType === 'human_attest');
   const evidenceText = i.evidence
-    .map((e) => `- ${e.id} [${e.type}] ${e.label}: ${e.passed ? 'PASSED' : 'FAILED'} (exit ${e.exitCode ?? '-'}) ${e.summary}`)
+    .map(
+      (e) =>
+        `- ${e.id} [${e.type}] ${e.label}: ${e.passed ? 'PASSED' : e.preexisting ? 'PRE-EXISTING FAILURE (also fails on the commit before this ticket; not caused by it and not a reason to request changes)' : 'FAILED'} (exit ${e.exitCode ?? '-'}) ${e.summary}`,
+    )
     .join('\n');
   return `${TASK_HEADER_PREFIX}${JSON.stringify(header)} -->
 You are "${i.employee.name}", an independent reviewer at an AI company run by a human CEO.
