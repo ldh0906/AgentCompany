@@ -90,14 +90,19 @@ export function Live({ runId }: { runId: string | null }) {
   }, [running.map((r) => r.id).join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!state) return <Skeleton />;
-  const selected = runId ?? running[0]?.id ?? null;
+  // 고른 실행만 연다. 대표 요청(2026-10-03): 작업 현황에 들어가면 원하든 말든 첫 진행 중 작업이 열려 닫을 수도 없었다.
+  const selected = runId;
 
   const Card = ({ r }: { r: RunSummary }) => {
     const info = last[r.id];
     const stalled = r.status === 'running' && info?.at && Date.now() - Date.parse(info.at) > STALL_MS;
     const place = runPlace(r, ko);
     return (
-      <button className={`live-card ${selected === r.id ? 'on' : ''}`} onClick={() => go(`/live/${r.id}`)}>
+      <button
+        className={`live-card ${selected === r.id ? 'on' : ''}`}
+        onClick={() => go(selected === r.id ? '/live' : `/live/${r.id}`)}
+        title={selected === r.id ? (ko ? '한 번 더 누르면 닫힙니다' : 'Click again to close') : undefined}
+      >
         <div className="spread">
           <span className="row">
             <Avatar employees={state.employees} id={r.employeeId} />
@@ -161,7 +166,7 @@ export function Live({ runId }: { runId: string | null }) {
         </div>
         <div className="live-detail">
           {selected ? (
-            <RunLog key={selected} runId={selected} />
+            <RunLog key={selected} runId={selected} onClose={() => go('/live')} />
           ) : (
             <EmptyState icon="activity">{ko ? '실행을 고르세요' : 'Pick a run'}</EmptyState>
           )}
@@ -171,7 +176,7 @@ export function Live({ runId }: { runId: string | null }) {
   );
 }
 
-function RunLog({ runId }: { runId: string }) {
+function RunLog({ runId, onClose }: { runId: string; onClose: () => void }) {
   const { state } = useCompany();
   const { lang } = useT();
   const ko = lang === 'ko';
@@ -214,6 +219,9 @@ function RunLog({ runId }: { runId: string }) {
               ? `${ko ? '진행' : 'running'} ${elapsed(r.startedAt)}`
               : `${r.status} · ${elapsed(r.startedAt, r.endedAt)}`}
           </span>
+          <button className="btn small" onClick={onClose}>
+            {ko ? '닫기' : 'Close'}
+          </button>
         </span>
       </div>
       <div className="body">
