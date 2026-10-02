@@ -171,6 +171,36 @@ function chat(h: TaskHeader, prompt: string): string {
       },
       L('플레이 결과.', 'Play result.'),
     );
+  // 인수 시험 흉내: 1회차는 하나 떨어뜨리고 고칠 업무를 낸다, 그다음은 모두 통과
+  if (prompt.includes('ACCEPTANCE TEST')) {
+    const first = /This is round 1 of/.test(prompt);
+    return finalWith(
+      {
+        nonce: h.nonce,
+        kind: 'chat',
+        reply: first ? L('A1 ✅ 해산 가능\nA2 ⚠ 문서에 안내가 없음', 'A1 ✅\nA2 ⚠ docs missing') : L('A1 ✅\nA2 ✅', 'A1 ✅\nA2 ✅'),
+        mentions: [],
+        openRoom: null,
+        results: [
+          { id: 'A1', mark: '✅', why: 'ok' },
+          { id: 'A2', mark: first ? '⚠' : '✅', why: first ? L('안내 없음', 'missing') : 'ok' },
+        ],
+        fixes: first
+          ? [
+              {
+                title: L('해산 안내 문서', 'Disband docs'),
+                purpose: L('문서 보강', 'Docs'),
+                requirements: [{ text: L('해산 안내가 있다', 'Docs explain disbanding'), evidenceType: 'inspection' }],
+                writeScope: ['docs/**'],
+                difficulty: 'easy',
+                for: 'A2',
+              },
+            ]
+          : [],
+      },
+      L('인수 시험 결과.', 'Acceptance result.'),
+    );
+  }
   // 토론 사회자 흉내: 선택지 둘과 추천
   if (prompt.includes('moderator of a team debate'))
     return finalWith(
@@ -284,6 +314,10 @@ function drafts(h: TaskHeader, prompt: string): string {
         },
       ],
       questions: [L('수치가 필요한 부분은 대표 결정이 필요합니다.', 'The actual fatigue numbers need a CEO decision.')],
+      acceptance: [
+        { check: L('파티를 해산할 수 있다', 'A party can be disbanded'), how: L('테스트를 돌린다', 'Run the tests') },
+        { check: L('해산 안내가 문서에 있다', 'The docs explain disbanding'), how: L('문서를 읽는다', 'Read the docs') },
+      ],
     },
     L('업무 초안을 만들었습니다.', 'Drafted tickets.'),
   );

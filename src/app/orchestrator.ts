@@ -90,6 +90,7 @@ import { Playtests } from './playtests.ts';
 import { ScreenQa } from './screen-qa.ts';
 import { Delegation } from './delegation.ts';
 import { Debates } from './debate.ts';
+import { Acceptance } from './acceptance.ts';
 import { deliverableKindOf, projectDoc, projectDocList } from './deliverables.ts';
 import { checkLinks, extractLinks, linkSummary, type LinkResult } from './link-check.ts';
 
@@ -141,6 +142,8 @@ export class Orchestrator {
   readonly delegation: Delegation;
   /** 토론 모드(debate.ts) */
   readonly debates: Debates;
+  /** 요청 단위 V모델 인수 시험(acceptance.ts) */
+  readonly acceptance: Acceptance;
   /** 대표 할 일·알림(ceo-desk.ts) */
   readonly desk: CeoDesk;
   /** 고급 QA 직접 플레이(playtests.ts) */
@@ -241,6 +244,29 @@ export class Orchestrator {
       delegate: () => this.delegation.delegate(),
       logDelegated: (entityId, text, ticketId) => this.delegation.log(entityId, text, ticketId),
     });
+    this.acceptance = new Acceptance({
+      ...host,
+      nameOf: (id) => this.nameOf(id),
+      snapshotDir: (projectId, key) => this.debateDir(projectId, null, key),
+      integrationChecks: (project, dir, key) => this.integrationChecks(project, dir, key),
+    });
+  }
+
+  /**
+   * 통합 시험(V모델 오른쪽 가운데): 요청의 업무가 모두 반영된 결과에서 프로젝트 검사 명령을 다시 돌린다.
+   * 업무마다 따로 통과해도 합친 뒤 깨질 수 있다.
+   */
+  private async integrationChecks(project: Project, dir: string, key: string): Promise<string[]> {
+    const setup = dependencySetup(dir, project.verifyCommands);
+    const steps = setup ? [setup, ...project.verifyCommands] : project.verifyCommands;
+    const out: string[] = [];
+    for (const [i, vc] of steps.entries()) {
+      const ev = await this.runVerifyCommand(vc, dir, path.join(this.opts.dataDir, 'acceptance', key, String(i)));
+      out.push(
+        `${vc.label} [${vc.evidenceType}] ${ev.passed ? 'PASSED' : 'FAILED'} (exit ${ev.exitCode ?? '-'}): ${vc.argv.join(' ')}\n${ev.summary.slice(-800)}`,
+      );
+    }
+    return out;
   }
 
   /** 토론 참가자가 읽을 사본: 업무 토론이면 그 제출물, 아니면 프로젝트 기준 브랜치(프로젝트가 없으면 빈 폴더). */
@@ -1429,6 +1455,7 @@ export class Orchestrator {
     if (!this.chat.channel(channelId)) return;
     if (failed || !parsed) {
       this.debates.onChatReply(run, null, finalText); // 토론은 그 사람 몫만 비우고 다음 단계로
+      this.acceptance.onChatReply(run, null, finalText);
       this.chat.post(
         channelId,
         'system',
@@ -1444,6 +1471,7 @@ export class Orchestrator {
       if (ticketId) this.screens.maybeQaReject(ticketId, run, parsed.reply);
       this.delegation.onChatReply(run, parsed.reply, finalText);
       this.debates.onChatReply(run, parsed.reply, finalText);
+      this.acceptance.onChatReply(run, parsed.reply, finalText);
       if (parsed.profile) this.proposeProfile(channelId, parsed.profile, run.employeeId);
       const byName = (n: string) => this.company.employees().find((e) => e.name === n.trim() && !e.removedAt)?.id;
       const called = new Set(
@@ -1666,6 +1694,18 @@ export class Orchestrator {
 
   /** 요청이 끝났을 때: 게임 프로젝트에서 켜 두었으면 고급 QA(직접 플레이)를 한 번 한다. */
   private onRequestDone(req: CeoRequest, tickets: Ticket[]): void {
+    // V모델 인수 시험: 반영된 결과 전체를 요청 기준으로 확인하고, 떨어지면 고칠 업무를 만들어 다시 돈다.
+    this.track(
+      `acceptance:${req.id}`,
+      this.acceptance
+        .onRequestDone(req, tickets)
+        .catch((e: unknown) =>
+          this.desk.notice(
+            tr('인수 시험을 시작하지 못했습니다', 'Could not start the acceptance test'),
+            String((e as Error)?.message ?? e),
+          ),
+        ),
+    );
     const project = this.company.store.get<Project>('projects', req.projectId);
     if (!project?.profile?.game || !project.autoPlaytest || !tickets.some((t) => t.status === 'done')) return;
     void this.playtests
@@ -3128,6 +3168,7 @@ ${failure.detail.slice(0, 400)}`,
         answers: parsed.ok ? parsed.report.questions.map(() => null) : [],
         verifySuggestions: parsed.ok ? parsed.report.verifySuggestions : [],
         profile: parsed.ok ? (parsed.report.profile ?? null) : null,
+        acceptance: parsed.ok ? (parsed.report.acceptance ?? []) : [],
         error: parsed.ok
           ? null
           : transient && !req.retriedFrom

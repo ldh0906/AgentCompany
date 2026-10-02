@@ -2479,3 +2479,12 @@ details.advanced[open] summary {
   display: grid;
   gap: 3px;
 }
+/* V모델 인수 시험 (Requests) */
+.acceptance {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+.acceptance summary {
+  cursor: pointer;
+}

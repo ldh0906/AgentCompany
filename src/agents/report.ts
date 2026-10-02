@@ -245,6 +245,8 @@ export interface DraftReport {
   profile?: ProjectProfile | null;
   /** 만들기 전에 팀이 토론할 큰 갈림길(드물게) */
   debate?: { topic: string; why: string } | null;
+  /** 요청 전체의 인수 시험(V모델 꼭대기): 업무가 다 끝나면 반영된 결과로 확인한다 */
+  acceptance?: { id: string; check: string; how: string }[];
 }
 
 /** 프로필 제안: 한두 줄 요약이 있을 때만. */
@@ -329,8 +331,16 @@ export function parseDrafts(
       verifySuggestions: suggestionsOf(raw.verifySuggestions),
       profile: profileOf(raw.profile),
       debate: debateOf(raw.debate),
+      acceptance: acceptanceOf(raw.acceptance),
     },
   };
+}
+
+function acceptanceOf(v: unknown): { id: string; check: string; how: string }[] {
+  return (Array.isArray(v) ? (v as Record<string, unknown>[]) : [])
+    .filter((x) => isStr(x?.check) && x.check.trim())
+    .slice(0, 8)
+    .map((x, i) => ({ id: `A${i + 1}`, check: String(x.check).slice(0, 500), how: isStr(x.how) ? x.how.slice(0, 500) : '' }));
 }
 
 function debateOf(v: unknown): { topic: string; why: string } | null {

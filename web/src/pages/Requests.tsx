@@ -217,6 +217,49 @@ export function RequestBox() {
                   {')'}
                 </div>
               )}
+              {/* V모델 인수 시험: 회차별 결과와 고칠 업무(대표 요청 2026-10-02) */}
+              {(r.acceptanceRounds?.length ?? 0) > 0 && (
+                <div className="acceptance">
+                  {r.acceptanceRounds!.map((a) => {
+                    const pass = a.results.filter((x) => x.mark === '✅').length;
+                    return (
+                      <details key={a.round} open={a.round === r.acceptanceRounds!.length}>
+                        <summary>
+                          ✔ {ko ? `인수 시험 ${a.round}회차` : `Acceptance round ${a.round}`}:{' '}
+                          {a.state === 'running'
+                            ? ko
+                              ? '확인 중…'
+                              : 'checking…'
+                            : a.state === 'failed'
+                              ? ko
+                                ? '시험 담당이 답하지 못했습니다'
+                                : 'no answer'
+                              : `${pass}/${a.results.length} ${ko ? '통과' : 'passed'}`}
+                          {a.fixTickets.length > 0 && (
+                            <>
+                              {' · '}
+                              {ko ? '고칠 업무' : 'Fixes'}{' '}
+                              {a.fixTickets.map((id) => (
+                                <Link key={id} to={`/tickets/${id}`} className="chip">
+                                  {id}
+                                </Link>
+                              ))}
+                            </>
+                          )}
+                        </summary>
+                        {a.results.map((x) => (
+                          <div key={x.id} className={`verdict ${x.mark === '✅' ? 'ok' : x.mark === '⚠' ? 'bad' : 'unk'}`}>
+                            <b>
+                              {x.id} {x.mark}
+                            </b>{' '}
+                            {r.acceptance?.find((t) => t.id === x.id)?.check} — <span className="sub">{x.why}</span>
+                          </div>
+                        ))}
+                      </details>
+                    );
+                  })}
+                </div>
+              )}
               {/* 요청의 업무가 모두 끝났고 게임이면: 고급 QA(직접 플레이) 결과·버튼 */}
               {(state.projects.find((p) => p.id === r.projectId)?.profile?.game || state.playtests?.[`Q:${r.id}`]) &&
                 r.ticketIds.length > 0 &&
@@ -521,6 +564,17 @@ function DraftReview({ r }: { r: CeoRequest }) {
               {ko ? '업무를 만들 때 이 프로필을 저장(나중에 프로젝트 설정에서 고칠 수 있음)' : 'Save this profile when creating tickets'}
             </span>
           </label>
+        </div>
+      )}
+      {(r.acceptance?.length ?? 0) > 0 && (
+        <div className="note" style={{ marginTop: 8 }}>
+          <b>✔ {ko ? '다 끝나면 이렇게 확인합니다 (인수 시험)' : 'Acceptance tests (checked at the end)'}</b>
+          {r.acceptance!.map((a) => (
+            <div key={a.id} className="sub">
+              {a.id} {a.check}
+              {a.how ? ` — ${a.how}` : ''}
+            </div>
+          ))}
         </div>
       )}
       {r.questions.length > 0 && (

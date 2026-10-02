@@ -50,6 +50,18 @@ export interface RunRecord extends Run {
 }
 
 /** 대표 요청 → 비서실장 초안 → 대표 확정. */
+/** 인수 시험 한 회차 */
+export interface AcceptanceRound {
+  round: number;
+  state: 'running' | 'done' | 'failed';
+  at: string;
+  runId: string | null;
+  results: { id: string; mark: '✅' | '⚠' | '❓'; why: string }[];
+  report: string;
+  /** 이 회차로 만든 고칠 업무 */
+  fixTickets: string[];
+}
+
 export interface CeoRequest {
   id: string;
   projectId: string;
@@ -68,6 +80,10 @@ export interface CeoRequest {
   verifySuggestions?: VerifySuggestion[];
   /** 비서실장이 제안한 프로젝트 프로필(프로필이 없을 때만) */
   profile?: ProjectProfile | null;
+  /** 요청 전체의 인수 시험(V모델): 비서실장이 초안 때 정하고, 업무가 다 끝나면 확인한다 */
+  acceptance?: { id: string; check: string; how: string }[];
+  /** 인수 시험 회차 기록 */
+  acceptanceRounds?: AcceptanceRound[];
   /** 비서실장이 표시한 갈림길로 연 토론(결정 전에는 위임 모드도 확정하지 않는다) */
   debateId?: string | null;
   /** 실패한 요청을 다시 보낸 것이면 원래 요청 ID(자동 재시도는 한 번만). */

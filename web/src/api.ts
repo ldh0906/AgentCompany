@@ -59,6 +59,16 @@ export interface CeoRequest {
   profile?: ProjectProfile | null;
   /** 큰 갈림길로 연 토론 */
   debateId?: string | null;
+  /** V모델 인수 시험(src/app/acceptance.ts) */
+  acceptance?: { id: string; check: string; how: string }[];
+  acceptanceRounds?: {
+    round: number;
+    state: 'running' | 'done' | 'failed';
+    at: string;
+    results: { id: string; mark: '✅' | '⚠' | '❓'; why: string }[];
+    report: string;
+    fixTickets: string[];
+  }[];
   error: string | null;
   ticketIds: string[];
   createdAt: string;
