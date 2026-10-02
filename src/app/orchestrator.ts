@@ -94,6 +94,7 @@ import { dependencySetup, installDependencies } from './verify-setup.ts';
 import { estimates, ticketTokens, tokenBudget } from './cost.ts';
 import { nodeTestArgs, suggestVerifyAt } from './repo-inspect.ts';
 import { killStalePreviews, PreviewManager, type PreviewInfo } from './preview.ts';
+import { similarTitle } from './similar.ts';
 import { captureScreens, findChrome } from './screen-check.ts';
 import { CeoDesk } from './ceo-desk.ts';
 import type { OrchHost } from './orch-host.ts';
@@ -2023,14 +2024,22 @@ export class Orchestrator {
   private postFollowUps(run: RunRecord, t: Ticket, followUps: { title: string; reason: string }[]): void {
     const room = this.chat.ensureTicketChannel(t.id);
     if (!room || !followUps.length) return;
-    // 같은 제목의 제안은 한 번만(재작업 회차마다 반복하지 않게)
-    const seen = new Set(
-      this.chat
-        .messages(room.id, 300)
-        .filter((m) => m.followUp)
-        .map((m) => m.followUp!.title),
-    );
-    for (const f of followUps.filter((x) => !seen.has(x.title)))
+    // 같은 제안은 한 번만: 이 방의 지난 회차뿐 아니라 같은 프로젝트의 다른 업무방(최근 7일)에 이미 올라온 비슷한 제안도 거른다.
+    // 실측(2026-10-03, 4777): 같은 playwright 문제가 직원마다 다른 말로 6개 업무방에 제안됐다(similar.ts).
+    const since = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+    const seen = this.chat
+      .channels()
+      .filter((c) => c.kind === 'ticket' && c.ticketId && this.company.store.get<Ticket>('tickets', c.ticketId)?.projectId === t.projectId)
+      .flatMap((c) => this.chat.messages(c.id, 300))
+      .filter((m) => m.followUp && (m.channelId === room.id || m.createdAt >= since))
+      .map((m) => m.followUp!.title);
+    const fresh: { title: string; reason: string }[] = [];
+    for (const f of followUps)
+      if (!seen.some((s) => s === f.title || similarTitle(s, f.title))) {
+        fresh.push(f);
+        seen.push(f.title);
+      }
+    for (const f of fresh)
       this.chat.post(
         room.id,
         run.employeeId,
