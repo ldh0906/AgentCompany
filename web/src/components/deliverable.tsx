@@ -173,6 +173,7 @@ export function Markdown({ text }: { text: string }) {
       continue;
     }
     const para: string[] = [];
+    const hard: boolean[] = []; // 이 줄 뒤에서 줄을 바꾸는가(줄 끝 공백 두 칸이나 역슬래시)
     for (
       ;
       i < lines.length &&
@@ -183,13 +184,16 @@ export function Markdown({ text }: { text: string }) {
       i++
     ) {
       if (para.length && lines[i]!.includes('|') && i + 1 < lines.length && isTableRule(lines[i + 1]!)) break;
-      para.push(lines[i]!.trim());
+      // 줄 끝 공백 두 칸이나 \ 는 줄바꿈 표시(표준 마크다운). 나머지 줄바꿈은 띄어쓰기로 잇는다.
+      hard.push(/( {2,}|\\)$/.test(lines[i]!));
+      para.push(lines[i]!.trim().replace(/\\$/, ''));
     }
     blocks.push(
       <p key={key}>
+        {/* 실측(2026-10-02 QA): 폭에 맞춰 줄을 끊어 쓴 README가 "Python 표준 / 라이브러리"처럼 문장 중간에서 끊겨 보였다 */}
         {para.map((l, j) => (
           <Fragment key={j}>
-            {j > 0 && <br />}
+            {j > 0 && (hard[j - 1] ? <br /> : ' ')}
             {inline(l)}
           </Fragment>
         ))}

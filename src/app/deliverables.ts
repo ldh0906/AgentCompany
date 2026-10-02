@@ -82,13 +82,21 @@ export function viewOf(p: string, kind: DeliverableFileKind, buf: Buffer): Pick<
  */
 export async function projectDocList(repo: string, sha: string): Promise<{ path: string; kind: DeliverableFileKind }[]> {
   const r = await git(['ls-tree', '-r', '--name-only', sha], repo, { allowFail: true });
-  return r.stdout
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((p) => ({ path: p, kind: deliverableKindOf(p) }))
-    .filter((x): x is { path: string; kind: DeliverableFileKind } => x.kind !== null)
-    .sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind) || a.path.localeCompare(b.path))
-    .slice(0, 200);
+  return (
+    r.stdout
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((p) => ({ path: p, kind: deliverableKindOf(p) }))
+      .filter((x): x is { path: string; kind: DeliverableFileKind } => x.kind !== null)
+      // 얕은 곳 먼저(맨 위 README가 안쪽 폴더 README보다 먼저 열리게. 실측 2026-10-02 QA: bakery/core/README.md가 먼저 열렸다)
+      .sort(
+        (a, b) =>
+          ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind) ||
+          a.path.split('/').length - b.path.split('/').length ||
+          a.path.localeCompare(b.path),
+      )
+      .slice(0, 200)
+  );
 }
 
 export async function projectDoc(repo: string, sha: string, p: string): Promise<DeliverableFile | null> {

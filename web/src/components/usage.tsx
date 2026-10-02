@@ -93,11 +93,17 @@ function DailyLimit() {
               style={{ width: 90 }}
               value={edit}
               onChange={(e) => setEdit(e.target.value.replace(/[^0-9]/g, ''))}
+              onKeyDown={(e) => (e.key === 'Enter' ? save(Number(edit || 0) * 1e4) : e.key === 'Escape' ? setEdit(null) : undefined)}
               placeholder={ko ? '만 토큰' : '10k tokens'}
+              autoFocus
             />
             <span className="sub">{ko ? '만' : '×10k'}</span>
             <button className="btn small primary" onClick={() => save(Number(edit || 0) * 1e4)}>
               {ko ? '저장' : 'Save'}
+            </button>
+            {/* 실측(2026-10-02 QA): 펼친 뒤 닫을 방법이 저장뿐이었다 */}
+            <button className="btn small" onClick={() => setEdit(null)}>
+              {ko ? '취소' : 'Cancel'}
             </button>
           </span>
         )}
