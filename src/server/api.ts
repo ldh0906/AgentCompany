@@ -360,6 +360,8 @@ export class Api {
         return this.orch.setDailyTokenLimit(Number(b.tokens ?? 0));
       case 'POST pause':
         return this.orch.setPaused(b.paused !== false);
+      case 'POST later-checks':
+        return this.orch.resolveAllLaterChecks(oneOf(b, 'mode', ['ok', 'dismiss'] as const));
       case 'POST delegation':
         return this.orch.delegation.set(b.on === true);
       case 'POST debates':

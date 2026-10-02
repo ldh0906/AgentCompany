@@ -359,6 +359,41 @@ function Shell() {
                 </li>
               ))}
             </ul>
+            {/* "나중에 확인"을 한꺼번에(실측 2026-10-02: 전권 위임을 쓰면 빨리 쌓이는데 하나씩만 처리할 수 있었다) */}
+            {todos.filter((x) => x.kind === 'later').length > 1 && (
+              <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                <span className="sub">
+                  {lang === 'ko'
+                    ? `나중에 확인 ${todos.filter((x) => x.kind === 'later').length}개를 한꺼번에:`
+                    : `All ${todos.filter((x) => x.kind === 'later').length} deferred checks:`}
+                </span>
+                <button
+                  className="btn small"
+                  onClick={() =>
+                    confirm(
+                      lang === 'ko' ? '나중에 확인 항목을 모두 "확인했어요"로 기록할까요?' : 'Mark all deferred checks as confirmed?',
+                    ) &&
+                    void api('later-checks', { body: { mode: 'ok' } })
+                      .then(reload)
+                      .catch(() => {})
+                  }
+                >
+                  {lang === 'ko' ? '모두 확인했어요' : 'All confirmed'}
+                </button>
+                <button
+                  className="btn small"
+                  title={lang === 'ko' ? '확인한 척 기록하지 않고 목록에서만 뺍니다' : 'Remove without recording a confirmation'}
+                  onClick={() =>
+                    confirm(lang === 'ko' ? '나중에 확인 항목을 확인하지 않고 모두 목록에서 뺄까요?' : 'Dismiss all deferred checks?') &&
+                    void api('later-checks', { body: { mode: 'dismiss' } })
+                      .then(reload)
+                      .catch(() => {})
+                  }
+                >
+                  {lang === 'ko' ? '모두 버리기' : 'Dismiss all'}
+                </button>
+              </div>
+            )}
           </details>
         )}
         {state?.delegation?.on && (

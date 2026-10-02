@@ -61,4 +61,11 @@ test('위임: 대표 직접 확인 항목은 자동 점검이 없으면 승인�
     env.orch.laterChecks(tk.id).map((x) => x.id),
     ['R2'],
   );
+  // 한꺼번에 버리기: 확인 기록 없이 목록에서만 빠지고, 버렸다는 기록이 남는다
+  assert.deepEqual(env.orch.resolveAllLaterChecks('dismiss'), { count: 1 });
+  assert.deepEqual(env.orch.laterChecks(tk.id), []);
+  assert.ok(
+    !env.orch.records.evidenceFor(tk.id).some((e) => e.type === 'human_attest' && e.requirementId === 'R2' && e.label === '대표 직접 확인'),
+  );
+  assert.ok(env.company.store.events(tk.id).some((e) => e.type === 'evidence.later_dismissed'));
 });

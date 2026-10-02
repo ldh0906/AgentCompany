@@ -1549,6 +1549,28 @@ export class Orchestrator {
     return { requestId };
   }
 
+  /**
+   * "나중에 확인"을 한꺼번에: ok면 모두 대표 확인으로 기록, dismiss면 확인한 척하지 않고 목록에서만 뺀다(버렸다는 기록은 남긴다).
+   * 실측(2026-10-02): 전권 위임을 쓰면 ❓ 항목이 빠르게 쌓이는데 하나씩만 처리할 수 있었다.
+   */
+  resolveAllLaterChecks(mode: 'ok' | 'dismiss'): { count: number } {
+    let count = 0;
+    for (const t of this.company.tickets()) {
+      const list = this.laterChecks(t.id);
+      if (!list.length) continue;
+      this.company.store.setSetting(`later_checks:${t.id}`, '[]');
+      for (const item of list) {
+        if (mode === 'ok')
+          this.attest(t.id, item.id, tr('반영 뒤 대표가 한꺼번에 확인했습니다.', 'Confirmed by the CEO in bulk after merging.'));
+        count++;
+      }
+      if (mode === 'dismiss')
+        this.company.store.appendEvent('ceo', 'evidence.later_dismissed', t.id, { requirementIds: list.map((x) => x.id) });
+      this.changed('ticket', t.id);
+    }
+    return { count };
+  }
+
   // ======================= 멈춘 실행 =======================
 
   /** 이만큼 아무 출력이 없으면 멈췄을 수 있다고 대표에게 알린다(라이브 화면은 5분부터 ⚠). */
