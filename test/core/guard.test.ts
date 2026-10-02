@@ -119,3 +119,16 @@ test('읽기 전용 실행(검수): 읽기·검색·테스트는 허용, 쓰기�
     assert.equal(ok(c), false, c);
   assert.equal(ok(ps('Get-Content x 2>$null')), true, '오류 버리기 리다이렉트는 허용');
 });
+
+test('오판 없음: -LiteralPath·-Force는 재귀가 아니고, 두 겹 백슬래시(Codex 명령 안 경로)도 작업공간 안', () => {
+  // 실측(2026-10-02, 가계부 T-47): 직원이 자기 폴더의 파일 2개를 지우려다 "작업공간 밖 재귀 삭제"로 막혀 대표 결정을 기다리며 멈췄다.
+  const doubled = WS.replace(/\\/g, '\\\\');
+  for (const c of [
+    `"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Remove-Item -LiteralPath '${doubled}\\\\examples\\\\out.csv', '${doubled}\\\\examples\\\\b.csv'; git status"`,
+    'Remove-Item -Force -LiteralPath C:\\other\\file.txt',
+    `Remove-Item -Recurse -Force '${doubled}\\\\build'`,
+  ])
+    assert.equal(cmd(c).allow, true, c);
+  for (const c of ['Remove-Item -Recurse -Force C:\\\\Users\\\\me', 'rm -rf C:\\\\Windows', 'Remove-Item -r C:\\other'])
+    assert.equal(cmd(c).allow, false, c);
+});

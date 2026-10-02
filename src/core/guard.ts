@@ -42,7 +42,13 @@ function tokens(s: string): string[] {
   return (s.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map((t) => t.replace(/^["']|["']$/g, ''));
 }
 
-const norm = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+// 두 겹 백슬래시도 하나로: Codex는 명령 안 경로를 "C:\\Users\\…"처럼 이스케이프해 보낸다(실측 2026-10-02).
+const norm = (p: string) =>
+  p
+    .replace(/\//g, '\\')
+    .replace(/\\{2,}/g, '\\')
+    .replace(/\\+$/, '')
+    .toLowerCase();
 
 function isAbsolute(p: string): boolean {
   return /^[a-z]:/i.test(p) || p.startsWith('/') || p.startsWith('\\') || p.startsWith('~') || /^\$(env:)?\w+|^%\w+%/i.test(p);
@@ -71,9 +77,13 @@ function judgeDelete(seg: string, workspace: string, prevTarget: string | null):
   const cmd = tk[i]!.toLowerCase();
   const args = tk.slice(i + 1);
   const cmdStyle = cmd === 'rd' || cmd === 'rmdir' || cmd === 'del' || cmd === 'erase';
+  // PowerShell 삭제(Remove-Item/ri)는 -Recurse(줄임 -r, -re, -rec…)만 재귀다. 묶음 짧은 옵션(-rf, -Rf)은 rm만.
+  // 실측(2026-10-02, 가계부 T-47): -LiteralPath·-Force에 r이 들어 있어 파일 하나 지우기가 "재귀 삭제"로 막혔다.
   const recursive = cmdStyle
     ? args.some((a) => /^\/s$/i.test(a))
-    : args.some((a) => /^-(r|rf|fr|recurse|recursive|-recursive)$/i.test(a) || /^-[a-z]*r[a-z]*$/i.test(a));
+    : cmd === 'rm'
+      ? args.some((a) => /^-(-recursive|[a-z]{0,3}r[a-z]{0,3})$/i.test(a))
+      : args.some((a) => /^-(r|re|rec|recu|recur|recurs|recurse)$/i.test(a));
   if (!recursive) return null;
   const valueFlags = /^-(path|literalpath|include|exclude|filter)$/i;
   const targets: string[] = [];
