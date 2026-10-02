@@ -231,10 +231,14 @@ code {
   padding: 10px 8px 0;
   border-top: 1px solid var(--border);
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
+/* 언어 고르기는 아랫줄 하나를 다 쓴다. 실측(2026-10-03, 대표 화면): 사이드바 236px에 Live·알림 두 개·언어가 한 줄로 들어가지 않아
+   "한국어" 칸이 사이드바 밖으로 삐져나왔다. */
 .sidebar .foot select {
+  flex: 1 0 100%;
   width: auto;
   padding: 3px 8px;
   font-size: 12px;
@@ -2272,6 +2276,13 @@ details.advanced[open] summary {
   .sidebar > .foot {
     white-space: nowrap;
     flex-shrink: 0;
+  }
+  /* 위쪽 가로 막대에서는 한 줄로 */
+  .sidebar > .foot {
+    flex-wrap: nowrap;
+  }
+  .sidebar .foot select {
+    flex: 0 0 auto;
   }
 }
 @media (max-width: 640px) {
