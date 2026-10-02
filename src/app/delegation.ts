@@ -35,6 +35,7 @@ export interface DelegationHost extends OrchHost {
   latestHead(ticketId: string): string | null;
   profileProposal(projectId: string): unknown;
   resolveProfileProposal(projectId: string, accept: boolean): unknown;
+  debateOpen(debateId: string): boolean;
 }
 
 /** 직원 질문에 답하는 위임 실행(nonce → 업무) */
@@ -81,7 +82,7 @@ export class Delegation {
   }
 
   /** 위임 결정 기록: 이벤트로 남기고 업무방(또는 전체 방)에 알린다. */
-  private log(entityId: string, text: string, ticketId?: string): void {
+  log(entityId: string, text: string, ticketId?: string): void {
     const d = this.delegate();
     if (!d) return;
     this.h.company.store.appendEvent(d.id, 'delegate.decided', entityId, { text });
@@ -131,6 +132,8 @@ export class Delegation {
   /** 초안 확정: 질문은 비서실장 제안대로, 프로필이 없으면 제안 프로필 저장, 초안에 필요한 검사 명령 추가. */
   private acceptDraft(req: CeoRequest): void {
     if (req.error) return;
+    // 갈림길 토론이 끝나기 전에는 확정하지 않는다(결론이 규칙으로 남은 뒤에 업무가 시작되게).
+    if (req.debateId && this.h.debateOpen(req.debateId)) return;
     const project = this.h.company.requireProject(req.projectId);
     if (req.profile && !project.profile) this.h.company.updateProject(project.id, { profile: req.profile });
     const have = new Set(project.verifyCommands.map((v) => v.argv.join(' ')));

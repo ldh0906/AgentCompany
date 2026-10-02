@@ -352,6 +352,19 @@ export class Api {
         return this.orch.setPaused(b.paused !== false);
       case 'POST delegation':
         return this.orch.delegation.set(b.on === true);
+      case 'POST debates':
+        return this.orch.debates.start({
+          topic: str(b, 'topic', { max: 500 }),
+          context: str(b, 'context', { optional: true, max: 2000 }) || undefined,
+          origin: 'ceo',
+          projectId: str(b, 'projectId', { optional: true }) || null,
+          participants: strList(b, 'participants'),
+        });
+      case 'POST debates/:id/decide':
+        return this.orch.debates.decide(id!, {
+          ...(typeof b.option === 'number' ? { option: b.option } : {}),
+          text: str(b, 'text', { optional: true, max: 2000 }),
+        });
       case 'POST tickets/:id/answer':
         return this.orch.answerTicket(id!, str(b, 'answer', { optional: true, max: 4000 }) || null, b.remember !== false);
       case 'POST tickets/:id/reverify':
@@ -511,6 +524,7 @@ export class Api {
           .filter(([, v]) => v),
       ),
       paused: this.orch.paused,
+      debates: this.orch.debates.list(15),
       delegation: {
         on: this.orch.delegation.on,
         delegate: this.orch.delegation.delegate()?.id ?? null,

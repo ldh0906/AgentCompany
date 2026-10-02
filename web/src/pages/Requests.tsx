@@ -168,6 +168,27 @@ export function RequestBox() {
                   </button>
                 </div>
               )}
+              {r.debateId &&
+                (() => {
+                  // 비서실장이 표시한 갈림길: 팀 토론 결론이 규칙으로 남은 뒤 확정하는 것이 좋다
+                  const d = state.debates?.find((x) => x.id === r.debateId);
+                  if (!d) return null;
+                  return (
+                    <div className={`banner ${d.phase === 'done' ? 'ok' : 'info'}`} style={{ margin: '8px 0' }}>
+                      🗣 {ko ? '갈림길 토론' : 'Fork debate'}: {d.topic}{' '}
+                      {d.phase === 'done'
+                        ? `→ ${d.decision}`
+                        : d.phase === 'decide'
+                          ? ko
+                            ? '— 정리 끝, 결정을 기다립니다'
+                            : '— waiting for your decision'
+                          : ko
+                            ? '— 토론 중 (확정은 결론 뒤가 좋습니다)'
+                            : '— in progress'}{' '}
+                      <Link to={`/chat/${encodeURIComponent(d.channelId)}`}>{ko ? '토론 방 보기' : 'Open'}</Link>
+                    </div>
+                  );
+                })()}
               {r.status === 'drafted' && <DraftReview r={r} />}
             </div>
           );

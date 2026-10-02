@@ -8,6 +8,7 @@ import { useT } from '../i18n.ts';
 import { Avatar, EmptyState, Icon, Modal, Skeleton, useAction, when } from '../components/ui.tsx';
 import { ChipToggles } from '../components/kit.tsx';
 import { isUnread, markRead, unreadMentions } from '../components/unread.ts';
+import { DebatePanel, NewDebateModal } from '../components/debate.tsx';
 
 const KIND_LABEL: Record<string, [string, string]> = {
   report: ['작업 보고', 'Report'],
@@ -32,6 +33,7 @@ export function ChatPage({ channelId }: { channelId: string | null }) {
   const [channels, setChannels] = useState<Channel[] | null>(null);
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState(false);
+  const [debating, setDebating] = useState(false);
 
   // 방 목록: 상태가 바뀔 때마다(새 메시지·새 업무) 다시 받는다.
   useEffect(() => {
@@ -77,6 +79,13 @@ export function ChatPage({ channelId }: { channelId: string | null }) {
           <button className="btn small" onClick={() => setCreating(true)} title={ko ? '그룹 방 만들기' : 'New group'}>
             <Icon name="plus" size={13} />
           </button>
+          <button
+            className="btn small"
+            onClick={() => setDebating(true)}
+            title={ko ? '토론 열기: 다같이 모여 입장·반박 후 정리' : 'Open a debate'}
+          >
+            🗣
+          </button>
         </div>
         {mentions.length > 0 && (
           <div className="chat-mentions">
@@ -120,6 +129,12 @@ export function ChatPage({ channelId }: { channelId: string | null }) {
           <EmptyState icon="inbox">{ko ? '방을 고르세요' : 'Pick a room'}</EmptyState>
         )}
       </section>
+      {debating && (
+        <NewDebateModal
+          onClose={() => setDebating(false)}
+          onCreated={(id) => (setDebating(false), go(`/chat/${encodeURIComponent(id)}`))}
+        />
+      )}
       {creating && (
         <NewRoomModal onClose={() => setCreating(false)} onCreated={(c) => (setCreating(false), go(`/chat/${encodeURIComponent(c.id)}`))} />
       )}
@@ -179,6 +194,7 @@ function Room({ channel }: { channel: Channel }) {
   const shown = (messages ?? []).filter((m) => showPerms || !isPerm(m));
   const permCount = (messages ?? []).filter(isPerm).length;
   const ticket = channel.ticketId ? state.tickets.find((t) => t.id === channel.ticketId) : null;
+  const debate = state.debates?.find((d) => d.channelId === channel.id);
 
   return (
     <div className="room">
@@ -212,6 +228,7 @@ function Room({ channel }: { channel: Channel }) {
           </label>
         </div>
       </header>
+      {debate && <DebatePanel debate={debate} />}
 
       <div className="room-body" ref={bodyRef}>
         {messages === null ? (

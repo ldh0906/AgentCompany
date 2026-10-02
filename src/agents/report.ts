@@ -243,6 +243,8 @@ export interface DraftReport {
   verifySuggestions: VerifySuggestion[];
   /** 프로젝트 프로필이 없을 때 비서실장이 제안하는 프로필 */
   profile?: ProjectProfile | null;
+  /** 만들기 전에 팀이 토론할 큰 갈림길(드물게) */
+  debate?: { topic: string; why: string } | null;
 }
 
 /** 프로필 제안: 한두 줄 요약이 있을 때만. */
@@ -326,8 +328,15 @@ export function parseDrafts(
       ...questionsOf(raw.questions),
       verifySuggestions: suggestionsOf(raw.verifySuggestions),
       profile: profileOf(raw.profile),
+      debate: debateOf(raw.debate),
     },
   };
+}
+
+function debateOf(v: unknown): { topic: string; why: string } | null {
+  const o = v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
+  if (!o || !isStr(o.topic) || !o.topic.trim()) return null;
+  return { topic: o.topic.trim().slice(0, 300), why: isStr(o.why) ? o.why.slice(0, 1000) : '' };
 }
 
 /** 질문은 문자열이나 {question, proposal}. */

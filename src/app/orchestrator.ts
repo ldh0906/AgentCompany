@@ -89,6 +89,7 @@ import type { OrchHost } from './orch-host.ts';
 import { Playtests } from './playtests.ts';
 import { ScreenQa } from './screen-qa.ts';
 import { Delegation } from './delegation.ts';
+import { Debates } from './debate.ts';
 import { deliverableKindOf, projectDoc, projectDocList } from './deliverables.ts';
 import { checkLinks, extractLinks, linkSummary, type LinkResult } from './link-check.ts';
 
@@ -138,6 +139,8 @@ export class Orchestrator {
   readonly screens: ScreenQa;
   /** 전권 위임 모드(delegation.ts) */
   readonly delegation: Delegation;
+  /** 토론 모드(debate.ts) */
+  readonly debates: Debates;
   /** 대표 할 일·알림(ceo-desk.ts) */
   readonly desk: CeoDesk;
   /** 고급 QA 직접 플레이(playtests.ts) */
@@ -190,6 +193,8 @@ export class Orchestrator {
       ...host,
       onRequestDone: (req, tickets) => this.onRequestDone(req, tickets),
       stalled: () => this.stalledRuns(),
+      // 위임 중이면 위임받은 직원이 결정하므로 대표 할 일로 올리지 않는다.
+      debatesToDecide: () => (this.delegation.on ? [] : this.debates.list(20).filter((d) => d.phase === 'decide')),
     });
     this.playtests = new Playtests(host);
     this.screens = new ScreenQa({
@@ -216,7 +221,42 @@ export class Orchestrator {
       },
       profileProposal: (id) => this.profileProposal(id),
       resolveProfileProposal: (id, accept) => this.resolveProfileProposal(id, accept),
+      debateOpen: (id) => (this.debates.get(id)?.phase ?? 'done') !== 'done',
     });
+    this.debates = new Debates({
+      ...host,
+      nameOf: (id) => this.nameOf(id),
+      debateDir: (projectId, ticketId, id) => this.debateDir(projectId, ticketId, id),
+      resumeTicket: (ticketId, text) => {
+        const room = this.chat.ensureTicketChannel(ticketId);
+        if (room) this.chat.post(room.id, 'ceo', text, 'chat'); // 업무방 메모는 다음 작업 지시에 들어간다
+        const t = this.company.store.get<Ticket>('tickets', ticketId);
+        if (t?.hold) this.releaseHold(ticketId);
+      },
+      holdTicket: (ticketId, note) => {
+        const t = this.company.store.get<Ticket>('tickets', ticketId);
+        if (t && !t.hold && !TERMINAL_STATUSES.includes(t.status)) this.apply(ticketId, { type: 'hold', reason: 'on_hold', note });
+      },
+      delegationOn: () => this.delegation.on,
+      delegate: () => this.delegation.delegate(),
+      logDelegated: (entityId, text, ticketId) => this.delegation.log(entityId, text, ticketId),
+    });
+  }
+
+  /** 토론 참가자가 읽을 사본: 업무 토론이면 그 제출물, 아니면 프로젝트 기준 브랜치(프로젝트가 없으면 빈 폴더). */
+  private async debateDir(projectId: string | null, ticketId: string | null, debateId: string): Promise<string> {
+    const empty = path.join(this.opts.dataDir, 'debates', debateId);
+    const project = projectId ? this.company.store.get<Project>('projects', projectId) : null;
+    if (!project) {
+      await mkdir(empty, { recursive: true });
+      return empty;
+    }
+    const paths = projectPaths(this.opts.dataDir, project.id);
+    const t = ticketId ? this.company.store.get<Ticket>('tickets', ticketId) : null;
+    const sha =
+      (t ? this.records.latestSubmission(t)?.headSha : null) ??
+      (await this.withProjectLock(project.id, () => this.syncMirrorRecorded(project, paths)));
+    return ensureDetachedWorktree(paths, 'review', `debate-${debateId}`, sha);
   }
 
   private readonly lastNotes = new Map<string, string>();
@@ -527,6 +567,8 @@ export class Orchestrator {
           this.noteOnce(t.id, 'orchestrator.error', { error: String(error) });
         }
       }
+      // 토론: 끊긴 토론 잇기, 위임 중이면 추천안으로 결정
+      await this.debates.sweep().catch(() => {});
       // 전권 위임: 대표 할 일(초안 확정·질문·예산·범위·승인)을 최고 직급 직원이 대신 처리한다.
       this.delegation.step();
     } finally {
@@ -558,6 +600,8 @@ export class Orchestrator {
         return;
       case 'assigned':
       case 'changes_requested':
+        // 검수에서 두 번 반려되면 다시 고치기 전에 토론한다(대표 요청 2026-10-02: 필요할 때 다같이 토론).
+        if (await this.debates.maybeReviewDebate(t)) return;
         await this.startWork(t);
         return;
       case 'in_progress':
@@ -1384,6 +1428,7 @@ export class Orchestrator {
     this.chatDepth.delete(run.id);
     if (!this.chat.channel(channelId)) return;
     if (failed || !parsed) {
+      this.debates.onChatReply(run, null, finalText); // 토론은 그 사람 몫만 비우고 다음 단계로
       this.chat.post(
         channelId,
         'system',
@@ -1398,6 +1443,7 @@ export class Orchestrator {
       const ticketId = this.chat.channel(channelId)?.ticketId;
       if (ticketId) this.screens.maybeQaReject(ticketId, run, parsed.reply);
       this.delegation.onChatReply(run, parsed.reply, finalText);
+      this.debates.onChatReply(run, parsed.reply, finalText);
       if (parsed.profile) this.proposeProfile(channelId, parsed.profile, run.employeeId);
       const byName = (n: string) => this.company.employees().find((e) => e.name === n.trim() && !e.removedAt)?.id;
       const called = new Set(
@@ -3097,6 +3143,22 @@ ${failure.detail.slice(0, 400)}`,
                 )
               : run.reportError,
       });
+      // 큰 갈림길: 확정 전에 팀이 토론한다(대표 요청 2026-10-02).
+      if (parsed.ok && parsed.report.debate) {
+        const d = await this.debates
+          .start({
+            topic: parsed.report.debate.topic,
+            context: tr(
+              `대표 요청 "${req.text.slice(0, 200)}"의 초안을 만들다 큰 갈림길을 만났습니다: ${parsed.report.debate.why}`,
+              `Drafting "${req.text.slice(0, 200)}" hit a fork: ${parsed.report.debate.why}`,
+            ),
+            origin: 'draft',
+            projectId: req.projectId,
+            requestId: req.id,
+          })
+          .catch(() => null);
+        if (d) this.records.saveRequest({ ...this.records.request(req.id)!, debateId: d.id });
+      }
       // 일시적 오류(실측: Claude 로그인 토큰 갱신 경합)는 한 번 자동으로 다시 요청한다.
       if (transient && !req.retriedFrom) setTimeout(() => void this.retryRequest(req.id).catch(() => {}), 60_000).unref?.();
       this.company.store.appendEvent(run.employeeId, parsed.ok ? 'request.drafted' : 'request.failed', req.id, {

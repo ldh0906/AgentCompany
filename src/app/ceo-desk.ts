@@ -14,6 +14,8 @@ export interface CeoDeskHost extends Pick<OrchHost, 'company' | 'records' | 'pau
   onRequestDone(req: CeoRequest, tickets: Ticket[]): void;
   /** 출력이 오래 없는 실행(멈췄을 수 있음) */
   stalled(): { runId: string; ticketId: string; employeeId: string; quietMs: number }[];
+  /** 결정을 기다리는 토론 */
+  debatesToDecide(): { id: string; topic: string; channelId: string }[];
 }
 
 export class CeoDesk {
@@ -51,6 +53,13 @@ export class CeoDesk {
           title: tr(`초안 실패: ${r.text.slice(0, 60)}`, `Drafting failed: ${r.text.slice(0, 60)}`),
           link: '/',
         });
+    for (const d of this.h.debatesToDecide())
+      out.push({
+        key: `debate:${d.id}`,
+        kind: 'decision',
+        title: tr(`토론 결정: ${d.topic.slice(0, 60)}`, `Decide the debate: ${d.topic.slice(0, 60)}`),
+        link: `/chat/${encodeURIComponent(d.channelId)}`,
+      });
     for (const p of this.h.company.projects())
       if (!p.removedAt && this.h.company.store.getSetting(`profile_proposal:${p.id}`))
         out.push({

@@ -171,6 +171,36 @@ function chat(h: TaskHeader, prompt: string): string {
       },
       L('플레이 결과.', 'Play result.'),
     );
+  // 토론 사회자 흉내: 선택지 둘과 추천
+  if (prompt.includes('moderator of a team debate'))
+    return finalWith(
+      {
+        nonce: h.nonce,
+        kind: 'chat',
+        reply: L('선택지 A(파일 저장)와 B(SQLite). 추천: B', 'Options A (files) and B (SQLite). Recommend B'),
+        mentions: [],
+        openRoom: null,
+        options: [
+          {
+            title: L('파일 저장', 'Files'),
+            supporters: [],
+            pros: [L('단순', 'simple')],
+            cons: [L('동시 쓰기 약함', 'weak concurrency')],
+            decision: L('저장은 JSON 파일로 한다', 'Store data in JSON files'),
+          },
+          {
+            title: 'SQLite',
+            supporters: [],
+            pros: [L('안전', 'safe')],
+            cons: [L('조금 복잡', 'a bit complex')],
+            decision: L('저장은 SQLite로 한다', 'Store data in SQLite'),
+          },
+        ],
+        recommendation: 1,
+        dissent: '',
+      },
+      L('정리.', 'Summary.'),
+    );
   // 전권 위임 흉내: 질문에 하나로 정해 답한다
   if (prompt.includes('full delegation mode'))
     return finalWith(

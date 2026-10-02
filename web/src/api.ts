@@ -57,6 +57,8 @@ export interface CeoRequest {
   answers?: (string | null)[];
   verifySuggestions?: { label: string; argv: string[]; evidenceType: string }[];
   profile?: ProjectProfile | null;
+  /** 큰 갈림길로 연 토론 */
+  debateId?: string | null;
   error: string | null;
   ticketIds: string[];
   createdAt: string;
@@ -80,6 +82,7 @@ export interface State {
   previews?: PreviewInfo[];
   /** 회사 전체 일시정지 */
   paused?: boolean;
+  debates?: Debate[];
   /** 전권 위임 모드: 위임받은 직원과 최근 결정 기록 */
   delegation?: { on: boolean; delegate: string | null; recent: { at: string; by: string; entityId: string; text: string }[] };
   pausedReason?: string;
@@ -176,6 +179,29 @@ export interface ActivityItem {
   kind: 'say' | 'think' | 'tool' | 'output' | 'command' | 'file' | 'approval' | 'steer' | 'error' | 'done';
   text: string;
   detail?: string;
+}
+
+/** 토론(src/app/debate.ts) */
+export interface Debate {
+  id: string;
+  channelId: string;
+  topic: string;
+  origin: 'ceo' | 'review' | 'draft';
+  projectId: string | null;
+  ticketId: string | null;
+  requestId: string | null;
+  participants: string[];
+  moderator: string;
+  phase: 'opening' | 'rebuttal' | 'summary' | 'decide' | 'done';
+  positions: Record<string, string>;
+  rebuttals: Record<string, string>;
+  summary: string | null;
+  options: { title: string; supporters: string[]; pros: string[]; cons: string[]; decision: string }[];
+  recommendation: number | null;
+  dissent: string;
+  decision: string | null;
+  decidedBy: string | null;
+  createdAt: string;
 }
 
 /** 결과물 보기: 제출물에서 바뀐 문서·표·그림(src/app/deliverables.ts). */

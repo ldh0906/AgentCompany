@@ -2446,3 +2446,36 @@ details.advanced[open] summary {
   padding: 12px 2px 4px;
   font-size: 13.5px;
 }
+/* 토론 모드 (components/debate.tsx) */
+.debate {
+  display: grid;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+.debate-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.debate-option {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.debate-option.recommended {
+  border-color: var(--accent);
+  box-shadow: var(--glow);
+}
+.debate-option ul {
+  margin: 0;
+  padding-left: 4px;
+  list-style: none;
+  font-size: 13px;
+  display: grid;
+  gap: 3px;
+}
