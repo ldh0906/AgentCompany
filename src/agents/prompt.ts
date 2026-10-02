@@ -115,7 +115,7 @@ For each "human_attest" requirement add a demo to "demoCommands", shaped [{"requ
 - The command must finish by itself and print what a non-developer can follow: what was done and the result (for example each request sent and the response received, or the input and the produced table). Not just "OK".
 - For a server (API), do not leave it running: write a small demo script that starts the server (in the same process or as a child process on a free port), calls the endpoints, prints each request and response, and stops the server.
 - Use sample data inside the project (for example samples/). Do not use the network or files outside the project.
-- Files your demo writes inside the project folder (CSV, Markdown, text, PNG/JPG) are captured and shown to the CEO in the app, with an Excel encoding check for CSV; write them there (not to the OS temp folder) and print their path relative to the project, not the full path.
+- Files your demo writes inside the project folder (CSV, Markdown, text, PNG/JPG) are captured and shown to the CEO in the app, with an Excel encoding check for CSV; write them there (not to the OS temp folder) and print their path relative to the project, not the full path. Put them in a folder that .gitignore excludes (add it, e.g. "demo-output/"), so generated files are not committed to the CEO's folder. Measured: a demo's summary CSV was committed along with the code.
 - One program and its arguments, no shell operators (|, >, &&). This PC runs Windows: use "python" (not python3) and "node".
 `;
 

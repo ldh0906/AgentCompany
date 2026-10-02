@@ -153,17 +153,39 @@ export function fileTimes(dir: string, maxFiles = 5000): Map<string, number> {
 }
 
 /**
+ * 출력에 적힌 문서·표·그림 경로(프로젝트 안 상대 경로, 또는 프로젝트 폴더로 시작하는 전체 경로)를 프로젝트 기준 상대 경로로.
+ * 따옴표·괄호로 감싼 경로와 공백 없는 경로를 찾는다.
+ */
+export function mentionedFiles(text: string, dir: string): string[] {
+  const root = path.resolve(dir).replace(/\\/g, '/').toLowerCase();
+  const out = new Set<string>();
+  for (const m of text.matchAll(/"([^"\n]+)"|'([^'\n]+)'|([^\s"'()<>|]+)/g)) {
+    const raw = (m[1] ?? m[2] ?? m[3] ?? '').replace(/[.,;:]+$/, '');
+    if (!deliverableKindOf(raw)) continue;
+    const norm = raw.replace(/\\/g, '/');
+    const rel = path.isAbsolute(raw)
+      ? norm.toLowerCase().startsWith(`${root}/`)
+        ? norm.slice(root.length + 1)
+        : null
+      : norm.replace(/^\.\//, '');
+    if (rel && !rel.startsWith('../')) out.add(rel);
+  }
+  return [...out];
+}
+
+/**
  * 실행 전후를 비교해 새로 생기거나 바뀐 문서·표·그림을 최대 5개 꺼낸다. 글 파일은 엑셀 한글 판정(BOM)도 붙인다.
  * 실측(2026-10-02, 가계부): "요약 CSV를 엑셀에서 열어 한글 확인"이 대표 몫이었는데, 파일이 앱 내부 임시 폴더에만 있어 열 방법이 없었다.
  */
-export async function demoOutputFiles(dir: string, before: Map<string, number>, max = 5): Promise<DemoFile[]> {
-  const changed = [...fileTimes(dir)]
-    .filter(([p, t]) => before.get(p) !== t && deliverableKindOf(p))
-    .map(([p]) => p)
-    .sort()
-    .slice(0, max);
+export async function demoOutputFiles(dir: string, before: Map<string, number>, max = 5, outputText = ''): Promise<DemoFile[]> {
+  const now = fileTimes(dir);
+  const changed = [...now].filter(([p, t]) => before.get(p) !== t && deliverableKindOf(p)).map(([p]) => p);
+  // 출력에 적힌 파일도 결과물로 본다: 같은 내용을 다시 쓰면 바뀐 것으로 잡히지 않는다.
+  // 실측(2026-10-02, 가계부): 직원이 데모 결과 CSV를 커밋해 두어, 데모가 같은 파일을 다시 써도 "바뀐 파일"이 0개였다.
+  const mentioned = mentionedFiles(outputText, dir).filter((p) => now.has(p) && !changed.includes(p));
+  const picked = [...mentioned, ...changed.sort()].slice(0, max);
   const out: DemoFile[] = [];
-  for (const p of changed) {
+  for (const p of picked) {
     const buf = await readFile(path.join(dir, p)).catch(() => null);
     if (!buf) continue;
     const kind = deliverableKindOf(p)!;

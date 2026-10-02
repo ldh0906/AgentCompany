@@ -219,7 +219,7 @@ export class ScreenQa {
     const runRoot = path.join(this.h.dataDir, 'screens', t.id, sha.slice(0, 12), 'demo');
     const before = fileTimes(dir);
     check.demos = cmds.length ? await runDemos(cmds, dir, runRoot) : [];
-    check.demoFiles = cmds.length ? await demoOutputFiles(dir, before) : [];
+    check.demoFiles = cmds.length ? await demoOutputFiles(dir, before, 5, check.demos.map((d) => d.output).join('\n')) : [];
     check.state = 'done';
     check.scripted = cmds.length > 0;
     check.note = cmds.length

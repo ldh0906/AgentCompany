@@ -4,7 +4,15 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { demoCommandsOf, demoOutputFiles, demoRefusal, demoResultLine, fileTimes, runDemos } from '../../src/app/demo-run.ts';
+import {
+  demoCommandsOf,
+  demoOutputFiles,
+  demoRefusal,
+  demoResultLine,
+  fileTimes,
+  mentionedFiles,
+  runDemos,
+} from '../../src/app/demo-run.ts';
 import { locateExecutable } from '../../src/runner/locate.ts';
 
 test('보고서의 demoCommands: 형식이 틀린 항목은 버리고, 모르는 요구사항은 *', () => {
@@ -106,4 +114,23 @@ test('확인용 실행이 만든 파일: 새로 생기거나 바뀐 문서·표�
   assert.match(files[1]!.verdict ?? '', /BOM 있음/);
   assert.match(files[0]!.verdict ?? '', /^⚠/);
   assert.equal(files[1]!.text, '월,합계\n2026-01,57000\n');
+});
+
+test('출력에 적힌 파일 경로(상대·전체·따옴표)도 결과물로 잡는다: 같은 내용으로 다시 써서 바뀌지 않아도', async (t) => {
+  const d = mkdtempSync(path.join(tmpdir(), 'ac-demo-'));
+  t.after(() => rmSync(d, { recursive: true, force: true }));
+  mkdirSync(path.join(d, 'out'));
+  writeFileSync(path.join(d, 'out', 'summary.csv'), '월,합계\n');
+  writeFileSync(path.join(d, 'notes.md'), '# n');
+  const full = path.join(d, 'out', 'summary.csv');
+  assert.deepEqual(mentionedFiles(`엑셀 파일: ${full}\n보고서 "./notes.md" 와 ../secret.md, C:\\other\\x.csv`, d), [
+    'out/summary.csv',
+    'notes.md',
+  ]);
+  const before = fileTimes(d);
+  const files = await demoOutputFiles(d, before, 5, `요약 파일: ${full}`);
+  assert.deepEqual(
+    files.map((f) => f.path),
+    ['out/summary.csv'],
+  );
 });
