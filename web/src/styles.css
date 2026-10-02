@@ -2289,6 +2289,32 @@ details.advanced[open] summary {
     font-size: 22px;
     margin-top: 2px;
   }
+  /* 휴대폰 폭(375px): 업무판 거르개·프로젝트 설명 칩·요구사항 표가 화면 밖으로 잘렸다(실측 2026-10-02, 4790). */
+  .page-head {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .page-head .btn {
+    white-space: nowrap;
+  }
+  .board-filters {
+    flex-wrap: wrap;
+  }
+  .board-filters input.search {
+    width: 100%;
+  }
+  .chip {
+    white-space: normal;
+    word-break: keep-all;
+    max-width: 100%;
+  }
+  td .chip {
+    white-space: nowrap;
+  }
+  .card table {
+    display: block;
+    overflow-x: auto;
+  }
 }
 
 /* 승인 카드: 대시보드에서는 일정 높이 안에서 스크롤, "크게 보기"는 넓은 창에서 페이지로 나눠 본다.
