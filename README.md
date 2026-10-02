@@ -167,6 +167,7 @@ No services, scheduled tasks or autostart entries are ever created.
 npm test          # ~270 tests: unit (4 at a time, ~1 min) then e2e with fake agents (2 at a time, ~25 min)
 npm run test:unit # unit tests only
 npm run typecheck
+npm run build:exe # after npm run build: dist/Agent Company.exe (Windows launcher, needs Node.js)
 npm run dev       # demo daemon from source
 npm run dev:web   # Vite dev server for the dashboard (proxy to :4777)
 ```

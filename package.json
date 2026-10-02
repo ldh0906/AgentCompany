@@ -25,6 +25,7 @@
     "test:unit": "node --no-warnings --test --test-concurrency=4 \"test/{adapters,agents,app,core,runner,server,store,workspace}/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json && tsc -p web/tsconfig.json",
     "build": "tsc -p tsconfig.build.json && vite build --config web/vite.config.ts",
+    "build:exe": "node tools/build-exe.ts",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"web/src/**/*.{ts,tsx,css}\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"web/src/**/*.{ts,tsx,css}\""
   },
