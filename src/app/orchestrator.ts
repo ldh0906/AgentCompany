@@ -55,6 +55,8 @@ import {
 import { pickPanel, pickStaff } from '../core/staffing.ts';
 import { commandOf, judgeToolRequest } from '../core/guard.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
+import { activityFrom } from './activity.ts';
+import { PROGRESS_MS, progressLine } from './progress.ts';
 import { locateExecutable } from '../runner/locate.ts';
 import {
   abandonAndTerminate,
@@ -607,6 +609,7 @@ export class Orchestrator {
       await this.screens.sweepScreens().catch(() => {});
       await this.sweepWorkspaces().catch(() => {});
       await this.checkStalled();
+      await this.postProgress().catch(() => {});
       this.desk.notifyNewTodos();
       // 우선순위(1 높음 → 3 낮음) 순, 같으면 먼저 만든 순: 쓰기 범위가 겹칠 때 높은 업무가 먼저 잠금을 잡는다.
       this.expireOrphanApprovals();
@@ -1657,6 +1660,26 @@ export class Orchestrator {
         );
     }
     this.stalled = next;
+  }
+
+  /** 작업 중간 보고(progress.ts): 작업 실행마다 PROGRESS_MS마다, 새로 한 일이 있을 때만 업무방에 올린다. */
+  private readonly progressSeen = new Map<string, { at: number; count: number }>();
+
+  private async postProgress(): Promise<void> {
+    const now = Date.now();
+    for (const runId of this.liveRuns.keys()) {
+      const run = this.records.run(runId);
+      if (!run || run.status !== 'running' || run.kind !== 'work' || !run.ticketId.startsWith('T-')) continue;
+      const seen = this.progressSeen.get(runId) ?? { at: Date.parse(run.startedAt), count: 0 };
+      if (!this.progressSeen.has(runId)) this.progressSeen.set(runId, seen);
+      if (now - seen.at < PROGRESS_MS) continue;
+      const items = activityFrom((await readAllJsonl(path.join(run.runDir, 'stdout.log')).catch(() => null))?.events ?? []);
+      const line = progressLine(items.slice(seen.count), Math.round((now - Date.parse(run.startedAt)) / 60_000));
+      this.progressSeen.set(runId, { at: now, count: items.length });
+      const room = line ? this.chat.ensureTicketChannel(run.ticketId) : null;
+      if (line && room) this.chat.post(room.id, run.employeeId, line, 'event');
+    }
+    for (const id of [...this.progressSeen.keys()]) if (!this.liveRuns.has(id)) this.progressSeen.delete(id);
   }
 
   /** 멈췄을 수 있는 실행: 실행 ID → 조용했던 시간(ms) */
