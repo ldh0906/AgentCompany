@@ -228,34 +228,36 @@ export function parseCsv(text: string, sep = ','): string[][] {
 
 function CsvTable({ text, tsv }: { text: string; tsv: boolean }) {
   const { lang } = useT();
-  const rows = parseCsv(text, tsv ? '\t' : ',');
-  const [head, ...body] = rows;
-  if (!head) return null;
+  const rows = parseCsv(text, tsv ? '\t' : ',').filter((r) => r.some((c) => c.trim()));
+  if (!rows.length) return null;
+  // 엑셀용 요약은 한 파일에 표 여러 개(제목 한 줄 + 머리글 + 줄들)를 담기도 한다: 가장 긴 줄 기준으로 칸을 그리고,
+  // 한 칸짜리 줄은 소제목으로. 실측(2026-10-02, 가계부 summary.csv): 첫 줄이 제목 한 칸이라 숫자 칸이 전부 빠졌다.
+  const cols = Math.max(...rows.map((r) => r.length));
   const MAX = 500;
+  const isTitle = (r: string[]) => cols > 1 && r.filter((c) => c.trim()).length === 1 && r[0]!.trim() !== '';
   return (
     <div className="doc-table">
       <table>
-        <thead>
-          <tr>
-            {head.map((c, j) => (
-              <th key={j}>{c}</th>
-            ))}
-          </tr>
-        </thead>
         <tbody>
-          {body.slice(0, MAX).map((r, ri) => (
-            <tr key={ri}>
-              {head.map((_, j) => (
-                <td key={j}>{r[j] ?? ''}</td>
-              ))}
-            </tr>
-          ))}
+          {rows.slice(0, MAX).map((r, ri) =>
+            isTitle(r) ? (
+              <tr key={ri} className="csv-title">
+                <th colSpan={cols}>{r[0]}</th>
+              </tr>
+            ) : (
+              <tr key={ri} className={ri === 0 || isTitle(rows[ri - 1]!) ? 'csv-head' : ''}>
+                {Array.from({ length: cols }, (_, j) => (
+                  <td key={j}>{r[j] ?? ''}</td>
+                ))}
+              </tr>
+            ),
+          )}
         </tbody>
       </table>
       <div className="hint">
         {lang === 'ko'
-          ? `${body.length}줄${body.length > MAX ? ` (앞 ${MAX}줄만 표시)` : ''}`
-          : `${body.length} rows${body.length > MAX ? ` (first ${MAX} shown)` : ''}`}
+          ? `${rows.length}줄${rows.length > MAX ? ` (앞 ${MAX}줄만 표시)` : ''}`
+          : `${rows.length} rows${rows.length > MAX ? ` (first ${MAX} shown)` : ''}`}
       </div>
     </div>
   );

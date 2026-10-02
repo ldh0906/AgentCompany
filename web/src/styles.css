@@ -2436,3 +2436,13 @@ details.advanced[open] summary {
   text-decoration: underline dotted;
   cursor: help;
 }
+.doc-table tr.csv-head td {
+  background: var(--panel-hover);
+  font-weight: 600;
+}
+.doc-table tr.csv-title th {
+  background: none;
+  border: 0;
+  padding: 12px 2px 4px;
+  font-size: 13.5px;
+}
