@@ -84,7 +84,8 @@ export function newImplTicket(env: Env): Ticket {
 }
 
 /** 조건을 만족하거나 보류될 때까지 tick을 반복한다. */
-export async function driveUntil(env: Env, ticketId: string, until: (t: Ticket) => boolean, maxMs = 60_000): Promise<Ticket> {
+// 기본 120초: e2e를 두 개씩 함께 돌리면(npm test) 혼자 40~50초 걸리는 흐름이 60초를 넘겼다(실측 2026-10-02).
+export async function driveUntil(env: Env, ticketId: string, until: (t: Ticket) => boolean, maxMs = 120_000): Promise<Ticket> {
   const deadline = Date.now() + maxMs;
   for (;;) {
     await env.orch.tick();
