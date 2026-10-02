@@ -5,12 +5,14 @@
 // 보안: 명령은 직원이 정한다. 그래서 모양을 좁힌다: python/py/node + 프로젝트 안의 파일(또는 python -m 모듈).
 // 이는 이미 자동으로 도는 검사 명령(npm test, python -m unittest)이 제출된 코드를 실행하는 것과 같은 수준이다.
 // 셸·인라인 코드(-c, -e)·프로젝트 밖 파일은 받지 않는다.
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, type Dirent } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tr } from '../core/i18n.ts';
 import { locateExecutable } from '../runner/locate.ts';
 import { startProcess } from '../runner/process.ts';
+import { deliverableKindOf, viewOf, type DeliverableFile } from './deliverables.ts';
+import { inspectDownload } from './screen-check.ts';
 
 export interface DemoCommand {
   requirementId: string;
@@ -113,6 +115,60 @@ export async function runDemos(cmds: DemoCommand[], dir: string, runRoot: string
       output: await tail(proc.stdoutPath, 6000),
       errors: await tail(proc.stderrPath, 2000),
     });
+  }
+  return out;
+}
+
+/** 확인용 실행이 만든(또는 바꾼) 파일: 대표가 앱 안에서 열어 본다. */
+export type DemoFile = DeliverableFile & { verdict?: string };
+
+const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', '.pytest_cache', 'dist', 'build']);
+
+/** 폴더 안 파일들의 수정 시각(확인용 실행 전후를 비교한다). .git·node_modules 등은 건너뛴다. */
+export function fileTimes(dir: string, maxFiles = 5000): Map<string, number> {
+  const out = new Map<string, number>();
+  const walk = (rel: string, depth: number) => {
+    if (depth > 6 || out.size >= maxFiles) return;
+    let entries: Dirent[] = [];
+    try {
+      entries = readdirSync(path.join(dir, rel), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        if (!SKIP_DIRS.has(e.name)) walk(r, depth + 1);
+      } else if (e.isFile()) {
+        try {
+          out.set(r, statSync(path.join(dir, r)).mtimeMs);
+        } catch {
+          // 사라진 파일
+        }
+      }
+    }
+  };
+  walk('', 0);
+  return out;
+}
+
+/**
+ * 실행 전후를 비교해 새로 생기거나 바뀐 문서·표·그림을 최대 5개 꺼낸다. 글 파일은 엑셀 한글 판정(BOM)도 붙인다.
+ * 실측(2026-10-02, 가계부): "요약 CSV를 엑셀에서 열어 한글 확인"이 대표 몫이었는데, 파일이 앱 내부 임시 폴더에만 있어 열 방법이 없었다.
+ */
+export async function demoOutputFiles(dir: string, before: Map<string, number>, max = 5): Promise<DemoFile[]> {
+  const changed = [...fileTimes(dir)]
+    .filter(([p, t]) => before.get(p) !== t && deliverableKindOf(p))
+    .map(([p]) => p)
+    .sort()
+    .slice(0, max);
+  const out: DemoFile[] = [];
+  for (const p of changed) {
+    const buf = await readFile(path.join(dir, p)).catch(() => null);
+    if (!buf) continue;
+    const kind = deliverableKindOf(p)!;
+    const verdict = kind === 'image' ? '' : inspectDownload(path.basename(p), buf).verdict;
+    out.push({ path: p, kind, status: before.has(p) ? 'modified' : 'added', ...viewOf(p, kind, buf), ...(verdict ? { verdict } : {}) });
   }
   return out;
 }

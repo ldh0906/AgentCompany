@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { demoCommandsOf, demoRefusal, demoResultLine, runDemos } from '../../src/app/demo-run.ts';
+import { demoCommandsOf, demoOutputFiles, demoRefusal, demoResultLine, fileTimes, runDemos } from '../../src/app/demo-run.ts';
 import { locateExecutable } from '../../src/runner/locate.ts';
 
 test('보고서의 demoCommands: 형식이 틀린 항목은 버리고, 모르는 요구사항은 *', () => {
@@ -75,4 +75,35 @@ test('돌리기: 출력·종료 코드·거절 이유, 파이썬 한글 출력�
   assert.ok(r[2]!.skipped);
   assert.match(demoResultLine(r[2]!), /^돌리지 않음/);
   if (hasPython) assert.match(r[3]!.output, /안녕하세요 — 요청 1개 처리/);
+});
+
+test('확인용 실행이 만든 파일: 새로 생기거나 바뀐 문서·표만, CSV는 엑셀 한글 판정, node_modules 등은 무시', async (t) => {
+  const d = mkdtempSync(path.join(tmpdir(), 'ac-demo-'));
+  t.after(() => rmSync(d, { recursive: true, force: true }));
+  writeFileSync(path.join(d, 'old.md'), '# 그대로');
+  writeFileSync(path.join(d, 'report.md'), '# 이전');
+  mkdirSync(path.join(d, 'node_modules'));
+  const before = fileTimes(d);
+  await new Promise((r) => setTimeout(r, 20));
+  mkdirSync(path.join(d, 'out'));
+  writeFileSync(
+    path.join(d, 'out', 'summary.csv'),
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('월,합계\n2026-01,57000\n')]),
+  );
+  writeFileSync(path.join(d, 'out', 'nobom.csv'), '월,합계\n');
+  writeFileSync(path.join(d, 'report.md'), '# 새 보고서');
+  writeFileSync(path.join(d, 'node_modules', 'x.md'), 'ignored');
+  writeFileSync(path.join(d, 'out', 'data.bin'), 'x');
+  const files = await demoOutputFiles(d, before);
+  assert.deepEqual(
+    files.map((f) => [f.path, f.status]),
+    [
+      ['out/nobom.csv', 'added'],
+      ['out/summary.csv', 'added'],
+      ['report.md', 'modified'],
+    ],
+  );
+  assert.match(files[1]!.verdict ?? '', /BOM 있음/);
+  assert.match(files[0]!.verdict ?? '', /^⚠/);
+  assert.equal(files[1]!.text, '월,합계\n2026-01,57000\n');
 });

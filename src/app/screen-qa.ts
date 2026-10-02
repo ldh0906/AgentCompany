@@ -15,7 +15,7 @@ import { DomainError } from './company.ts';
 import type { OrchHost } from './orch-host.ts';
 import type { RunRecord } from './records.ts';
 import { captureScreens, findChrome, type DownloadedFile, type ScreenClip } from './screen-check.ts';
-import { demoCommandsOf, demoResultLine, runDemos, type DemoResult } from './demo-run.ts';
+import { demoCommandsOf, demoOutputFiles, demoResultLine, fileTimes, runDemos, type DemoFile, type DemoResult } from './demo-run.ts';
 import { installDependencies } from './verify-setup.ts';
 import { ensureDetachedWorktree, projectPaths } from '../workspace/workspace.ts';
 
@@ -43,6 +43,8 @@ export interface ScreenCheck {
   clips?: ScreenClip[];
   /** 화면 없는 프로그램: 확인용 실행 명령과 출력(사진 대신) */
   demos?: DemoResult[];
+  /** 확인용 실행이 만든 문서·표·그림(엑셀 한글 판정 포함) */
+  demoFiles?: DemoFile[];
 }
 
 export class ScreenQa {
@@ -215,7 +217,9 @@ export class ScreenQa {
     // npm 프로젝트(node CLI 등)는 사본에 의존성이 없다: 검사 명령처럼 먼저 설치한다.
     if (cmds.some((c) => c.argv[0] === 'node')) await installDependencies(dir);
     const runRoot = path.join(this.h.dataDir, 'screens', t.id, sha.slice(0, 12), 'demo');
+    const before = fileTimes(dir);
     check.demos = cmds.length ? await runDemos(cmds, dir, runRoot) : [];
+    check.demoFiles = cmds.length ? await demoOutputFiles(dir, before) : [];
     check.state = 'done';
     check.scripted = cmds.length > 0;
     check.note = cmds.length
@@ -248,6 +252,9 @@ export class ScreenQa {
           output: d.output,
           errors: d.errors,
         })),
+        files: check.demoFiles.map(
+          (f) => `${f.path}${f.verdict ? ` — ${f.verdict}` : ''}${f.text ? `\n${f.text.split('\n').slice(0, 8).join('\n')}` : ''}`,
+        ),
         notes:
           sub?.report?.kind === 'work'
             ? sub.report.requirements.filter((r) => attestIds.has(r.id) && r.notes).map((r) => `${r.id}: ${r.notes.slice(0, 1500)}`)

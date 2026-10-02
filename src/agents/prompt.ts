@@ -115,6 +115,7 @@ For each "human_attest" requirement add a demo to "demoCommands", shaped [{"requ
 - The command must finish by itself and print what a non-developer can follow: what was done and the result (for example each request sent and the response received, or the input and the produced table). Not just "OK".
 - For a server (API), do not leave it running: write a small demo script that starts the server (in the same process or as a child process on a free port), calls the endpoints, prints each request and response, and stops the server.
 - Use sample data inside the project (for example samples/). Do not use the network or files outside the project.
+- Files your demo writes inside the project folder (CSV, Markdown, text, PNG/JPG) are captured and shown to the CEO in the app, with an Excel encoding check for CSV; write them there (not to the OS temp folder) and print their path relative to the project, not the full path.
 - One program and its arguments, no shell operators (|, >, &&). This PC runs Windows: use "python" (not python3) and "node".
 `;
 
@@ -613,6 +614,8 @@ export interface DemoCheckPromptInput {
   checks: { id: string; text: string }[];
   /** 시스템이 돌린 확인용 실행과 출력 */
   demos: { requirementId: string; label: string; command: string; result: string; output: string; errors: string }[];
+  /** 확인용 실행이 만든 파일(경로 — 엑셀 판정 + 앞 몇 줄) */
+  files?: string[];
   notes?: string[];
   profile?: Project['profile'];
   nonce: string;
@@ -662,6 +665,8 @@ ${dataBlock(
     )
     .join('\n\n') || '(none: the implementer left no demo commands)',
 )}
+
+${dataBlock('Files the demo created (system-checked: Excel encoding verdict and first lines)', (i.files ?? []).join('\n\n') || '(none)')}
 
 ## Final answer format (required)
 End with exactly one JSON code block ("reply" holds your whole opinion):

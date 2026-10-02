@@ -63,7 +63,11 @@ async function readAt(
   kind: DeliverableFileKind,
 ): Promise<Pick<DeliverableFile, 'text' | 'dataUrl' | 'truncated'> | null> {
   const buf = await gitShowBytes(repo, sha, p);
-  if (!buf) return null;
+  return buf ? viewOf(p, kind, buf) : null;
+}
+
+/** 파일 내용을 보기용으로(그림은 data: 주소, 글은 앞부분). 확인용 실행이 만든 파일에도 쓴다. */
+export function viewOf(p: string, kind: DeliverableFileKind, buf: Buffer): Pick<DeliverableFile, 'text' | 'dataUrl' | 'truncated'> {
   if (kind === 'image')
     return buf.length > MAX_IMAGE
       ? { truncated: true }

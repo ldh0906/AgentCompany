@@ -5,7 +5,7 @@ import { useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
 import { empName, Icon, Modal, useAction } from './ui.tsx';
 import { verdictsOf } from '../../../src/core/verdicts.ts';
-import { ProjectDocsButton } from './deliverable.tsx';
+import { DemoFilesView, ProjectDocsButton } from './deliverable.tsx';
 
 export function PreviewButton({ projectId, ticketId = null }: { projectId: string; ticketId?: string | null }) {
   const { state, reload } = useCompany();
@@ -160,6 +160,7 @@ export function ScreenCheckPanel({ ticketId }: { ticketId: string }) {
               )}
             </div>
           ))}
+          <DemoFilesView files={c.demoFiles ?? []} />
         </>
       )}
       {c.state === 'done' && !c.demos && (

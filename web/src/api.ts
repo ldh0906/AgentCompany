@@ -140,6 +140,8 @@ export interface ScreenCheck {
     errors: string;
     skipped?: string;
   }[];
+  /** 확인용 실행이 만든 파일(엑셀 한글 판정 포함) */
+  demoFiles?: (DeliverableFile & { verdict?: string })[];
 }
 
 export interface Channel {

@@ -310,7 +310,7 @@ function Changes({ before, after }: { before: string; after: string }) {
 const STATUS_KO = { added: '새 파일', modified: '수정됨', deleted: '삭제됨' };
 const STATUS_EN = { added: 'New', modified: 'Changed', deleted: 'Deleted' };
 
-function FileBody({ f, changesOnly }: { f: DeliverableFile; changesOnly: boolean }) {
+export function FileBody({ f, changesOnly }: { f: DeliverableFile; changesOnly: boolean }) {
   const { lang } = useT();
   if (f.status === 'deleted') return <div className="hint">{lang === 'ko' ? '이 파일은 삭제됩니다.' : 'This file is deleted.'}</div>;
   if (f.kind === 'image')
@@ -459,5 +459,36 @@ export function ProjectDocsButton({ projectId }: { projectId: string }) {
         </Modal>
       )}
     </>
+  );
+}
+
+/**
+ * 확인용 실행이 만든 파일(화면 없는 프로그램): 표·문서·그림을 앱 안에서 보고, CSV는 엑셀 한글 판정을 함께 보여 준다.
+ * 실측(2026-10-02, 가계부): 요약 CSV가 앱 내부 임시 폴더에만 있어 대표가 열어 볼 수 없었다.
+ */
+export function DemoFilesView({ files }: { files: (DeliverableFile & { verdict?: string })[] }) {
+  const { lang } = useT();
+  const ko = lang === 'ko';
+  const [sel, setSel] = useState(0);
+  if (!files.length) return null;
+  const f = files[Math.min(sel, files.length - 1)]!;
+  return (
+    <div className="deliverables">
+      <b>{ko ? '확인용 실행이 만든 파일' : 'Files the demo created'}</b>
+      {files.length > 1 && (
+        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+          {files.map((x, k) => (
+            <button key={x.path} className={`btn small ${k === sel ? 'on' : ''}`} onClick={() => setSel(k)}>
+              {x.path.split('/').pop()}
+            </button>
+          ))}
+        </div>
+      )}
+      <span className="sub mono">{f.path}</span>
+      {f.verdict && <div className={`hint ${f.verdict.startsWith('⚠') ? 'bad-text' : 'ok-text'}`}>{f.verdict}</div>}
+      <div className="doc-scroll">
+        <FileBody f={f} changesOnly={false} />
+      </div>
+    </div>
   );
 }
