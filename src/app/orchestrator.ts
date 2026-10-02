@@ -2000,6 +2000,22 @@ export class Orchestrator {
 
   private readonly followUpsInFlight = new Map<string, Promise<CeoRequest>>();
 
+  /** 후속 업무 제안 버리기(대표 요청 2026-10-03: "업무로 만들기" 말고 버리기도). 이미 요청한 제안은 그대로 둔다. */
+  dismissFollowUp(messageId: string): { ok: true } {
+    const m = this.company.store.get<ChatMessage>('chat', messageId);
+    if (!m?.followUp) throw new DomainError(tr('후속 업무 제안이 아닙니다.', 'Not a follow-up suggestion.'));
+    if (m.followUp.requestId) throw new DomainError(tr('이미 비서실장에게 요청한 제안입니다.', 'Already sent to the chief of staff.'));
+    this.company.store.put(
+      'chat',
+      m.id,
+      { ...m, followUp: { ...m.followUp, dismissed: true } },
+      { channel_id: m.channelId, created_at: m.createdAt },
+    );
+    this.company.store.appendEvent('ceo', 'followup.dismissed', m.channelId, { messageId: m.id, title: m.followUp.title });
+    this.changed('chat', m.channelId);
+    return { ok: true };
+  }
+
   private async followUpToRequestOnce(messageId: string): Promise<CeoRequest> {
     const m = this.company.store.get<ChatMessage>('chat', messageId);
     if (!m?.followUp) throw new DomainError(tr('후속 업무 제안이 아닙니다.', 'Not a follow-up suggestion.'));

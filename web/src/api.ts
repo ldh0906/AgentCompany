@@ -184,7 +184,14 @@ export interface ChatMessage {
   refs: string[];
   createdAt: string;
   runId?: string | null;
-  followUp?: { title: string; reason: string; projectId: string | null; ticketId: string | null; requestId?: string } | null;
+  followUp?: {
+    title: string;
+    reason: string;
+    projectId: string | null;
+    ticketId: string | null;
+    requestId?: string;
+    dismissed?: boolean;
+  } | null;
 }
 
 export interface ActivityItem {

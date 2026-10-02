@@ -259,6 +259,11 @@ function Room({ channel }: { channel: Channel }) {
                   ko ? '비서실장에게 업무 초안을 요청했습니다.' : 'Sent to the chief of staff.',
                 ).then(() => (load(), reload()))
               }
+              onFollowUpDismiss={() =>
+                run(() => api(`chat/${m.id}/followup-dismiss`, { body: {} }), ko ? '제안을 버렸습니다.' : 'Dismissed.').then(
+                  () => (load(), reload()),
+                )
+              }
             />
           ))
         )}
@@ -353,6 +358,7 @@ function Message({
   onQuote,
   onFollowUp,
   followUpBusy = false,
+  onFollowUpDismiss,
 }: {
   m: ChatMessage;
   prev?: ChatMessage;
@@ -360,7 +366,10 @@ function Message({
   onQuote: () => void;
   onFollowUp: () => void;
   followUpBusy?: boolean;
+  onFollowUpDismiss?: () => void;
 }) {
+  // 누르자마자 버튼을 감춘다(서버 답을 기다리는 동안 여러 번 눌려 업무가 여러 개 생겼다, 대표 2026-10-03)
+  const [acted, setActed] = useState<'sent' | 'dismissed' | null>(null);
   const { state } = useCompany();
   const { lang } = useT();
   const ko = lang === 'ko';
@@ -405,10 +414,35 @@ function Message({
               <span className="chip ok">
                 {ko ? `비서실장에게 요청함 (${m.followUp.requestId})` : `Requested (${m.followUp.requestId})`}
               </span>
+            ) : m.followUp.dismissed || acted === 'dismissed' ? (
+              <span className="chip">{ko ? '버린 제안' : 'Dismissed'}</span>
+            ) : acted === 'sent' ? (
+              <span className="chip info pulse">{ko ? '비서실장에게 보내는 중…' : 'Sending…'}</span>
             ) : (
-              <button className="btn small primary" disabled={followUpBusy} onClick={onFollowUp}>
-                <Icon name="plus" size={12} /> {ko ? '업무로 만들기 (비서실장에게)' : 'Make it a ticket'}
-              </button>
+              <>
+                <button
+                  className="btn small primary"
+                  disabled={followUpBusy}
+                  onClick={() => {
+                    setActed('sent');
+                    onFollowUp();
+                  }}
+                >
+                  <Icon name="plus" size={12} /> {ko ? '업무로 만들기 (비서실장에게)' : 'Make it a ticket'}
+                </button>
+                {onFollowUpDismiss && (
+                  <button
+                    className="btn small"
+                    disabled={followUpBusy}
+                    onClick={() => {
+                      setActed('dismissed');
+                      onFollowUpDismiss();
+                    }}
+                  >
+                    {ko ? '버리기' : 'Dismiss'}
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}

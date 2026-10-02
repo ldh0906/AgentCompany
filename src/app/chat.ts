@@ -48,7 +48,14 @@ export interface ChatMessage {
   createdAt: string;
   runId?: string | null;
   /** 후속 업무 제안 등 대표가 누를 수 있는 동작 */
-  followUp?: { title: string; reason: string; projectId: string | null; ticketId: string | null; requestId?: string | null } | null;
+  followUp?: {
+    title: string;
+    reason: string;
+    projectId: string | null;
+    ticketId: string | null;
+    requestId?: string | null;
+    dismissed?: boolean;
+  } | null;
 }
 
 export const GENERAL = 'general';

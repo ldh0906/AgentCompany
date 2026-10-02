@@ -83,6 +83,13 @@ test('작업 보고의 후속 업무 제안은 업무방에 올라가고, 대표
   assert.equal(env.orch.records.requests(50).filter((r) => r.text.includes('맵 레벨대 조정')).length, 1);
   assert.match(req.text, /맵 레벨대 조정/);
   assert.match(req.text, new RegExp(tk.id));
+  // 버리기: 요청 없이 버린 표시만 남고, 이미 요청한 제안은 버릴 수 없다
+  const other = env.orch.chat.post(room.id, env.company.employees()[0]!.id, '후속 업무 제안: 로그 공유', 'followup', {
+    followUp: { title: '로그 공유 방식 확인', reason: '범위 밖', projectId: env.projectId, ticketId: tk.id },
+  });
+  env.orch.dismissFollowUp(other.id);
+  assert.equal(env.orch.chat.messages(room.id).find((x) => x.id === other.id)!.followUp!.dismissed, true);
+  assert.throws(() => env.orch.dismissFollowUp(m.id), /이미/);
   await env.orch.idle();
 });
 

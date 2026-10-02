@@ -179,6 +179,8 @@ export class Api {
         return this.orch.chat.addMembers(id!, strList(b, 'members'));
       case 'POST dm/:id':
         return this.orch.chat.ensureDm(id!);
+      case 'POST chat/:id/followup-dismiss':
+        return this.orch.dismissFollowUp(id!);
       case 'POST chat/:id/followup':
         return this.orch.followUpToRequest(id!);
       case 'GET events':
