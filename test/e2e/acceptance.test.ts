@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AcceptanceHost } from '../../src/app/acceptance.ts';
+import type { CeoRequest } from '../../src/app/records.ts';
+import type { Ticket } from '../../src/core/types.ts';
 import { requestTokens } from '../../src/app/cost.ts';
 import { findChrome } from '../../src/app/screen-check.ts';
 import { AGENT_IDENTITY, git } from '../../src/workspace/git.ts';
@@ -83,3 +85,12 @@ test(
     );
   },
 );
+
+test('인수 시험을 끈 프로젝트는 요청이 끝나도 시험하지 않는다', async (t) => {
+  const env = await setup(t);
+  env.company.updateProject(env.projectId, { acceptanceTests: false });
+  const req = { id: 'Q-off', projectId: env.projectId, text: 'r', ticketIds: ['T-1'], acceptance: [{ id: 'A1', check: 'c', how: 'h' }] };
+  await env.orch.acceptance.onRequestDone(req as unknown as CeoRequest, [{ id: 'T-1', status: 'done' } as Ticket]);
+  assert.equal(env.orch.records.request('Q-off'), null, '시험 기록을 만들지 않는다');
+  assert.ok(!env.company.store.getSetting('acceptance_room:Q-off'), '시험 방도 만들지 않는다');
+});

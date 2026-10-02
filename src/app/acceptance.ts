@@ -68,7 +68,7 @@ export class Acceptance {
   async onRequestDone(req: CeoRequest, tickets: Ticket[]): Promise<void> {
     if (!req.acceptance?.length || !tickets.some((t) => t.status === 'done')) return;
     const project = this.h.company.store.get<Project>('projects', req.projectId);
-    if (!project || project.removedAt) return;
+    if (!project || project.removedAt || project.acceptanceTests === false) return; // 대표가 끈 프로젝트
     const round = (req.acceptanceRounds?.length ?? 0) + 1;
     const tester = this.pickTester(tickets, deliverableOf(project) === 'screen');
     if (!tester) return;

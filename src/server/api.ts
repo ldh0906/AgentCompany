@@ -301,6 +301,7 @@ export class Api {
           autoApprove: b.autoApprove === true,
           qaAutoReject: b.qaAutoReject !== false,
           autoPlaytest: b.autoPlaytest === true,
+          acceptanceTests: b.acceptanceTests !== false,
           ...(b.profile && typeof b.profile === 'object' && str(b.profile as Body, 'summary', { optional: true, max: 500 })
             ? { profile: profileBody(b.profile as Body) }
             : {}),
@@ -323,6 +324,7 @@ export class Api {
         if (b.autoApprove !== undefined) patch.autoApprove = b.autoApprove === true;
         if (b.qaAutoReject !== undefined) patch.qaAutoReject = b.qaAutoReject === true;
         if (b.autoPlaytest !== undefined) patch.autoPlaytest = b.autoPlaytest === true;
+        if (b.acceptanceTests !== undefined) patch.acceptanceTests = b.acceptanceTests === true;
         if (b.profile !== undefined) {
           patch.profile = profileBody((b.profile ?? {}) as Body);
         }

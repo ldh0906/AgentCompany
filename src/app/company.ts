@@ -53,6 +53,7 @@ export interface NewProject {
   profile?: Project['profile'];
   qaAutoReject?: boolean;
   autoPlaytest?: boolean;
+  acceptanceTests?: boolean;
 }
 
 export interface NewTicket {
@@ -301,6 +302,7 @@ export class Company {
       ...(input.profile ? { profile: input.profile } : {}),
       qaAutoReject: input.qaAutoReject ?? true,
       autoPlaytest: input.autoPlaytest ?? false,
+      acceptanceTests: input.acceptanceTests ?? true,
       createdAt: this.clock(),
     };
     return this.store.transact(() => {

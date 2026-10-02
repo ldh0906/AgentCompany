@@ -275,6 +275,7 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
   const screen = deliverable === 'screen';
   const [qaAutoReject, setQaAutoReject] = useState(project?.qaAutoReject ?? true);
   const [autoPlaytest, setAutoPlaytest] = useState(project?.autoPlaytest ?? false);
+  const [acceptanceTests, setAcceptanceTests] = useState(project?.acceptanceTests ?? true);
   const [picking, setPicking] = useState(false);
   const [info, setInfo] = useState<Inspection | null>(null);
   const [inspecting, setInspecting] = useState(false);
@@ -322,6 +323,7 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
     autoApprove,
     qaAutoReject,
     autoPlaytest: screen && profileGame && autoPlaytest,
+    acceptanceTests,
     ...(profileSummary.trim() || project?.profile || !screen
       ? { profile: { summary: profileSummary.trim(), mobile: screen && profileMobile, game: screen && profileGame, deliverable } }
       : {}),
@@ -474,6 +476,15 @@ function ProjectModal({ project, onClose }: { project: Project | null; onClose: 
             </span>
           </label>
         )}
+        <label className="check-row">
+          <input type="checkbox" checked={acceptanceTests} onChange={(e) => setAcceptanceTests(e.target.checked)} />
+          <span>
+            {ko
+              ? '요청이 모두 끝나면 인수 시험으로 결과 전체를 다시 확인 (떨어지면 고칠 업무를 만듦)'
+              : 'Acceptance-test the whole result when a request is done'}{' '}
+            <span className="hint">{ko ? '— 한 번에 약 30만 토큰(실측 32만)' : '— about 300K tokens each'}</span>
+          </span>
+        </label>
         {/* 문서는 QA가 따로 보지 않는다(검수자가 읽고, 대표는 결과물 보기로 읽는다). */}
         {deliverable !== 'document' && (
           <label className="check-row">

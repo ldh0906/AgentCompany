@@ -208,3 +208,12 @@ test('인수 시험 지시문: 화면 사진이 있으면 사진으로 판정, �
   const program = buildAcceptancePrompt({ ...base, project: project({ deliverable: 'program' } as ProjectProfile), screens: null });
   assert.doesNotMatch(program, /screenshot/i);
 });
+
+test('인수 시험을 끈 프로젝트: 비서실장에게 인수 시험을 쓰지 말라고 한다', () => {
+  const draft = (p: Project) =>
+    buildDraftPrompt({ employee: emp, project: p, requestId: 'Q-1', request: 'r', nonce: 'n', decisions: [], language: 'ko' });
+  assert.match(draft(project()), /V-model: before splitting/);
+  const off = draft({ ...project(), acceptanceTests: false } as Project);
+  assert.doesNotMatch(off, /V-model: before splitting/);
+  assert.match(off, /Leave "acceptance" empty/);
+});

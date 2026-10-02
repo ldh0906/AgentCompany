@@ -95,6 +95,8 @@ export interface Project {
   qaAutoReject?: boolean;
   /** 게임이면: 요청 하나의 업무가 모두 끝났을 때 고급 QA(직접 플레이)를 자동으로 한 번 한다. */
   autoPlaytest?: boolean;
+  /** 요청 단위 인수 시험(V모델): 업무가 다 끝나면 결과 전체를 다시 확인한다(기본 켬, 한 번에 약 32만 토큰). */
+  acceptanceTests?: boolean;
   removedAt?: string | null; // 삭제(목록에서 숨김, 새 업무 불가). 지난 업무 기록용으로 남는다.
   createdAt: string;
 }

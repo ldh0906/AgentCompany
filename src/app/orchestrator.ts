@@ -3294,7 +3294,11 @@ ${failure.detail.slice(0, 400)}`,
         answers: parsed.ok ? parsed.report.questions.map(() => null) : [],
         verifySuggestions: parsed.ok ? parsed.report.verifySuggestions : [],
         profile: parsed.ok ? (parsed.report.profile ?? null) : null,
-        acceptance: parsed.ok ? (parsed.report.acceptance ?? []) : [],
+        // 대표가 이 프로젝트의 인수 시험을 껐으면 비서실장이 써 와도 버린다
+        acceptance:
+          parsed.ok && this.company.store.get<Project>('projects', req.projectId)?.acceptanceTests !== false
+            ? (parsed.report.acceptance ?? [])
+            : [],
         error: parsed.ok
           ? null
           : transient && !req.retriedFrom
