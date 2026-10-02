@@ -48,7 +48,18 @@ function useCompanyState() {
   const [error, setError] = useState<ApiError | null>(null);
   const [live, setLive] = useState(false);
   const timer = useRef<number | null>(null);
+  // 상태 응답은 수백 KB다(실측 2026-10-02: 400~570KB). 직원이 일하는 동안 변화가 이어지면 0.2초마다 다시 받았고,
+  // 재연결 직후에는 24번이 몰렸다. 받는 중이면 끝난 뒤 한 번만, 그리고 1초에 한 번까지만 받는다(마지막 변화는 꼭 반영).
+  const inflight = useRef(false);
+  const again = useRef(false);
+  const last = useRef(0);
   const reload = useCallback(() => {
+    if (inflight.current) {
+      again.current = true;
+      return;
+    }
+    inflight.current = true;
+    last.current = Date.now();
     api<State>('state')
       .then((s) => {
         setState(s);
@@ -58,14 +69,26 @@ function useCompanyState() {
       .catch((e: ApiError) => {
         setError(e);
         setLive(false);
+      })
+      .finally(() => {
+        inflight.current = false;
+        if (again.current) {
+          again.current = false;
+          schedule();
+        }
       });
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const schedule = () => {
+    if (timer.current) return; // 이미 예약됨: 그때 최신 상태를 받는다
+    const wait = Math.max(150, 1000 - (Date.now() - last.current));
+    timer.current = window.setTimeout(() => {
+      timer.current = null;
+      reload();
+    }, wait);
+  };
   useEffect(() => {
     reload();
-    const unsub = subscribe(() => {
-      if (timer.current) window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(reload, 150);
-    });
+    const unsub = subscribe(schedule);
     const poll = window.setInterval(reload, 15_000);
     return () => {
       unsub();

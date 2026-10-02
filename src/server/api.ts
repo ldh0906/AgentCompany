@@ -71,6 +71,16 @@ function verifyCommands(b: Body): VerifyCommand[] | undefined {
   });
 }
 
+/** 긴 base64(그림 데이터 등)를 "[그림 데이터 생략 N KB]"로 줄인다. */
+export function shortenBase64(text: string): string {
+  return text.replace(/[A-Za-z0-9+/]{400,}={0,2}/g, (m) =>
+    tr(
+      `[그림 데이터 생략 ${Math.round((m.length * 3) / 4 / 1024)} KB]`,
+      `[image data omitted, ${Math.round((m.length * 3) / 4 / 1024)} KB]`,
+    ),
+  );
+}
+
 /** 프로젝트 프로필 입력. 화면이 없는 결과물(문서·프로그램)이면 휴대폰·게임 점검은 끈다. */
 function profileBody(pr: Body): ProjectProfile {
   const deliverable = oneOf(pr, 'deliverable', DELIVERABLE_KINDS, 'screen');
@@ -593,7 +603,10 @@ export class Api {
   async runLog(id: string, stream: 'stdout' | 'stderr') {
     const run = this.orch.records.run(id);
     if (!run) throw new ApiError(404, tr('실행 기록이 없습니다.', 'Run record not found.'));
-    const text = await readFile(path.join(run.runDir, `${stream}.log`), 'utf8').catch(() => '');
+    const raw = await readFile(path.join(run.runDir, `${stream}.log`), 'utf8').catch(() => '');
+    // 직원이 읽은 화면 사진은 base64로 출력에 통째로 들어간다: 줄여야 사람이 읽을 수 있고, 뒤쪽 200KB가 사진으로 채워지지 않는다.
+    // 실측(2026-10-02, 퀴즈 T-55): 원본 출력 창 맨 위가 알아볼 수 없는 base64 글자였다.
+    const text = shortenBase64(raw);
     return {
       text: text.slice(-200_000),
       truncated: text.length > 200_000,

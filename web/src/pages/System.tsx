@@ -233,7 +233,13 @@ export function System() {
               <tr key={r.id}>
                 <td className="mono">{r.id}</td>
                 <td>
-                  {r.ticketId} · {r.kind}
+                  {/* 대화방 실행(g:…, t:…)은 방 이름으로(실측 2026-10-02: "g:2fe72ca8 · chat"으로는 어떤 토론인지 몰랐다) */}
+                  {r.ticketId.startsWith('t:')
+                    ? `${r.ticketId.slice(2)} ${ko ? '업무방' : 'room'}`
+                    : r.ticketId.includes(':') || r.ticketId === 'general'
+                      ? (state.channels?.find((c) => c.id === r.ticketId)?.name ?? (ko ? '대화방' : 'chat'))
+                      : r.ticketId}{' '}
+                  · {r.kind}
                 </td>
                 <td>{r.cli}</td>
                 <td>{r.status}</td>

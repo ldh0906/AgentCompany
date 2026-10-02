@@ -565,6 +565,7 @@ export class Orchestrator {
       await this.pollToolApprovals();
       this.checkDailyLimit();
       await this.screens.sweepScreens().catch(() => {});
+      await this.sweepWorkspaces().catch(() => {});
       await this.checkStalled();
       this.desk.notifyNewTodos();
       // 우선순위(1 높음 → 3 낮음) 순, 같으면 먼저 만든 순: 쓰기 범위가 겹칠 때 높은 업무가 먼저 잠금을 잡는다.
@@ -1673,6 +1674,67 @@ export class Orchestrator {
     const project = accept ? this.company.updateProject(projectId, { profile: p.profile }) : this.company.requireProject(projectId);
     this.changed('project', projectId);
     return project;
+  }
+
+  private lastWorkspaceSweep = 0;
+
+  /**
+   * 끝난 업무의 사본(작업·검증·검수·미리보기·확인용 실행)과 끝난 토론·인수 시험 사본을 지운다(10분에 한 번, 끝나고 1시간 뒤).
+   * 실측(2026-10-02): 정리가 없어 시험 회사 데이터 폴더가 3.2GB가 되었다(메이플: 검증 사본 21개 1GB, 작업 폴더 21개 0.9GB).
+   * 지금 띄워 둔 미리보기는 건드리지 않는다. 다시 필요하면(나중에 확인의 "실행해 보기" 등) 사본을 새로 만든다.
+   */
+  private async sweepWorkspaces(now = Date.now()): Promise<number> {
+    if (now - this.lastWorkspaceSweep < 10 * 60_000) return 0;
+    this.lastWorkspaceSweep = now;
+    const HOUR = 60 * 60_000;
+    const livePreview = new Set(this.previews.list().map((p) => p.key));
+    let removed = 0;
+    for (const project of this.company.projects()) {
+      const paths = projectPaths(this.opts.dataDir, project.id);
+      const dirs = [paths.worktrees, paths.verify, paths.review, path.join(paths.root, 'preview')];
+      const stale: string[] = [];
+      for (const dir of dirs)
+        for (const name of await readdir(dir).catch(() => [] as string[])) {
+          const full = path.join(dir, name);
+          const ticketId = /^(?:demo-)?(T-\d+)$/.exec(name)?.[1];
+          if (ticketId) {
+            const t = this.company.store.get<Ticket>('tickets', ticketId);
+            if (!t || !TERMINAL_STATUSES.includes(t.status) || now - Date.parse(t.updatedAt) < HOUR) continue;
+            if (livePreview.has(`${project.id}:${ticketId}`)) continue;
+            stale.push(full);
+            continue;
+          }
+          const debateId = /^debate-(D-[0-9a-f]+)$/.exec(name)?.[1];
+          if (debateId) {
+            const d = this.debates.get(debateId);
+            if (d && (d.phase !== 'done' || now - Date.parse(d.createdAt) < HOUR)) continue;
+            stale.push(full);
+            continue;
+          }
+          // 비서실장 초안용 읽기 사본: 확정·버림·실패한 요청
+          const requestId = /^_request-(Q-[0-9a-f]+)$/.exec(name)?.[1];
+          if (requestId) {
+            const r = this.records.request(requestId);
+            if (r && (['drafting', 'drafted'].includes(r.status) || now - Date.parse(r.createdAt) < HOUR)) continue;
+            stale.push(full);
+            continue;
+          }
+          if (/^debate-acc-/.test(name)) {
+            const age = await stat(full)
+              .then((s) => now - s.mtimeMs)
+              .catch(() => 0);
+            if (age > HOUR) stale.push(full);
+          }
+        }
+      if (!stale.length) continue;
+      await this.withProjectLock(project.id, async () => {
+        for (const full of stale) {
+          await removeWorktree(paths, full);
+          removed++;
+        }
+      });
+    }
+    return removed;
   }
 
   private readonly splitCleanup = new Set<string>();
