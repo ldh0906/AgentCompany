@@ -55,7 +55,7 @@ test('검증 실패한 제출물은 검수 건너뛰기로도 승인 단계에 �
     verify: [{ label: 'unit tests', argv: ['node', '-e', 'process.exit(1)'], evidenceType: 'unit_test' }],
   });
   const tk = newImplTicket(env);
-  await driveUntil(env, tk.id, (x) => x.hold !== null);
+  await driveUntil(env, tk.id, (x) => x.hold !== null, 150_000); // 검증 실패로 세 회차를 돈다: 실측 55~62초라 기본 60초가 빠듯했다
   assert.throws(() => env.orch.skipReview(tk.id), /검증/);
 });
 
