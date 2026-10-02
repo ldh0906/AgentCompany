@@ -48,7 +48,8 @@ const dict = {
     close: '닫기',
     empty: '없음',
     loading: '불러오는 중…',
-    authMissing: '인증 토큰이 없습니다. 터미널에 표시된 대시보드 주소로 다시 열어 주세요.',
+    authMissing:
+      '이 창에는 로그인 정보가 없습니다(보안을 위해 주소만으로는 열리지 않습니다). 바탕화면이나 시작 메뉴의 Agent Company 아이콘으로 다시 여세요. 이미 켜져 있으면 그 창이 열립니다.',
   },
   en: {
     appName: 'Agent Company',
@@ -95,7 +96,8 @@ const dict = {
     close: 'Close',
     empty: 'None',
     loading: 'Loading…',
-    authMissing: 'Missing session token. Open the dashboard URL printed in your terminal.',
+    authMissing:
+      'This window has no session token (the address alone is not enough, for security). Reopen Agent Company from its desktop or Start menu icon.',
   },
 } as const;
 

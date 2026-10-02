@@ -65,8 +65,8 @@ export function RequestBox() {
                   ? '예: 신제품 출시 기획서 써줘. 시장 규모는 실제 자료 찾아서 출처 달고'
                   : 'e.g. Write a launch plan for the new product, with sourced market numbers',
                 program: ko
-                  ? '예: 주문 목록을 돌려주는 API 만들어줘. 추가·조회·삭제가 되게'
-                  : 'e.g. Build an API for orders with add, list and delete',
+                  ? '예: 거래내역 CSV를 월별로 정리하는 도구 만들어줘 / 주문 받는 API 만들어줘'
+                  : 'e.g. A tool that sums a bank CSV by month / an API that takes orders',
               } as Record<string, string>
             )[state.projects.find((p) => p.id === pid)?.profile?.deliverable ?? ''] ??
             (ko

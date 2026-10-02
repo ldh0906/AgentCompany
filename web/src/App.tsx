@@ -339,14 +339,17 @@ export function App() {
 }
 
 function AuthMissing() {
-  const { t } = useT();
+  const { t, lang } = useT();
   return (
     <div style={{ display: 'grid', placeItems: 'center', height: '100%', padding: 24 }}>
       <div className="card" style={{ maxWidth: 480 }}>
         <div className="body">
           <h2 style={{ marginTop: 0 }}>🔒 {t('appName')}</h2>
           <p>{t('authMissing')}</p>
-          <code>agent-company start</code>
+          {/* 실측(2026-10-02): "터미널에 표시된 주소"라고만 써 있었는데, 아이콘으로 쓰는 대표에게는 터미널이 없다. */}
+          <p className="hint">
+            {lang === 'ko' ? '아이콘이 없으면 터미널에서:' : 'No icon? In a terminal:'} <code>agent-company start</code>
+          </p>
         </div>
       </div>
     </div>
