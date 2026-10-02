@@ -508,7 +508,13 @@ export class Api {
         r
           .requests(30)
           .filter((q) => q.ticketIds.length)
-          .map((q) => [q.id, requestTokens(r, q)]),
+          .map((q) => {
+            // rooms가 생기기 전 요청: 인수 시험 방·토론 방을 기록에서 찾아 넣는다
+            const acceptance = this.company.store.getSetting(`acceptance_room:${q.id}`);
+            const debate = q.debateId ? this.orch.debates.get(q.debateId)?.channelId : undefined;
+            const rooms = { ...(acceptance ? { acceptance } : {}), ...(debate ? { debate } : {}), ...q.rooms };
+            return [q.id, requestTokens(r, { ...q, rooms })];
+          }),
       ),
       chiefOfStaff: this.orch.chiefOfStaff()?.id ?? null,
       permissionDelegate: this.orch.permissionDelegate()?.id ?? null,

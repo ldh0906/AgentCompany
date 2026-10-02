@@ -9,7 +9,7 @@ test('업무 예산을 넘으면 멈추고, 예산을 늘리면 다시 돈다', 
   const env = await setup(t, { reviewer: 'harsh' });
   const tk = newImplTicket(env);
   env.company.setTicketTokenBudget(tk.id, 100_000);
-  const held = await driveUntil(env, tk.id, (x) => x.hold !== null);
+  const held = await driveUntil(env, tk.id, (x) => x.hold !== null, 150_000); // 엄한 검수자와 몇 회차 돌아야 예산에 닿는다
   assert.equal(held.hold?.reason, 'needs_decision');
   assert.match(held.hold!.note, /토큰 예산/);
   const { used, budget } = env.orch.ticketBudget(held);
@@ -22,7 +22,7 @@ test('업무 예산을 넘으면 멈추고, 예산을 늘리면 다시 돈다', 
 test('하루 한도에 닿으면 회사 전체를 멈추고, 대표가 풀면 그날은 다시 멈추지 않는다', { timeout: 120_000 }, async (t) => {
   const env = await setup(t);
   const tk = newImplTicket(env);
-  await driveUntil(env, tk.id, (x) => x.status === 'awaiting_approval' || x.hold !== null);
+  await driveUntil(env, tk.id, (x) => x.status === 'awaiting_approval' || x.hold !== null, 100_000);
   env.orch.setDailyTokenLimit(10_000);
   await env.orch.tick();
   assert.equal(env.orch.paused, true);
