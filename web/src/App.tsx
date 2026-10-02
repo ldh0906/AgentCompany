@@ -244,12 +244,13 @@ function Shell() {
                 (state?.approvals.filter((a) => a.state === 'pending' && a.kind === 'integrate').length ?? 0) +
                 (state?.requests.filter((r) => r.status === 'drafted').length ?? 0) +
                 d;
+              // 대신 승인까지 하는 강한 모드라 켤 때는 늘 묻는다(실측 2026-10-02 QA: 대기 결정이 없으면 한 번 클릭으로 바로 켜졌다).
+              const who = empName(state!.employees, state!.delegation?.delegate ?? null);
               if (
-                pending > 0 &&
                 !confirm(
                   lang === 'ko'
-                    ? `지금 기다리는 결정 ${pending}개(반영 승인·초안 확정·토론 결정)를 ${empName(state!.employees, state!.delegation?.delegate ?? null)}이(가) 바로 처리합니다. 켤까요?`
-                    : `${pending} pending decisions will be made right away. Turn on?`,
+                    ? `${who}에게 전권을 맡깁니다: 초안 확정·직원 질문·예산·범위·반영 승인·토론 결정을 대신 하고, 모두 기록으로 남깁니다.${pending > 0 ? `\n지금 기다리는 결정 ${pending}개도 바로 처리합니다.` : ''}\n켤까요?`
+                    : `Delegate every decision to ${who}?${pending > 0 ? ` ${pending} pending decisions will be made right away.` : ''}`,
                 )
               )
                 return;
