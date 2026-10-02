@@ -93,7 +93,7 @@ import { appProfileDir } from './doctor.ts';
 import { dependencySetup, installDependencies } from './verify-setup.ts';
 import { estimates, ticketTokens, tokenBudget } from './cost.ts';
 import { nodeTestArgs, suggestVerifyAt } from './repo-inspect.ts';
-import { PreviewManager, type PreviewInfo } from './preview.ts';
+import { killStalePreviews, PreviewManager, type PreviewInfo } from './preview.ts';
 import { captureScreens, findChrome } from './screen-check.ts';
 import { CeoDesk } from './ceo-desk.ts';
 import type { OrchHost } from './orch-host.ts';
@@ -347,6 +347,8 @@ export class Orchestrator {
 
   start(intervalMs = 1500): void {
     if (this.timer) return;
+    // 지난번에 강제로 꺼지며 남은 "실행해 보기" 서버를 정리한다(preview.ts)
+    void killStalePreviews(this.opts.dataDir).catch(() => 0);
     this.timer = setInterval(() => void this.tick(), intervalMs);
   }
 

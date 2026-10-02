@@ -3,7 +3,7 @@
 // - package.json에 dev/start 스크립트가 있으면 그것을, 없고 index.html이 있으면 내장 정적 서버를 쓴다.
 // - 개발 서버 출력에서 localhost 주소를 찾아 돌려준다. 프로세스는 앱 종료 때 함께 끝낸다.
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, type Dirent } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
@@ -217,6 +217,43 @@ export class PreviewManager {
       child.once('error', () => resolve(-1));
     });
   }
+}
+
+/**
+ * 지난번 앱이 끝나며 남긴 "실행해 보기" 서버를 끈다(앱이 강제로 꺼지면 vite 같은 자식 프로세스가 계속 남는다).
+ * 이 회사 데이터 폴더의 projects\…\preview\ 안에서 도는 프로세스만 고른다(경로 끝에 구분자를 붙여 다른 회사 폴더와 섞이지 않게).
+ * 실측(2026-10-03): 10/01에 4790이 띄운 vite 미리보기 3개가 회사를 여러 번 다시 켠 뒤에도 돌고 있었다.
+ */
+export async function killStalePreviews(dataDir: string): Promise<number> {
+  const marker = `${path.join(path.resolve(dataDir), 'projects')}${path.sep}`;
+  const pids: number[] = [];
+  if (process.platform === 'win32') {
+    const out = await new Promise<string>((resolve) =>
+      execFile(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }',
+        ],
+        { windowsHide: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
+        (_e, stdout) => resolve(stdout ?? ''),
+      ),
+    );
+    for (const line of out.split(/\r?\n/)) {
+      const [pid, cmd] = [line.slice(0, line.indexOf('\t')), line.slice(line.indexOf('\t') + 1)];
+      if (cmd.toLowerCase().includes(marker.toLowerCase()) && /[\\/]preview[\\/]/i.test(cmd)) pids.push(Number(pid));
+    }
+  } else {
+    const out = await new Promise<string>((resolve) => execFile('ps', ['-eo', 'pid=,args='], (_e, stdout) => resolve(stdout ?? '')));
+    for (const line of out.split('\n')) {
+      const m = /^\s*(\d+)\s+(.*)$/.exec(line);
+      if (m && m[2]!.includes(marker) && /\/preview\//.test(m[2]!)) pids.push(Number(m[1]));
+    }
+  }
+  for (const pid of pids.filter((p) => p && p !== process.pid)) killTree(pid);
+  return pids.length;
 }
 
 function killTree(pid: number): void {
