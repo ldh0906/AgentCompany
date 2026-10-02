@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDraftPrompt, buildReviewPrompt, buildWorkPrompt, profileBlock } from '../../src/agents/prompt.ts';
 import { buildAcceptancePrompt } from '../../src/agents/acceptance-prompts.ts';
-import { parseDrafts, profileOf } from '../../src/agents/report.ts';
+import { parseDrafts, parseReport, profileOf } from '../../src/agents/report.ts';
 import { claudeAdapter } from '../../src/adapters/claude.ts';
 import { codexAdapter } from '../../src/adapters/codex.ts';
 import { pythonTests } from '../../src/app/repo-inspect.ts';
@@ -216,4 +216,35 @@ test('인수 시험을 끈 프로젝트: 비서실장에게 인수 시험을 쓰
   const off = draft({ ...project(), acceptanceTests: false } as Project);
   assert.doesNotMatch(off, /V-model: before splitting/);
   assert.match(off, /Leave "acceptance" empty/);
+});
+
+test('전권 위임 중: 기본값이 분명한 작은 결정은 멈추지 않고 정해 "assumed"에 적는다', () => {
+  const work = (delegated: boolean) =>
+    buildWorkPrompt({
+      employee: emp,
+      project: project(),
+      ticket: ticket('impl'),
+      nonce: 'n',
+      decisions: [],
+      feedback: null,
+      language: 'ko',
+      delegated,
+    });
+  assert.match(work(true), /delegated decisions to the team/);
+  assert.match(work(true), /"assumed":\[\]/);
+  assert.doesNotMatch(work(false), /assumed/);
+  const text =
+    '```json\n' +
+    JSON.stringify({
+      nonce: 'n',
+      kind: 'work',
+      status: 'done',
+      summary: 's',
+      requirements: [{ id: 'R1', claim: 'met', notes: '' }],
+      assumed: ['알림 간격 60분(흔한 기본값)', 3],
+    }) +
+    '\n```';
+  const r = parseReport(text, { kind: 'work', nonce: 'n', requirementIds: ['R1'] });
+  assert.ok(r.ok && r.report.kind === 'work');
+  assert.deepEqual(r.report.assumed, ['알림 간격 60분(흔한 기본값)']);
 });

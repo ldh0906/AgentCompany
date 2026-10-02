@@ -829,6 +829,7 @@ export class Orchestrator {
         decisions: this.records.decisions(project.id, 'current'),
         feedback,
         request: this.records.requestOfTicket(next)?.text ?? null,
+        delegated: this.delegation.on,
         language: this.opts.language,
         colleagues: this.company
           .activeEmployees()
@@ -1929,6 +1930,17 @@ export class Orchestrator {
     const t = this.company.store.get<Ticket>('tickets', run.ticketId);
     // 직원이 칸을 안 채워도 요약에 "범위 밖·후속"이 있으면 제안으로 올린다.
     const followUps = report.followUps?.length ? report.followUps : followUpsFromSummary(report.summary);
+    // 전권 위임 중 멈추지 않고 스스로 정한 것: 위임 기록에 남겨 대표가 나중에 훑어볼 수 있게 한다.
+    // 실측(2026-10-02, 4790): 업무 한 번 다시 돌리는 데 평균 119만 토큰. 작은 질문으로 멈추면 그만큼 더 든다.
+    if (t && report.assumed?.length)
+      this.delegation.log(
+        t.id,
+        tr(
+          `${t.id} 담당이 멈추지 않고 정한 것: ${report.assumed.join(' / ')}`.slice(0, 1000),
+          `${t.id}'s assignee decided without stopping: ${report.assumed.join(' / ')}`.slice(0, 1000),
+        ),
+        t.id,
+      );
     if (!t || (!followUps.length && !report.ask?.length)) return;
     const room = this.chat.ensureTicketChannel(t.id);
     if (!room) return;

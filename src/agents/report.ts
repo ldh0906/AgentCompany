@@ -10,6 +10,8 @@ export interface WorkReport {
   summary: string;
   requirements: { id: string; claim: 'met' | 'partial' | 'not_met'; notes: string }[];
   questions: string[];
+  /** 전권 위임 중 직원이 멈추지 않고 스스로 정한 것(무엇을, 왜) */
+  assumed?: string[];
   /** 내 범위 밖에서 발견한 문제: 대표가 후속 업무로 만들 수 있게 업무방에 올린다. */
   followUps?: { title: string; reason: string }[];
   /** 다른 직원에게 묻는 말(이름). 업무방에 올라가고 그 직원이 답한다. */
@@ -166,6 +168,7 @@ export function parseReport(
         summary: r.summary,
         requirements: reqs,
         questions,
+        assumed: (isArr(r.assumed) ? (r.assumed as unknown[]).filter(isStr) : []).slice(0, 10).map((s) => s.slice(0, 500)),
         followUps: (isArr(r.followUps) ? (r.followUps as Record<string, unknown>[]) : [])
           .filter((f) => isStr(f?.title) && f.title.trim())
           .slice(0, 5)

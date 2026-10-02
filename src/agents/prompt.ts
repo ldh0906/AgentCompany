@@ -82,6 +82,8 @@ export interface WorkPromptInput {
   canSplit?: boolean;
   /** 이 업무를 만든 대표 요청 원문(초안에서 확정한 업무만) */
   request?: string | null;
+  /** 전권 위임 중: 기본값이 분명한 작은 결정은 멈추지 않고 정해 진행한다 */
+  delegated?: boolean;
 }
 
 /**
@@ -147,7 +149,12 @@ ${
 - Do NOT run git commit, git push, git branch, or change git refs. The system commits your working tree for you.
 - Everything left in your directory is committed. Put temporary files (screenshots, browser profiles, downloads, logs) in the OS temp directory, never in the worktree.
 - Do not override the CEO's decisions or invent product rules the ticket does not ask for. When the ticket itself asks you to define values or content (for example balance numbers or item lists), propose sensible values, implement them, and write down the reasoning; you are not blocked by the absence of a decision. Use status "needs_decision" only when you truly cannot proceed without the CEO, and put those items in "questions".
-${humanAttestRule(kind)}
+${
+  i.delegated
+    ? `- The CEO has delegated decisions to the team. For an open product question that has a sensible default (a number, wording, an order, a small rule), choose that default, implement it, and list each choice in "assumed" (["what you chose and why"]) instead of stopping. Stop with "needs_decision" only when no reasonable default exists or the choice is costly to undo (deleting data, changing the product's direction).
+`
+    : ''
+}${humanAttestRule(kind)}
 ${
   kind === 'screen'
     ? `- The CEO is a tired non-developer with a few minutes, on this PC only (no phone). In those notes say in plain words what to open, what to click and what they should see or hear, and make it checkable within a minute: if it only shows after a wait (a 20-minute timer, a daily reset), add a quick-check way (for example "?quick=1" that shortens the wait to seconds) and say so. Measured: the CEO could not see a 20-minute break without sitting through it.
@@ -211,7 +218,7 @@ ${i.feedback ? dataBlock('Feedback and notes (reviewer feedback, CEO notes, agre
 ## Final answer format (required)
 Write your summary in language "${i.language}". End your final answer with exactly one JSON code block:
 \`\`\`json
-{"nonce":"${i.nonce}","kind":"work","status":"done|blocked|needs_decision","summary":"...","requirements":[${header.requirementIds.map((id) => `{"id":"${id}","claim":"met|partial|not_met","notes":"..."}`).join(',')}],"questions":[],"followUps":[],"ask":[]${kind === 'program' ? ',"demoCommands":[]' : kind === 'screen' ? ',"screenSteps":[],"previewPage":null' : ''}}
+{"nonce":"${i.nonce}","kind":"work","status":"done|blocked|needs_decision","summary":"...","requirements":[${header.requirementIds.map((id) => `{"id":"${id}","claim":"met|partial|not_met","notes":"..."}`).join(',')}],"questions":[]${i.delegated ? ',"assumed":[]' : ''},"followUps":[],"ask":[]${kind === 'program' ? ',"demoCommands":[]' : kind === 'screen' ? ',"screenSteps":[],"previewPage":null' : ''}}
 \`\`\`
 The nonce must be copied exactly. Missing or wrong JSON means the run is rejected.
 `;

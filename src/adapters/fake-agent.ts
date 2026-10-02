@@ -127,6 +127,10 @@ async function work(h: TaskHeader, prompt: string): Promise<string> {
           : L('요구사항을 구현했습니다.', 'Implemented the requirements.'),
       requirements: h.requirementIds.map((id) => ({ id, claim: 'met', notes: '' })),
       questions: [],
+      // 전권 위임 중이면 작은 결정은 스스로 정했다고 적는다
+      ...(/delegated decisions to the team/.test(prompt)
+        ? { assumed: [L('버튼 문구는 "해산"(흔한 표현)', 'Button label "Disband"')] }
+        : {}),
     },
     lazyNow ? L('모든 작업을 완료했습니다!', 'All done!') : L('작업을 마쳤습니다.', 'Work finished.'),
   );

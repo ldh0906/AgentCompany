@@ -21,6 +21,8 @@ test('위임: 초안을 제안대로 확정하고, 검수를 통과한 업무를
   assert.match(String(decided?.actor ?? ''), /^delegate:/, '승인한 사람이 위임받은 직원으로 남는다');
   assert.ok(env.orch.delegation.recent().some((x) => x.text.includes('초안을 확정')));
   assert.ok(env.orch.delegation.recent().some((x) => x.text.includes(`${first}`) && x.text.includes('승인')));
+  // 작은 결정은 멈추지 않고 정했고, 무엇을 정했는지 위임 기록에 남는다
+  assert.ok(env.orch.delegation.recent().some((x) => x.text.includes('멈추지 않고 정한 것') && x.text.includes('해산')));
 });
 
 test('위임: 직원이 묻고 멈추면 팀장이 판단해 답하고, 답은 규칙으로 남아 업무가 이어진다', { timeout: 240_000 }, async (t) => {
