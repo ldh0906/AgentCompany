@@ -654,6 +654,30 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
               )}
             </div>
           </div>
+          {/* 최근 활동은 왼쪽 보류 아래: 오른쪽(팀·사용량·진행·프로젝트)만 길어 양쪽 높이가 어긋났다(대표 요청 2026-10-03). */}
+          <div className="card">
+            <h2>
+              <span className="row">
+                <Icon name="activity" /> {t('activity')}
+              </span>
+            </h2>
+            {state.events.length === 0 && <EmptyState icon="activity">{ko ? '아직 기록이 없습니다.' : 'Nothing yet.'}</EmptyState>}
+            <ul className="timeline">
+              {[...state.events]
+                .reverse()
+                // 직원이 대표 대신 허용한 명령 원문은 대시보드에서 뺀다(실측: 돌아와 보니 powershell 명령이 줄줄이). 차단(⛔)은 남긴다.
+                .filter(
+                  (e) => !isNoiseEvent(e, state) && !(e.type === 'approval.delegated' && (e.payload as { allow?: boolean } | null)?.allow),
+                )
+                .slice(0, 25)
+                .map((e) => (
+                  <li key={e.seq}>
+                    <span className="when">{new Date(e.ts).toLocaleTimeString()}</span>
+                    <span>{describeEvent(e, state, lang)}</span>
+                  </li>
+                ))}
+            </ul>
+          </div>
         </div>
 
         <div className="grid" style={{ alignContent: 'start' }}>
@@ -718,29 +742,6 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
             </div>
           </div>
           <ProjectsPanel />
-          <div className="card">
-            <h2>
-              <span className="row">
-                <Icon name="activity" /> {t('activity')}
-              </span>
-            </h2>
-            {state.events.length === 0 && <EmptyState icon="activity">{ko ? '아직 기록이 없습니다.' : 'Nothing yet.'}</EmptyState>}
-            <ul className="timeline">
-              {[...state.events]
-                .reverse()
-                // 직원이 대표 대신 허용한 명령 원문은 대시보드에서 뺀다(실측: 돌아와 보니 powershell 명령이 줄줄이). 차단(⛔)은 남긴다.
-                .filter(
-                  (e) => !isNoiseEvent(e, state) && !(e.type === 'approval.delegated' && (e.payload as { allow?: boolean } | null)?.allow),
-                )
-                .slice(0, 25)
-                .map((e) => (
-                  <li key={e.seq}>
-                    <span className="when">{new Date(e.ts).toLocaleTimeString()}</span>
-                    <span>{describeEvent(e, state, lang)}</span>
-                  </li>
-                ))}
-            </ul>
-          </div>
         </div>
       </div>
     </>
