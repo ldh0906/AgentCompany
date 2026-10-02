@@ -128,6 +128,8 @@ export class Acceptance {
       projectId: req.projectId,
     });
     this.h.company.store.setSetting(key, c.id);
+    const cur = this.h.records.request(req.id);
+    if (cur) this.h.records.saveRequest({ ...cur, rooms: { ...cur.rooms, acceptance: c.id } });
     return c.id;
   }
 

@@ -84,6 +84,8 @@ export interface CeoRequest {
   acceptance?: { id: string; check: string; how: string }[];
   /** 인수 시험 회차 기록 */
   acceptanceRounds?: AcceptanceRound[];
+  /** 요청에 딸린 대화방(acceptance: 인수 시험 방, debate: 갈림길 토론 방): 요청별 토큰 합계에 넣는다 */
+  rooms?: Record<string, string>;
   /** 비서실장이 표시한 갈림길로 연 토론(결정 전에는 위임 모드도 확정하지 않는다) */
   debateId?: string | null;
   /** 실패한 요청을 다시 보낸 것이면 원래 요청 ID(자동 재시도는 한 번만). */

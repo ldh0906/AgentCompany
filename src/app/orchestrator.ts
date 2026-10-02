@@ -3282,7 +3282,10 @@ ${failure.detail.slice(0, 400)}`,
             requestId: req.id,
           })
           .catch(() => null);
-        if (d) this.records.saveRequest({ ...this.records.request(req.id)!, debateId: d.id });
+        if (d) {
+          const cur = this.records.request(req.id)!;
+          this.records.saveRequest({ ...cur, debateId: d.id, rooms: { ...cur.rooms, debate: d.channelId } });
+        }
       }
       // 일시적 오류(실측: Claude 로그인 토큰 갱신 경합)는 한 번 자동으로 다시 요청한다.
       if (transient && !req.retriedFrom) setTimeout(() => void this.retryRequest(req.id).catch(() => {}), 60_000).unref?.();

@@ -4,6 +4,7 @@ import { api, type Debate } from '../api.ts';
 import { useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
 import { ChipToggles } from './kit.tsx';
+import { fmtTokens } from './usage.tsx';
 import { empName, Modal, useAction } from './ui.tsx';
 
 const PHASES = ['opening', 'rebuttal', 'summary', 'decide', 'done'] as const;
@@ -34,6 +35,7 @@ export function DebatePanel({ debate: d }: { debate: Debate }) {
         ))}
         <span className="sub">
           {ko ? '사회' : 'Moderator'}: {name(d.moderator)}
+          {d.tokens ? ` · ${ko ? '쓴 토큰' : 'used'} ${fmtTokens(d.tokens, lang)}` : ''}
         </span>
       </div>
       {d.phase === 'decide' && (
@@ -107,6 +109,11 @@ export function NewDebateModal({ onClose, onCreated }: { onClose: () => void; on
   const [members, setMembers] = useState<string[]>([]);
   const [projectId, setProjectId] = useState('');
   if (!state) return null;
+  // 예상: 참가자마다 입장·반박 두 번 + 사회자 정리 한 번
+  const active = state.employees.filter((e) => e.active && !e.removedAt);
+  const speakers = members.length || Math.min(4, active.length);
+  const runs = speakers * 2 + 1;
+  const estimate = fmtTokens(runs * (state.debateRunTokens ?? 50_000), lang);
   return (
     <Modal
       title={ko ? '🗣 토론 열기' : '🗣 Open a debate'}
@@ -157,15 +164,17 @@ export function NewDebateModal({ onClose, onCreated }: { onClose: () => void; on
         <label>
           {ko ? '참가자 (비우면 서로 다른 AI에서 최대 4명)' : 'Debaters (empty: up to 4 across AIs)'}
           <ChipToggles
-            options={state.employees.filter((e) => e.active && !e.removedAt).map((e) => ({ value: e.id, label: e.name }))}
+            options={active.map((e) => ({ value: e.id, label: e.name }))}
             selected={members}
             onToggle={(v) => setMembers(members.includes(v) ? members.filter((x) => x !== v) : [...members, v])}
           />
         </label>
         <div className="hint">
           {ko
-            ? '각자 입장 → 서로 반박 → 사회자(최고 직급)가 선택지·장단점·추천을 정리합니다. 결정은 대표가 한 번에, 전권 위임 중이면 추천안으로 바로 정해집니다. 참가자 수만큼 실행이 세 번 돌아 토큰이 듭니다.'
+            ? '각자 입장 → 서로 반박 → 사회자(최고 직급)가 선택지·장단점·추천을 정리합니다. 결정은 대표가 한 번에, 전권 위임 중이면 추천안으로 바로 정해집니다.'
             : 'Positions → rebuttals → the moderator summarizes options and a recommendation. You decide in one click.'}
+          <br />
+          {ko ? `예상: 발언 ${runs}번, 약 ${estimate} 토큰` : `Estimate: ${runs} runs, about ${estimate} tokens`}
         </div>
       </div>
     </Modal>

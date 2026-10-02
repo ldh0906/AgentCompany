@@ -51,11 +51,23 @@ export function estimates(records: Records, tickets: Ticket[]): Record<Difficult
  */
 export function requestTokens(
   records: Records,
-  req: { id: string; ticketIds: string[] },
+  req: { id: string; ticketIds: string[]; rooms?: Record<string, string> },
 ): { total: number; byTicket: Record<string, number> } {
   const byTicket: Record<string, number> = {};
   for (const id of req.ticketIds) byTicket[id] = ticketTokens(records, id) + ticketTokens(records, `t:${id}`);
+  // 요청에 딸린 방(인수 시험·갈림길 토론): 키는 acceptance / debate(화면에서 이름으로 바꾼다)
+  for (const [label, channelId] of Object.entries(req.rooms ?? {})) byTicket[label] = ticketTokens(records, channelId);
   return { total: ticketTokens(records, req.id) + Object.values(byTicket).reduce((a, b) => a + b, 0), byTicket };
+}
+
+/**
+ * 토론 발언 한 번에 드는 토큰: 지난 토론 기록의 평균, 없으면 기본값.
+ * 실측(2026-10-02, 4790 토론 2건): 9번 발언에 37만·45만, 한 번에 4만~5만.
+ */
+export const DEBATE_RUN_PRIOR = 50_000;
+export function debateRunTokens(records: Records, channelIds: string[]): number {
+  const runs = channelIds.flatMap((id) => records.runsForTicket(id)).filter((r) => (r.usage?.total ?? 0) > 0);
+  return runs.length >= 3 ? Math.round(runs.reduce((a, r) => a + (r.usage?.total ?? 0), 0) / runs.length) : DEBATE_RUN_PRIOR;
 }
 
 /** 알림 글에 쓰는 토큰 수(한국어는 만·억 단위). */

@@ -11,6 +11,9 @@ import { PlaytestPanel } from '../components/preview.tsx';
 const COMMAND_EVIDENCE = ['unit_test', 'static_check', 'runtime'];
 
 /** 대표 요청 → 비서실장 초안 → 대표 확정. 비서실장은 티켓을 직접 만들 수 없다. */
+/** 인수 시험 한 번(직원 한 명이 합쳐진 결과를 확인)에 드는 토큰. 실측(2026-10-02, 4790 단어 퀴즈 요청): 32만. */
+const ACCEPTANCE_TOKENS = 350_000;
+
 export function RequestBox() {
   const { state, reload } = useCompany();
   const { lang } = useT();
@@ -212,7 +215,10 @@ export function RequestBox() {
                   {ko ? '사용 토큰' : 'Tokens used'} {fmtTokens(state.requestTokens![r.id]!.total, lang)}
                   {' ('}
                   {Object.entries(state.requestTokens![r.id]!.byTicket)
-                    .map(([id, n]) => `${id} ${fmtTokens(n, lang)}`)
+                    .map(
+                      ([id, n]) =>
+                        `${({ acceptance: ko ? '인수 시험' : 'acceptance', debate: ko ? '토론' : 'debate' } as Record<string, string>)[id] ?? id} ${fmtTokens(n, lang)}`,
+                    )
                     .join(' · ')}
                   {')'}
                 </div>
@@ -568,7 +574,12 @@ function DraftReview({ r }: { r: CeoRequest }) {
       )}
       {(r.acceptance?.length ?? 0) > 0 && (
         <div className="note" style={{ marginTop: 8 }}>
-          <b>✔ {ko ? '다 끝나면 이렇게 확인합니다 (인수 시험)' : 'Acceptance tests (checked at the end)'}</b>
+          <b>✔ {ko ? '다 끝나면 이렇게 확인합니다 (인수 시험)' : 'Acceptance tests (checked at the end)'}</b>{' '}
+          <span className="sub">
+            {ko
+              ? `시험 한 번에 약 ${fmtTokens(ACCEPTANCE_TOKENS, lang)} 토큰 더`
+              : `about ${fmtTokens(ACCEPTANCE_TOKENS, lang)} more tokens per round`}
+          </span>
           {r.acceptance!.map((a) => (
             <div key={a.id} className="sub">
               {a.id} {a.check}
@@ -653,12 +664,7 @@ function DraftReview({ r }: { r: CeoRequest }) {
         )}
         <span className="sub">
           {ko ? '예상 합계' : 'Estimated total'} ~
-          <b>
-            {fmtTokens(
-              kept.reduce((a, i) => a + estimateOf(i), 0),
-              lang,
-            )}
-          </b>{' '}
+          <b>{fmtTokens(kept.reduce((a, i) => a + estimateOf(i), 0) + (r.acceptance?.length ? ACCEPTANCE_TOKENS : 0), lang)}</b>{' '}
           {ko ? '토큰' : 'tokens'}
         </span>
         <button className="btn" disabled={busy} onClick={() => run(() => api(`requests/${r.id}/dismiss`, { body: {} })).then(reload)}>

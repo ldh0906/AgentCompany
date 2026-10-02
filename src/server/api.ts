@@ -12,7 +12,7 @@ import { DELIVERABLE_KINDS, DIFFICULTIES, RANKS } from '../core/types.ts';
 import type { AccessLevel, CliKind, EvidenceType, ProjectProfile, RoleTemplate, TicketType, VerifyCommand } from '../core/types.ts';
 import { doctor, type DoctorReport, installInfo, openLoginWindow } from '../app/doctor.ts';
 import { listModels } from '../app/models.ts';
-import { requestTokens } from '../app/cost.ts';
+import { debateRunTokens, requestTokens, ticketTokens } from '../app/cost.ts';
 import { createRepo, inspectRepo, listDirs, trackedDirs } from '../app/repo-inspect.ts';
 import { deliverableFiles } from '../app/deliverables.ts';
 
@@ -536,7 +536,12 @@ export class Api {
           .filter(([, v]) => v),
       ),
       paused: this.orch.paused,
-      debates: this.orch.debates.list(15),
+      // 토론마다 지금까지 쓴 토큰, 새 토론 예상에 쓰는 발언 한 번의 평균
+      debates: this.orch.debates.list(15).map((d) => ({ ...d, tokens: ticketTokens(r, d.channelId) })),
+      debateRunTokens: debateRunTokens(
+        r,
+        this.orch.debates.list(30).map((d) => d.channelId),
+      ),
       delegation: {
         on: this.orch.delegation.on,
         delegate: this.orch.delegation.delegate()?.id ?? null,

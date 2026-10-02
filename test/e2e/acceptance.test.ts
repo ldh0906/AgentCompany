@@ -1,6 +1,7 @@
 // 요청 단위 V모델: 업무가 다 끝나면 인수 시험 → 떨어진 항목은 고칠 업무 → 끝나면 다시 시험(대표 요청 2026-10-02).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { requestTokens } from '../../src/app/cost.ts';
 import { setup } from './helpers.ts';
 
 test('인수 시험: 1회차에서 떨어진 항목은 고칠 업무가 되고, 그 업무가 끝나면 2회차로 통과한다', { timeout: 420_000 }, async (t) => {
@@ -39,4 +40,6 @@ test('인수 시험: 1회차에서 떨어진 항목은 고칠 업무가 되고, 
     ['✅', '✅'],
   );
   assert.equal(r2!.fixTickets.length, 0);
+  // 인수 시험 방에 든 토큰도 요청 비용에 들어간다
+  assert.ok('acceptance' in requestTokens(env.orch.records, accepted).byTicket);
 });

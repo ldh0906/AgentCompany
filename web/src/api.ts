@@ -93,6 +93,8 @@ export interface State {
   /** 회사 전체 일시정지 */
   paused?: boolean;
   debates?: Debate[];
+  /** 토론 발언 한 번의 평균 토큰(새 토론 예상에 쓴다) */
+  debateRunTokens?: number;
   /** 전권 위임 모드: 위임받은 직원과 최근 결정 기록 */
   delegation?: { on: boolean; delegate: string | null; recent: { at: string; by: string; entityId: string; text: string }[] };
   pausedReason?: string;
@@ -212,6 +214,8 @@ export interface Debate {
   decision: string | null;
   decidedBy: string | null;
   createdAt: string;
+  /** 지금까지 이 토론에 쓴 토큰 */
+  tokens?: number;
 }
 
 /** 결과물 보기: 제출물에서 바뀐 문서·표·그림(src/app/deliverables.ts). */
