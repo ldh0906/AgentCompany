@@ -84,6 +84,8 @@ export interface WorkPromptInput {
   request?: string | null;
   /** 전권 위임 중: 기본값이 분명한 작은 결정은 멈추지 않고 정해 진행한다 */
   delegated?: boolean;
+  /** 이 업무가 이어받는 앞 업무에서 검수자가 짚은 작은 실수(업무 ID: 내용) */
+  knownIssues?: string[];
 }
 
 /**
@@ -151,7 +153,7 @@ ${
 - Do not override the CEO's decisions or invent product rules the ticket does not ask for. When the ticket itself asks you to define values or content (for example balance numbers or item lists), propose sensible values, implement them, and write down the reasoning; you are not blocked by the absence of a decision. Use status "needs_decision" only when you truly cannot proceed without the CEO, and put those items in "questions".
 ${
   i.delegated
-    ? `- The CEO has delegated decisions to the team. For an open product question that has a sensible default (a number, wording, an order, a small rule), choose that default, implement it, and list each choice in "assumed" (["what you chose and why"]) instead of stopping. Stop with "needs_decision" only when no reasonable default exists or the choice is costly to undo (deleting data, changing the product's direction).
+    ? `- The CEO has delegated decisions to the team. For an open product question that has a sensible default (a number, wording, an order, a small rule), choose that default, implement it, and list each choice in "assumed" (["what you chose and why"]) instead of stopping. "assumed" is read by a non-developer CEO: list only choices about what the user sees or what the result says, in plain words (for example "savings count as money spent, so the balance goes down"), at most 5. Leave out implementation details (function names, data formats, number limits, error handling). Measured: the CEO's log showed "createLedger({ storage, storageKey })" and "Number.MAX_SAFE_INTEGER". Stop with "needs_decision" only when no reasonable default exists or the choice is costly to undo (deleting data, changing the product's direction).
 `
     : ''
 }${humanAttestRule(kind)}
@@ -207,7 +209,11 @@ Done criteria: ${i.ticket.doneCriteria}
 
 ${profileBlock(i.project)}
 
-${requestBlock(i.request, 'work')}
+${requestBlock(i.request, 'work')}${
+    i.knownIssues?.length
+      ? `\n${dataBlock('Small issues reviewers noted in the earlier tickets this one builds on (fix them wherever they appear in the files you write; ignore ones outside your scope)', i.knownIssues.map((x) => `- ${x}`).join('\n'))}`
+      : ''
+  }
 
 ${dataBlock('Project document rules', i.project.docRules)}
 
@@ -287,10 +293,11 @@ ${
       : ''
 }${
     i.ticket.type === 'research' || deliverableOf(i.project) === 'document'
-      ? `- Request changes only for errors that would change a conclusion or a key number the CEO will rely on (a wrong or misattributed statistic, a missing required part, a calculation that does not add up). Small slips that do not change the picture (a label, a minor fee left out, one menu price) go in your summary as "minor fixes", with met=true. Measured: a research ticket used all 3 rounds and 8.8M tokens while the last round only fixed a cold-brew label and an electricity surcharge.
+      ? `- Request changes only for errors that would change a conclusion or a key number the CEO will rely on (a wrong or misattributed statistic, a missing required part, a calculation that does not add up). Small slips that do not change the picture (a label, a minor fee left out, one menu price) go in "minorFixes", with met=true. Measured: a research ticket used all 3 rounds and 8.8M tokens while the last round only fixed a cold-brew label and an electricity surcharge.
 `
       : ''
-  }- Problems you notice outside this ticket's scope are not reasons to request changes: list them in "followUps" (title + reason) so the CEO can turn them into tickets with one click.
+  }- Small slips you notice that do not block approval (a wrong label, an internal contradiction, a typo in a number that is not relied on) go in "minorFixes", one short line each naming the file and what to fix. They are passed to the tickets that build on this work and to the final acceptance test, so they get fixed later without another round here.
+- Problems you notice outside this ticket's scope are not reasons to request changes: list them in "followUps" (title + reason) so the CEO can turn them into tickets with one click.
 
 ${dataBlock('System-generated evidence', evidenceText)}
 
@@ -311,7 +318,7 @@ ${requestBlock(i.request, 'review')}
 ## Final answer format (required)
 Write reasons in language "${i.language}". End with exactly one JSON code block:
 \`\`\`json
-{"nonce":"${i.nonce}","kind":"review","verdict":"approve|request_changes","summary":"...","requirements":[${header.requirementIds.map((id) => `{"id":"${id}","met":true,"evidenceIds":[],"reason":"..."}`).join(',')}],"followUps":[]}
+{"nonce":"${i.nonce}","kind":"review","verdict":"approve|request_changes","summary":"...","requirements":[${header.requirementIds.map((id) => `{"id":"${id}","met":true,"evidenceIds":[],"reason":"..."}`).join(',')}],"minorFixes":[],"followUps":[]}
 \`\`\`
 `;
 }

@@ -183,6 +183,18 @@ export class Records {
   }
 
   /** 이 회차의 마지막 성공한 작업 실행(제출). */
+  /**
+   * 검수자가 승인하면서 남긴 작은 실수(마지막 승인 검수 기준). 뒤 업무·인수 시험에 넘긴다.
+   * 실측(2026-10-02, 독서모임 T-58): "같은 장르를 연달아 두지 않는다"와 5·6월 모두 인문이라는 모순을 검수자가 짚고 승인했지만,
+   * 고칠 길이 없어 최종 기획서(T-59)까지 그대로 갔다.
+   */
+  minorFixesOf(ticketId: string): string[] {
+    const last = this.runsForTicket(ticketId)
+      .filter((r) => r.kind === 'review' && r.status === 'succeeded' && r.report?.kind === 'review' && r.report.verdict === 'approve')
+      .at(-1);
+    return last?.report?.kind === 'review' ? (last.report.minorFixes ?? []) : [];
+  }
+
   latestSubmission(ticket: Ticket): RunRecord | null {
     const runs = this.runsForTicket(ticket.id).filter((r) => r.kind === 'work' && r.status === 'succeeded' && r.round === ticket.round);
     return runs.at(-1) ?? null;

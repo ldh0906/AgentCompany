@@ -830,6 +830,7 @@ export class Orchestrator {
         feedback,
         request: this.records.requestOfTicket(next)?.text ?? null,
         delegated: this.delegation.on,
+        knownIssues: next.dependsOn.flatMap((d) => this.records.minorFixesOf(d).map((x) => `${d}: ${x}`)),
         language: this.opts.language,
         colleagues: this.company
           .activeEmployees()

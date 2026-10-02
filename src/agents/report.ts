@@ -60,6 +60,8 @@ export interface ReviewReport {
   requirements: { id: string; met: boolean; evidenceIds: string[]; reason: string }[];
   /** 이 업무 범위 밖에서 발견한 문제(대표가 후속 업무로 만들 수 있게) */
   followUps?: { title: string; reason: string }[];
+  /** 승인은 막지 않는 작은 실수(한 줄씩). 뒤 업무와 인수 시험에 넘겨 고치게 한다. */
+  minorFixes?: string[];
 }
 
 export type AgentReport = WorkReport | ReviewReport;
@@ -168,7 +170,7 @@ export function parseReport(
         summary: r.summary,
         requirements: reqs,
         questions,
-        assumed: (isArr(r.assumed) ? (r.assumed as unknown[]).filter(isStr) : []).slice(0, 10).map((s) => s.slice(0, 500)),
+        assumed: (isArr(r.assumed) ? (r.assumed as unknown[]).filter(isStr) : []).slice(0, 5).map((s) => s.slice(0, 500)),
         followUps: (isArr(r.followUps) ? (r.followUps as Record<string, unknown>[]) : [])
           .filter((f) => isStr(f?.title) && f.title.trim())
           .slice(0, 5)
@@ -211,6 +213,11 @@ export function parseReport(
       summary: r.summary,
       requirements: reqs,
       followUps: followUpsOf(r.followUps),
+      minorFixes: (isArr(r.minorFixes) ? (r.minorFixes as unknown[]).filter(isStr) : [])
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 8)
+        .map((s) => s.slice(0, 300)),
     },
   };
 }

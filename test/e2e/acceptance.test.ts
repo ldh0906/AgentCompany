@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AcceptanceHost } from '../../src/app/acceptance.ts';
-import type { CeoRequest } from '../../src/app/records.ts';
+import type { CeoRequest, RunRecord } from '../../src/app/records.ts';
 import type { Ticket } from '../../src/core/types.ts';
 import { requestTokens } from '../../src/app/cost.ts';
 import { findChrome } from '../../src/app/screen-check.ts';
@@ -93,4 +93,103 @@ test('인수 시험을 끈 프로젝트는 요청이 끝나도 시험하지 않�
   await env.orch.acceptance.onRequestDone(req as unknown as CeoRequest, [{ id: 'T-1', status: 'done' } as Ticket]);
   assert.equal(env.orch.records.request('Q-off'), null, '시험 기록을 만들지 않는다');
   assert.ok(!env.company.store.getSetting('acceptance_room:Q-off'), '시험 방도 만들지 않는다');
+});
+
+/** 인수 시험 답을 바로 넣어 본다(실제 실행 없이): 요청 하나와 nonce를 만들어 onChatReply를 부른다. */
+function replyWith(env: Awaited<ReturnType<typeof setup>>, json: Record<string, unknown>) {
+  const req = {
+    id: 'Q-fix',
+    projectId: env.projectId,
+    text: '기획서',
+    status: 'accepted',
+    employeeId: 'E',
+    runId: null,
+    summary: '',
+    drafts: [],
+    questions: [],
+    ticketIds: [],
+    acceptance: [
+      { id: 'A1', check: 'c1', how: 'h' },
+      { id: 'A2', check: 'c2', how: 'h' },
+      { id: 'A3', check: 'c3', how: 'h' },
+    ],
+    createdAt: new Date().toISOString(),
+  } as unknown as CeoRequest;
+  env.orch.records.saveRequest(req);
+  env.company.store.setSetting('acceptance_nonce:n1', JSON.stringify({ requestId: req.id, round: 1 }));
+  const text = '```json\n' + JSON.stringify({ nonce: 'n1', kind: 'chat', reply: 'r', ...json }) + '\n```';
+  env.orch.acceptance.onChatReply({ id: 'R-1', nonce: 'n1' } as RunRecord, 'r', text);
+  return env.orch.records.request(req.id)!;
+}
+
+const fix = (title: string, scope: string[], forId: string) => ({
+  title,
+  purpose: title,
+  requirements: [{ text: title, evidenceType: 'inspection' }],
+  writeScope: scope,
+  difficulty: 'easy',
+  for: forId,
+});
+
+test('인수 시험 고칠 업무: 같은 파일을 고치는 수정은 한 업무로 합치고, 다른 파일은 따로 만든다', async (t) => {
+  const env = await setup(t);
+  const r = replyWith(env, {
+    results: [
+      { id: 'A1', mark: '⚠', why: '일정' },
+      { id: 'A2', mark: '⚠', why: '이유' },
+      { id: 'A3', mark: '⚠', why: '표' },
+    ],
+    fixes: [
+      fix('회차표 고치기', ['docs/plan.md'], 'A1'),
+      fix('선정 이유 넣기', ['docs/plan.md'], 'A2'),
+      fix('조사표 보완', ['research/**'], 'A3'),
+    ],
+  });
+  const created = r.acceptanceRounds![0]!.fixTickets.map((id) => env.company.requireTicket(id));
+  assert.equal(created.length, 2, '기획서 수정 둘은 하나로');
+  const merged = created.find((x) => x.writeScope.includes('docs/plan.md'))!;
+  assert.equal(merged.requirements.length, 2);
+  assert.match(merged.title, /회차표 고치기 · 선정 이유 넣기/);
+  assert.match(merged.purpose, /A1, A2/);
+});
+
+test('인수 시험: 다 통과해도 검수자가 짚은 작은 실수가 남았으면 고치고, ❓는 대표 할 일로 알린다', async (t) => {
+  const env = await setup(t);
+  const r = replyWith(env, {
+    results: [
+      { id: 'A1', mark: '✅', why: 'ok' },
+      { id: 'A2', mark: '✅', why: 'ok' },
+      { id: 'A3', mark: '❓', why: '도서관(02-449-8855)에 세미나실 요금을 전화로 물어보세요' },
+    ],
+    fixes: [fix('5·6월 장르 표기 맞추기', ['docs/books.md'], 'review')],
+  });
+  assert.equal(r.acceptanceRounds![0]!.fixTickets.length, 1, '검수 메모로 고칠 업무');
+  // 고칠 업무가 없으면 ❓는 알림에 대표 할 일로 남는다
+  const r2 = replyWith(env, {
+    results: [
+      { id: 'A1', mark: '✅', why: 'ok' },
+      { id: 'A3', mark: '❓', why: '도서관에 전화로 요금 확인' },
+    ],
+    fixes: [],
+  });
+  assert.equal(r2.acceptanceRounds![0]!.fixTickets.length, 0);
+  assert.ok(env.orch.desk.notices().some((n) => /대표가 직접 확인할 것: A3 도서관에 전화로 요금 확인/.test(n.body)));
+});
+
+test('검수자의 작은 실수는 마지막 승인 검수에서 가져온다', async (t) => {
+  const env = await setup(t);
+  const review = (id: string, verdict: string, minorFixes: string[]) =>
+    ({
+      id,
+      ticketId: 'T-x',
+      kind: 'review',
+      status: 'succeeded',
+      startedAt: `2026-10-02T00:00:0${id.at(-1) === 'a' ? 1 : id.at(-1) === 'b' ? 2 : 3}Z`,
+      report: { kind: 'review', verdict, minorFixes },
+    }) as unknown as RunRecord;
+  env.orch.records.saveRun(review('R-a', 'approve', ['옛 메모']));
+  env.orch.records.saveRun(review('R-b', 'request_changes', ['반려 때 메모']));
+  env.orch.records.saveRun(review('R-c', 'approve', ['5·6월 장르 표기']));
+  assert.deepEqual(env.orch.records.minorFixesOf('T-x'), ['5·6월 장르 표기']);
+  assert.deepEqual(env.orch.records.minorFixesOf('T-none'), []);
 });

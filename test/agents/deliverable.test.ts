@@ -136,7 +136,7 @@ test('파이썬 검사 추천: pytest라고 적힌 곳만 pytest, 아니면 표�
   assert.equal(pythonTests(files({}), true), null);
 });
 
-test('조사·문서 검수: 결론·핵심 숫자를 바꾸는 오류만 반려, 작은 실수는 "minor fixes"', () => {
+test('조사·문서 검수: 결론·핵심 숫자를 바꾸는 오류만 반려, 작은 실수는 "minorFixes"', () => {
   const review = (p: Project, t: Ticket) =>
     buildReviewPrompt({
       employee: emp,
@@ -150,8 +150,8 @@ test('조사·문서 검수: 결론·핵심 숫자를 바꾸는 오류만 반려
       language: 'ko',
     });
   assert.match(review(doc, ticket('doc', 'inspection')), /Request changes only for errors that would change a conclusion/);
-  assert.match(review(project(), ticket('research', 'inspection')), /minor fixes/);
-  assert.doesNotMatch(review(project(), ticket('impl', 'unit_test')), /minor fixes/);
+  assert.match(review(project(), ticket('research', 'inspection')), /Request changes only for errors that would change a conclusion/);
+  assert.doesNotMatch(review(project(), ticket('impl', 'unit_test')), /Request changes only for errors that would change a conclusion/);
 });
 
 test('대표 요청 원문: 담당자와 검수자 모두 보고, 다른 조각의 조건과도 어긋나지 않게', () => {
@@ -247,4 +247,73 @@ test('전권 위임 중: 기본값이 분명한 작은 결정은 멈추지 않�
   const r = parseReport(text, { kind: 'work', nonce: 'n', requirementIds: ['R1'] });
   assert.ok(r.ok && r.report.kind === 'work');
   assert.deepEqual(r.report.assumed, ['알림 간격 60분(흔한 기본값)']);
+});
+
+test('검수자의 작은 실수(minorFixes): 검수 지시에 칸이 있고, 읽어 들이며, 뒤 업무 지시에 넘어간다', () => {
+  const review = buildReviewPrompt({
+    employee: emp,
+    project: project(),
+    ticket: ticket('doc'),
+    nonce: 'n',
+    diff: '',
+    changedPaths: [],
+    evidence: [],
+    assigneeSummary: '',
+    language: 'ko',
+  });
+  assert.match(review, /"minorFixes":\[\]/);
+  const text =
+    '```json\n' +
+    JSON.stringify({
+      nonce: 'n',
+      kind: 'review',
+      verdict: 'approve',
+      summary: 's',
+      requirements: [{ id: 'R1', met: true, evidenceIds: [], reason: '' }],
+      minorFixes: ['docs/books.md: 5·6월이 둘 다 인문인데 "연달아 같은 장르 없음"이라고 씀', ' ', 7],
+    }) +
+    '\n```';
+  const r = parseReport(text, { kind: 'review', nonce: 'n', requirementIds: ['R1'] });
+  assert.ok(r.ok && r.report.kind === 'review');
+  assert.deepEqual(r.report.minorFixes, ['docs/books.md: 5·6월이 둘 다 인문인데 "연달아 같은 장르 없음"이라고 씀']);
+  const base = { employee: emp, project: project(), ticket: ticket('doc'), nonce: 'n', decisions: [], feedback: null, language: 'ko' };
+  assert.match(
+    buildWorkPrompt({ ...base, knownIssues: ['T-58: 5·6월 장르 표기'] }),
+    /Small issues reviewers noted[\s\S]*T-58: 5·6월 장르 표기/,
+  );
+  assert.doesNotMatch(buildWorkPrompt(base), /Small issues reviewers noted/);
+});
+
+test('인수 시험 지시문: 사람만 확인할 수 있는 것은 ❓, 링크는 시스템 확인 결과를 믿는다', () => {
+  const p = buildAcceptancePrompt({
+    employee: emp,
+    project: project({ summary: 's', mobile: false, game: false, deliverable: 'document' }),
+    request: 'r',
+    tests: [{ id: 'A1', check: 'c', how: 'h' }],
+    tickets: ['- T-57 [done] 조사\n  system link check (passed): 12개 열림'],
+    checks: [],
+    decisions: [],
+    round: 1,
+    maxRounds: 3,
+    nonce: 'n',
+    language: 'ko',
+  });
+  assert.match(p, /a fix ticket cannot make a phone call/);
+  assert.match(p, /You cannot open web pages/);
+  assert.match(p, /"for":"review"/);
+});
+
+test('전권 위임: "assumed"는 대표가 읽는 쉬운 말로, 구현 세부는 빼라고 한다', () => {
+  const w = buildWorkPrompt({
+    employee: emp,
+    project: project(),
+    ticket: ticket('impl'),
+    nonce: 'n',
+    decisions: [],
+    feedback: null,
+    language: 'ko',
+    delegated: true,
+  });
+  assert.match(w, /read by a non-developer CEO/);
+  assert.match(w, /Leave out implementation details/);
 });

@@ -10,6 +10,7 @@ import { extractLastJson, screenStepsOf, type ScreenScenario } from '../agents/r
 import { tr } from '../core/i18n.ts';
 import type { Employee, EvidenceType, Project, Ticket } from '../core/types.ts';
 import { DEFAULT_BUDGET, DIFFICULTIES, RANK_ORDER, deliverableOf, rankOf, type Difficulty } from '../core/types.ts';
+import { scopesOverlap } from '../workspace/workspace.ts';
 import type { OrchHost } from './orch-host.ts';
 import type { AcceptanceRound, CeoRequest, RunRecord } from './records.ts';
 
@@ -123,7 +124,19 @@ export class Acceptance {
         tests: req.acceptance,
         tickets: tickets.map((t) => {
           const sub = this.h.records.latestSubmission(t);
-          return `- ${t.id} [${t.status}] ${t.title}: ${(sub?.summary ?? '').slice(0, 600)}`;
+          // 검수자가 승인하며 남긴 작은 실수: 반영된 결과에 아직 남았는지 시험 때 본다
+          const notes = this.h.records.minorFixesOf(t.id).map((x) => `  reviewer noted (not fixed in that ticket): ${x}`);
+          // 시험 직원은 웹을 열 수 없다: 제출 때 시스템이 확인한 출처 링크 결과를 넘긴다.
+          // 실측(2026-10-02, 독서모임): "링크를 열 수 없어 대표님이 직접 확인하세요"로 대표에게 넘겼다.
+          const links = this.h.records
+            .evidenceFor(t.id)
+            .filter((e) => e.label === '출처 링크 확인' || e.label === 'Source link check')
+            .at(-1);
+          return [
+            `- ${t.id} [${t.status}] ${t.title}: ${(sub?.summary ?? '').slice(0, 600)}`,
+            ...(links ? [`  system link check (${links.passed ? 'passed' : 'FAILED'}): ${links.summary.slice(0, 400)}`] : []),
+            ...notes,
+          ].join('\n');
         }),
         checks,
         screens,
@@ -201,7 +214,10 @@ export class Acceptance {
     };
     const failed = results.filter((r) => r.mark === '⚠');
     const project = this.h.company.store.get<Project>('projects', req.projectId);
-    const fixes = failed.length && project && round <= MAX_FIX_ROUNDS ? this.createFixes(req, project, json, failed, round) : [];
+    // 시험은 모두 통과해도 검수자가 짚은 작은 실수가 남았으면 고칠 업무를 낸다("for":"review")
+    const reviewFixes = (Array.isArray(json?.fixes) ? (json!.fixes as Record<string, unknown>[]) : []).some((f) => f.for === 'review');
+    const fixes =
+      (failed.length || reviewFixes) && project && round <= MAX_FIX_ROUNDS ? this.createFixes(req, project, json, failed, round) : [];
     record.fixTickets = fixes.map((t) => t.id);
     this.save(req, record);
     const room = this.h.company.store.getSetting(`acceptance_room:${req.id}`) ?? '';
@@ -223,6 +239,7 @@ export class Acceptance {
         );
     } else {
       const left = failed.length;
+      const unsure = results.filter((r) => r.mark === '❓');
       this.h.notice(
         left
           ? tr(
@@ -240,6 +257,14 @@ export class Acceptance {
                 '',
               )
             : ''
+        }${
+          // ❓: 사람만 확인할 수 있는 것(전화 문의, 직접 보기). 고칠 업무가 아니라 대표 할 일로 알린다.
+          unsure.length
+            ? tr(
+                `\n대표가 직접 확인할 것: ${unsure.map((f) => `${f.id} ${f.why}`).join(' / ')}`.slice(0, 500),
+                `\nFor you to check: ${unsure.map((f) => `${f.id} ${f.why}`).join(' / ')}`.slice(0, 500),
+              )
+            : ''
         }`,
         room ? `/chat/${encodeURIComponent(room)}` : '/',
       );
@@ -255,9 +280,16 @@ export class Acceptance {
     round: number,
   ): Ticket[] {
     const hasUnit = project.verifyCommands.some((v) => v.evidenceType === 'unit_test');
-    const out: Ticket[] = [];
-    const drafts = (Array.isArray(json?.fixes) ? (json!.fixes as Record<string, unknown>[]) : []).slice(0, 4);
-    for (const f of drafts) {
+    type Fix = {
+      titles: string[];
+      purposes: string[];
+      fors: string[];
+      scope: string[];
+      reqs: { text: string; evidenceType: EvidenceType }[];
+      difficulty: Difficulty;
+    };
+    const parsed: Fix[] = [];
+    for (const f of (Array.isArray(json?.fixes) ? (json!.fixes as Record<string, unknown>[]) : []).slice(0, 4)) {
       const title = typeof f.title === 'string' ? f.title.trim() : '';
       const scope = Array.isArray(f.writeScope)
         ? (f.writeScope as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim() !== '')
@@ -275,23 +307,43 @@ export class Acceptance {
         (DIFFICULTIES as readonly string[]).includes(String(f.difficulty)) && f.difficulty !== 'hard'
           ? (f.difficulty as Difficulty)
           : 'normal';
-      out.push(
-        this.h.company.createTicket(
-          {
-            projectId: project.id,
-            type: 'impl',
-            title: tr(`[인수 ${round}] ${title}`, `[Acceptance ${round}] ${title}`).slice(0, 200),
-            purpose:
-              `${typeof f.purpose === 'string' ? f.purpose : ''}\n${tr('인수 시험에서 떨어진 항목', 'Failed acceptance test')}: ${String(f.for ?? failed.map((x) => x.id).join(', '))}`.trim(),
-            requirements: reqs,
-            doneCriteria: tr('인수 시험 항목을 통과한다', 'The acceptance test passes'),
-            writeScope: scope,
-            difficulty,
-          },
-          { kind: 'orchestrator' },
-        ),
-      );
+      const fx: Fix = {
+        titles: [title],
+        purposes: typeof f.purpose === 'string' && f.purpose.trim() ? [f.purpose.trim()] : [],
+        fors: [String(f.for ?? failed.map((x) => x.id).join(', '))],
+        scope,
+        reqs,
+        difficulty,
+      };
+      // 같은 파일을 고치는 수정은 한 업무로 합친다. 따로 만들면 쓰기 범위가 겹쳐 하나씩 차례로 돌고 검사·검수도 매번 따로 든다.
+      // 실측(2026-10-02, 독서모임): 고칠 업무 3개(T-63·64·65)가 모두 기획서 한 파일을 고쳐 차례로 돌았다.
+      const same = parsed.find((p) => scopesOverlap(p.scope, fx.scope));
+      if (!same) {
+        parsed.push(fx);
+        continue;
+      }
+      same.titles.push(...fx.titles);
+      same.purposes.push(...fx.purposes);
+      same.fors.push(...fx.fors);
+      same.scope = [...new Set([...same.scope, ...fx.scope])];
+      same.reqs.push(...fx.reqs);
+      if (fx.difficulty === 'normal') same.difficulty = 'normal';
     }
-    return out;
+    return parsed.map((f) =>
+      this.h.company.createTicket(
+        {
+          projectId: project.id,
+          type: 'impl',
+          title: tr(`[인수 ${round}] ${f.titles.join(' · ')}`, `[Acceptance ${round}] ${f.titles.join(' · ')}`).slice(0, 200),
+          purpose:
+            `${f.purposes.join('\n')}\n${tr('인수 시험에서 떨어진 항목', 'Failed acceptance test')}: ${[...new Set(f.fors)].join(', ')}`.trim(),
+          requirements: f.reqs.slice(0, 12),
+          doneCriteria: tr('인수 시험 항목을 통과한다', 'The acceptance test passes'),
+          writeScope: f.scope,
+          difficulty: f.difficulty,
+        },
+        { kind: 'orchestrator' },
+      ),
+    );
   }
 }
