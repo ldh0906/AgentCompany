@@ -40,6 +40,8 @@ test('시작 도중 정기 점검이 돌아도 입장 단계를 건너뛰지 않
   const d = await starting;
   assert.equal(d.phase, 'opening');
   assert.equal(Object.keys(d.runs).length, d.participants.length);
+  // 실행이 다 끝나야 임시 폴더를 지울 수 있다(윈도우: 실행 중인 폴더는 지워지지 않는다)
+  await untilPhase(env.orch, d.id, 'decide');
 });
 
 test('전권 위임 중이면 사회자 추천안으로 바로 결정한다', { timeout: 180_000 }, async (t) => {

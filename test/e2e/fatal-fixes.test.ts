@@ -25,11 +25,22 @@ test('수정 요청에 고칠 게 없으면 이전 결과를 그대로 다시 �
   assert.equal(end.round, 2);
 });
 
-test('검수가 막히면(회차 초과) 대표가 검수를 건너뛰고 승인 단계로 보낼 수 있다 — 검증 통과 제출물만', { timeout: 180_000 }, async (t) => {
+test('검수가 막히면(회차 초과) 대표가 검수를 건너뛰고 승인 단계로 보낼 수 있다 — 검증 통과 제출물만', { timeout: 420_000 }, async (t) => {
   const env = await setup(t, { reviewer: 'harsh' });
   const tk = newImplTicket(env);
   // 검수 반려 3회차까지 돌아서 혼자 돌려도 40초쯤 걸린다: 느린 PC에서도 넉넉하게.
-  const held = await driveUntil(env, tk.id, (x) => x.hold !== null, 150_000);
+  // 두 번째 반려에서는 먼저 토론이 열린다(2026-10-02): 결론을 내면 업무가 이어지고, 세 번째 반려로 회차가 다 찬다.
+  let held = await driveUntil(env, tk.id, (x) => x.hold !== null, 150_000);
+  if (held.hold?.reason === 'on_hold') {
+    const d = env.orch.debates.list().find((x) => x.ticketId === tk.id)!;
+    const deadline = Date.now() + 90_000;
+    while (env.orch.debates.get(d.id)!.phase !== 'decide' && Date.now() < deadline) {
+      await env.orch.tick();
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    env.orch.debates.decide(d.id, { text: '검수 지적대로 고친다' });
+    held = await driveUntil(env, tk.id, (x) => x.hold !== null, 150_000);
+  }
   assert.equal(held.hold?.reason, 'needs_decision');
   const next = env.orch.skipReview(tk.id);
   assert.equal(next.status, 'awaiting_approval');
