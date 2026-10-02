@@ -15,7 +15,19 @@ export class GitError extends Error {
   }
 }
 
-const BASE_ARGS = ['-c', 'core.quotepath=false', '-c', 'core.longpaths=true', '-c', 'advice.detachedHead=false'];
+// maintenance.auto=false: 커밋·가져오기마다 git이 스스로 정리(maintenance run --auto)를 띄우지 않게 한다.
+// 실측(2026-10-02): 업무 하나에 git 83번 중 4번이 이 정리였고, 이 PC는 git 한 번 띄우는 데 0.18초가 든다.
+// 정리는 오케스트레이터가 작업 폴더 청소 때(10분마다) 저장소마다 한 번 돌린다(maintainRepo).
+const BASE_ARGS = [
+  '-c',
+  'core.quotepath=false',
+  '-c',
+  'core.longpaths=true',
+  '-c',
+  'advice.detachedHead=false',
+  '-c',
+  'maintenance.auto=false',
+];
 
 export function git(
   args: string[],

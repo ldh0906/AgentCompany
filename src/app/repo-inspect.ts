@@ -170,7 +170,15 @@ export function pythonTests(read: (f: string) => string | null, hasTestsDir: boo
  * npm 스크립트는 실제로 도는 명령(runs)도 알려 준다: 이미 같은 명령이 있으면 겹치는 추천을 하지 않게.
  */
 export async function suggestVerifyAt(repo: string, ref: string): Promise<(VerifySuggestion & { runs?: string })[]> {
+  // 맨 위 목록을 한 번 읽고 있는 파일만 연다. 실측(2026-10-02): 이 PC는 git 한 번 띄우는 데 0.18초라,
+  // 없는 파일까지 9번 열어 보던 것이 업무 하나에 1.6초를 썼다.
+  const top = new Map<string, string>(); // 이름 → blob/tree
+  for (const line of (await git(['ls-tree', ref], repo, { allowFail: true })).stdout.split('\n')) {
+    const m = /^\d+ (\w+) \w+\t(.+)$/.exec(line);
+    if (m) top.set(m[2]!, m[1]!);
+  }
   const show = async (f: string) => {
+    if (top.get(f) !== 'blob') return null;
     const r = await git(['show', `${ref}:${f}`], repo, { allowFail: true });
     return r.code === 0 ? r.stdout : null;
   };
@@ -184,7 +192,7 @@ export async function suggestVerifyAt(repo: string, ref: string): Promise<(Verif
   if (await show('go.mod')) out.push({ label: 'go test', evidenceType: 'unit_test', argv: ['go', 'test', './...'] });
   const files: Record<string, string | null> = {};
   for (const f of ['pytest.ini', 'pyproject.toml', 'setup.cfg', 'requirements.txt', 'main.py', 'app.py']) files[f] = await show(f);
-  const testsDir = (await git(['ls-tree', '-d', '--name-only', ref, 'tests'], repo, { allowFail: true })).stdout.trim() === 'tests';
+  const testsDir = top.get('tests') === 'tree';
   const py = pythonTests((f) => files[f] ?? null, testsDir);
   if (py) out.push(py);
   return out;

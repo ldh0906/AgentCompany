@@ -164,7 +164,8 @@ No services, scheduled tasks or autostart entries are ever created.
 ## Development
 
 ```bash
-npm test          # 90 tests: state machine properties, git workspace, e2e with fake agents, crash/restart
+npm test          # ~270 tests: unit (4 at a time, ~1 min) then e2e with fake agents (2 at a time, ~25 min)
+npm run test:unit # unit tests only
 npm run typecheck
 npm run dev       # demo daemon from source
 npm run dev:web   # Vite dev server for the dashboard (proxy to :4777)

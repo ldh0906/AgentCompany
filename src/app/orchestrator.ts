@@ -1787,12 +1787,15 @@ export class Orchestrator {
             if (age > HOUR) stale.push(full);
           }
         }
-      if (!stale.length) continue;
+      const mirror = existsSync(paths.mirror);
+      if (!stale.length && !mirror) continue;
       await this.withProjectLock(project.id, async () => {
         for (const full of stale) {
           await removeWorktree(paths, full);
           removed++;
         }
+        // git 자동 정리를 끈 대신(git.ts의 maintenance.auto=false) 여기서 저장소마다 한 번: 할 일이 없으면 곧바로 끝난다.
+        if (mirror) await git(['maintenance', 'run', '--auto'], paths.mirror, { allowFail: true });
       });
     }
     return removed;
