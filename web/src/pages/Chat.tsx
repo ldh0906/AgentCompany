@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type Channel, type ChatMessage, type Employee } from '../api.ts';
 import { Link, useCompany, useRoute } from '../App.tsx';
 import { useT } from '../i18n.ts';
-import { Avatar, EmptyState, Icon, Modal, Skeleton, useAction, when } from '../components/ui.tsx';
+import { Avatar, empName, EmptyState, Icon, Modal, Skeleton, useAction, when } from '../components/ui.tsx';
 import { ChipToggles } from '../components/kit.tsx';
 import { isUnread, markRead, unreadMentions } from '../components/unread.ts';
 import { DebatePanel, NewDebateModal } from '../components/debate.tsx';
@@ -170,7 +170,7 @@ function Room({ channel }: { channel: Channel }) {
   const [deciding, setDeciding] = useState<string | null>(null);
   const [quote, setQuote] = useState<string>('');
   const bodyRef = useRef<HTMLDivElement>(null);
-  const { run } = useAction();
+  const { busy, run } = useAction();
 
   const load = () => void api<ChatMessage[]>(`channels/${encodeURIComponent(channel.id)}/messages`).then(setMessages);
   useEffect(load, [channel.id, channel.lastMessageAt]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -209,19 +209,20 @@ function Room({ channel }: { channel: Channel }) {
             )}
           </div>
           {channel.topic && <div className="sub">{channel.topic}</div>}
+          {/* 누가 들어와 있는지 이름으로(머리글자만으로는 Claude·Codex 직원이 모두 "C"라 구분이 안 됐다, 대표 요청 2026-10-03).
+              토론방은 방 구성원이 아니어도 토론 참가자·사회자를 함께 보여 준다. */}
+          <div className="room-members">
+            <span className="sub">{ko ? '참여' : 'In room'}</span>
+            {[...new Set([...channel.members, ...(debate ? [...debate.participants, debate.moderator] : [])])].map((m) => (
+              <span key={m} className="chip member">
+                {m === 'ceo' ? <span className="avatar ceo">★</span> : <Avatar employees={employees} id={m} />}
+                {m === 'ceo' ? (ko ? '대표' : 'CEO') : empName(employees, m)}
+                {debate?.moderator === m && <span className="sub">{ko ? '· 사회' : '· moderator'}</span>}
+              </span>
+            ))}
+          </div>
         </div>
         <div className="row">
-          <span className="members">
-            {channel.members.map((m) =>
-              m === 'ceo' ? (
-                <span key={m} className="avatar ceo" title={ko ? '대표' : 'CEO'}>
-                  ★
-                </span>
-              ) : (
-                <Avatar key={m} employees={employees} id={m} />
-              ),
-            )}
-          </span>
           <label className="check-row small">
             <input type="checkbox" checked={showPerms} onChange={() => setShowPerms(!showPerms)} />
             {ko ? `권한 처리 보기 (${permCount})` : `Permissions (${permCount})`}
@@ -251,6 +252,7 @@ function Room({ channel }: { channel: Channel }) {
               prev={shown[i - 1]}
               onDecide={() => setDeciding(m.text)}
               onQuote={() => setQuote(`> ${nameOf(employees, m.author, ko)}: ${m.text.split('\n')[0]!.slice(0, 120)}\n`)}
+              followUpBusy={busy}
               onFollowUp={() =>
                 run(
                   () => api(`chat/${m.id}/followup`, { body: {} }),
@@ -350,12 +352,14 @@ function Message({
   onDecide,
   onQuote,
   onFollowUp,
+  followUpBusy = false,
 }: {
   m: ChatMessage;
   prev?: ChatMessage;
   onDecide: () => void;
   onQuote: () => void;
   onFollowUp: () => void;
+  followUpBusy?: boolean;
 }) {
   const { state } = useCompany();
   const { lang } = useT();
@@ -402,7 +406,7 @@ function Message({
                 {ko ? `비서실장에게 요청함 (${m.followUp.requestId})` : `Requested (${m.followUp.requestId})`}
               </span>
             ) : (
-              <button className="btn small primary" onClick={onFollowUp}>
+              <button className="btn small primary" disabled={followUpBusy} onClick={onFollowUp}>
                 <Icon name="plus" size={12} /> {ko ? '업무로 만들기 (비서실장에게)' : 'Make it a ticket'}
               </button>
             )}

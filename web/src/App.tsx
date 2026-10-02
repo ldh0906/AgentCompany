@@ -12,6 +12,7 @@ import { NewTicket } from './pages/NewTicket.tsx';
 import { ChatPage } from './pages/Chat.tsx';
 import { Live } from './pages/Live.tsx';
 import { isUnread, unreadMentions } from './components/unread.ts';
+import { saveTheme, savedTheme, type Theme } from './theme.ts';
 
 // ---- 라우팅(경로 기반, 의존성 없음) ----
 const RouteContext = createContext<{ path: string; go: (p: string) => void }>({ path: '/', go: () => {} });
@@ -111,6 +112,7 @@ function Shell() {
   const runningNow = (state?.runs ?? []).filter((r) => r.status === 'running').length;
 
   // 승인 알림: 탭 제목에 건수, 켜 두면 새 승인 요청마다 데스크톱 알림.
+  const [theme, setTheme] = useState<Theme>(savedTheme);
   const [notify, setNotify] = useState(() => {
     try {
       return localStorage.getItem('ac-notify') === '1' && 'Notification' in window && Notification.permission === 'granted';
@@ -337,6 +339,18 @@ function Shell() {
             <option value="ko">한국어</option>
             <option value="en">English</option>
           </select>
+          <button
+            className="btn small"
+            onClick={() => {
+              const next = theme === 'dark' ? 'light' : 'dark';
+              saveTheme(next);
+              setTheme(next);
+            }}
+            title={lang === 'ko' ? (theme === 'dark' ? '화이트 모드로' : '다크 모드로') : theme === 'dark' ? 'Light mode' : 'Dark mode'}
+            aria-label={lang === 'ko' ? '화면 색 바꾸기' : 'Switch theme'}
+          >
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
         </div>
       </aside>
       <main className="main">

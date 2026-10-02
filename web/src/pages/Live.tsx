@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { api, type ActivityItem, type RunSummary } from '../api.ts';
 import { Link, useCompany, useRoute } from '../App.tsx';
 import { useT } from '../i18n.ts';
-import { Avatar, CliChip, EmptyState, Skeleton, useAction, when } from '../components/ui.tsx';
+import { Avatar, CliChip, Skeleton, useAction, when } from '../components/ui.tsx';
 import { fmtTokens } from '../components/usage.tsx';
 
 interface Activity {
@@ -146,7 +146,8 @@ export function Live({ runId }: { runId: string | null }) {
           </div>
         </div>
       </div>
-      <div className="live-layout">
+      {/* 고른 실행이 없으면 목록만 넓게 보인다(빈 "실행을 고르세요" 칸은 대표가 왜 있는지 몰랐다, 2026-10-03) */}
+      <div className={`live-layout ${selected ? '' : 'solo'}`}>
         <div className="live-list">
           <div className="nav-label">{ko ? `진행 중 ${running.length}` : `Running ${running.length}`}</div>
           {running.length === 0 && (
@@ -164,13 +165,11 @@ export function Live({ runId }: { runId: string | null }) {
             <Card key={r.id} r={r} />
           ))}
         </div>
-        <div className="live-detail">
-          {selected ? (
+        {selected && (
+          <div className="live-detail">
             <RunLog key={selected} runId={selected} onClose={() => go('/live')} />
-          ) : (
-            <EmptyState icon="activity">{ko ? '실행을 고르세요' : 'Pick a run'}</EmptyState>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </>
   );

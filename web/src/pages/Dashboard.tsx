@@ -3,7 +3,7 @@ import { api, type Approval, type DomainEvent, type State } from '../api.ts';
 import { Link, useCompany, useRoute } from '../App.tsx';
 import { ACCESS, josa, useT } from '../i18n.ts';
 import { MAX_ACTIVE_EMPLOYEES } from '../../../src/core/types.ts';
-import { Avatar, empName, EmptyState, HoldChip, Icon, Modal, needsCeo, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
+import { Avatar, empName, EmptyState, Icon, Modal, needsCeo, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
 import { CliConnect, Segmented, useCliStatus } from '../components/kit.tsx';
 import { UsagePanel } from '../components/usage.tsx';
 import { RequestBox } from './Requests.tsx';
@@ -706,41 +706,7 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
             </div>
           )}
           <UsagePanel />
-          <div className="card">
-            <h2>
-              <span className="row">
-                <Icon name="bolt" /> {t('inProgress')}
-              </span>
-            </h2>
-            <div className="list">
-              {active.length === 0 ? (
-                <EmptyState icon="bolt">
-                  <div>{t('empty')}</div>
-                  {state.projects.length > 0 && (
-                    <button className="btn small" style={{ marginTop: 10 }} onClick={onNewTicket}>
-                      <Icon name="plus" /> {t('newTicket')}
-                    </button>
-                  )}
-                </EmptyState>
-              ) : (
-                active.map((x) => (
-                  <div className="item" key={x.id}>
-                    <div className="title">
-                      <Link to={`/tickets/${x.id}`}>
-                        {x.id} · {x.title}
-                      </Link>{' '}
-                      <StatusChip status={x.status} /> <HoldChip ticket={x} />
-                    </div>
-                    <div className="meta">
-                      {t('assignee')} {empName(state.employees, x.assigneeId)} · {t('reviewer')} {empName(state.employees, x.reviewerId)} ·{' '}
-                      {x.ownerId ? `${ko ? '책임' : 'Owner'} ${empName(state.employees, x.ownerId)} · ` : ''}
-                      {t('round')} {x.round}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+          {/* "진행 중" 업무 목록은 뺐다: 업무판·작업 현황과 겹치고 오른쪽만 길어졌다(대표 요청 2026-10-03). 위 숫자 칸은 남긴다. */}
           <ProjectsPanel />
         </div>
       </div>
