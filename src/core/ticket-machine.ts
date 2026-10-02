@@ -529,7 +529,14 @@ function requestChanges(
           'needs_decision',
           'changes_requested',
           now,
-          tr(`수정 회차 ${ticket.budget.maxRounds}회 초과`, `Revision limit exceeded (${ticket.budget.maxRounds} rounds)`),
+          // 왜 멈췄는지 함께 적는다. 실측(2026-10-03, 4777): "수정 회차 3회 초과"만 보여, 깨진 검사 하나가 원인인 것을 대표가 알 수 없었다.
+          `${tr(`수정 회차 ${ticket.budget.maxRounds}회 초과`, `Revision limit exceeded (${ticket.budget.maxRounds} rounds)`)}${
+            source === 'verification'
+              ? tr(' — 마지막 실패: 시스템 검증 실패', ' — last failure: system verification failed')
+              : source === 'review'
+                ? tr(' — 마지막 실패: 검수 반려', ' — last failure: review rejected')
+                : ''
+          }\n${reason.slice(0, 600)}`,
         ),
       },
       events: [

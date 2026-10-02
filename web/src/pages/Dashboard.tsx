@@ -637,15 +637,39 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
                           {ko ? '허용·되돌리기 고르기' : 'Allow or revert'}
                         </Link>
                       ) : (
-                        <button
-                          className="btn small"
-                          disabled={busy}
-                          onClick={() =>
-                            run(() => api(`tickets/${x.id}/release`, { body: {} }), ko ? '보류를 해제했습니다.' : 'Released.').then(reload)
-                          }
-                        >
-                          {t('release')}
-                        </button>
+                        <span className="row">
+                          {/* 검증 실패로 멈춘 업무: 검사를 고친 뒤 직원을 다시 돌리지 않고 마지막 제출물을 다시 검증한다(토큰 없음).
+                              실측(2026-10-03, 4777): 깨진 검사 하나로 7개가 멈췄는데 "다시 검증"은 업무 화면에만 있었다. */}
+                          {/검증 실패|verification failed|수정 회차 \d+회 초과|Revision limit/i.test(x.hold!.note) && (
+                            <button
+                              className="btn small primary"
+                              disabled={busy}
+                              title={
+                                ko
+                                  ? '직원에게 다시 시키지 않고 마지막 제출물을 다시 검사합니다(토큰 없음)'
+                                  : 'Re-check the last submission without another round'
+                              }
+                              onClick={() =>
+                                run(() => api(`tickets/${x.id}/reverify`, { body: {} }), ko ? '다시 검증합니다.' : 'Re-verifying.').then(
+                                  reload,
+                                )
+                              }
+                            >
+                              {ko ? '다시 검증' : 'Re-verify'}
+                            </button>
+                          )}
+                          <button
+                            className="btn small"
+                            disabled={busy}
+                            onClick={() =>
+                              run(() => api(`tickets/${x.id}/release`, { body: {} }), ko ? '보류를 해제했습니다.' : 'Released.').then(
+                                reload,
+                              )
+                            }
+                          >
+                            {t('release')}
+                          </button>
+                        </span>
                       )}
                     </div>
                     {x.hold!.note && <div className="note">{x.hold!.note}</div>}
