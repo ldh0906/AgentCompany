@@ -176,7 +176,14 @@ export class Debates {
     if (d.ticketId)
       this.h.holdTicket(d.ticketId, tr(`토론 중: ${topic.slice(0, 80)} (결론이 나면 이어갑니다)`, `In debate: ${topic.slice(0, 80)}`));
     this.save(d);
-    await this.launchPhaseSafe(d.id);
+    // 시작도 단계 넘기기와 같은 잠금 안에서: 사본 준비(수 초) 동안 tick이 단계를 넘기지 못하게.
+    // 실측(2026-10-02, 가계부 할부 토론): 시작 직후 tick이 "기대 0, 답 0"으로 보고 반박까지 띄워 8개 실행이 함께 돌았다.
+    this.advancing.add(d.id);
+    try {
+      await this.launchPhaseSafe(d.id);
+    } finally {
+      this.advancing.delete(d.id);
+    }
     return this.get(d.id)!;
   }
 
@@ -197,13 +204,13 @@ export class Debates {
     );
     const project = d.projectId ? this.h.company.store.get<Project>('projects', d.projectId) : null;
     // 읽을 사본은 토론당 한 번 만든다(단계마다 다시 맞추면 git 오류로 다음 단계가 시작되지 않았다).
+    this.update(id, (x) => ((x.runs = {}), (x.nonces = {}), (x.expected = who.length)));
     const cwd = d.dir ?? (await this.h.debateDir(d.projectId, d.ticketId, d.id));
     if (!d.dir) this.update(id, (x) => (x.dir = cwd));
     const decisions = d.projectId ? this.h.records.decisions(d.projectId, 'current').map((x) => `- [${x.id}] ${x.text}`) : [];
     const named = (m: Record<string, string>) =>
       Object.entries(m).map(([id, text]) => ({ name: this.h.nameOf(id), text: text || '(no answer)' }));
     // 실측(테스트, 2026-10-02): 빠른 답이 실행 번호 저장보다 먼저 와서 입장이 비었다. nonce를 먼저 저장하고 답은 nonce로 찾는다.
-    this.update(id, (x) => ((x.runs = {}), (x.nonces = {}), (x.expected = who.length)));
     for (const empId of who) {
       const employee = this.h.company.employees().find((e) => e.id === empId)!;
       const nonce = randomBytes(6).toString('hex');
@@ -291,8 +298,10 @@ export class Debates {
       const r = this.h.records.run(runId);
       return !r || (!['prepared', 'running'].includes(r.status) && Date.now() - Date.parse(r.endedAt ?? r.startedAt) > 30_000);
     };
-    const allRecorded = recorded >= (d.expected ?? 0);
+    if (d.expected === undefined) return; // 이 단계 실행이 아직 준비되지 않았다
+    const allRecorded = recorded >= d.expected;
     if (!allRecorded && (Object.keys(d.runs).length < (d.expected ?? 0) || !Object.values(d.runs).every(ended))) return;
+    delete d.expected; // 다음 단계의 실행 수는 그 단계를 띄울 때 정한다
     if (d.phase === 'opening') d.phase = 'rebuttal';
     else if (d.phase === 'rebuttal') d.phase = 'summary';
     else {

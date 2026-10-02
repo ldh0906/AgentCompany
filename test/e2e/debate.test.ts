@@ -31,6 +31,17 @@ test('대표가 연 토론: 각자 입장과 반박이 방에 올라오고, 사�
   assert.ok(env.orch.records.decisions(env.projectId, 'current').some((x) => x.text.includes('저장은 JSON 파일로 한다')));
 });
 
+test('시작 도중 정기 점검이 돌아도 입장 단계를 건너뛰지 않는다', { timeout: 120_000 }, async (t) => {
+  // 실측(2026-10-02, 가계부 할부 토론): 사본 준비 중 tick이 "기대 0, 답 0"으로 보고 반박까지 띄웠다.
+  const env = await setup(t);
+  const starting = env.orch.debates.start({ topic: '저장 방식', origin: 'ceo', projectId: env.projectId });
+  await env.orch.tick();
+  await env.orch.tick();
+  const d = await starting;
+  assert.equal(d.phase, 'opening');
+  assert.equal(Object.keys(d.runs).length, d.participants.length);
+});
+
 test('전권 위임 중이면 사회자 추천안으로 바로 결정한다', { timeout: 180_000 }, async (t) => {
   const env = await setup(t);
   env.orch.delegation.set(true);
