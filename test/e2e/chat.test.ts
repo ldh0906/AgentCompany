@@ -237,3 +237,18 @@ test('대화 답장 읽기: 프로필 제안이 없거나 틀리면 null', () =>
   assert.equal(parseChatReply('```json\n{"nonce":"n","kind":"chat","reply":"네","profile":{"summary":""}}\n```', 'n')!.profile, null);
   assert.equal(parseChatReply('```json\n{"nonce":"n","kind":"chat","reply":"네"}\n```', 'n')!.profile, null);
 });
+
+test('1:1 방은 그 직원만: 답에서 동료를 불러도 아무도 들어오지 않고, 구성원을 늘릴 수 없다', { timeout: 60_000 }, async (t) => {
+  const env = await setup(t);
+  const [impl, qa] = env.company.employees();
+  const dm = env.orch.chat.ensureDm(impl!.id);
+  // 가짜 직원은 받은 말에 부를이름:"…"이 있으면 그 사람을 부른다(그룹 방이면 qa가 답한다)
+  await env.orch.ceoMessage(dm.id, `부를이름:"${qa!.name}"`);
+  await until(env, () => env.orch.chat.messages(dm.id).some((m) => m.author === impl!.id));
+  await env.orch.idle();
+  const authors = new Set(env.orch.chat.messages(dm.id).map((m) => m.author));
+  assert.ok(!authors.has(qa!.id), '다른 직원은 1:1 방에서 답하지 않는다');
+  assert.deepEqual(env.orch.chat.channel(dm.id)!.members, ['ceo', impl!.id]);
+  assert.throws(() => env.orch.chat.addMembers(dm.id, [qa!.id]), /1:1/);
+  assert.ok(!env.orch.chat.channels().some((c) => c.kind === 'group'), '1:1 방에서 다른 방을 열지 않는다');
+});

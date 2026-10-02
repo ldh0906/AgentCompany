@@ -1374,6 +1374,10 @@ export class Orchestrator {
   private async dispatchChat(channelId: string, employeeId: string, depth: number, trigger: ChatMessage): Promise<void> {
     const employee = this.company.employees().find((e) => e.id === employeeId);
     if (!employee) return;
+    // 1:1 방은 그 직원만 읽는다: 다른 직원을 불러 대화 기록을 보게 하지 않는다.
+    // 대표 요청(2026-10-03): "1대1 채팅방에서는 다른 얘들이 읽으면 안된다. 오로지 1대1로 대화하는 세션이다."
+    const room = this.chat.channel(channelId);
+    if (room?.kind === 'dm' && !room.members.includes(employeeId)) return;
     if (!employee.active || employee.removedAt) {
       this.chat.post(
         channelId,
@@ -1455,7 +1459,7 @@ export class Orchestrator {
       decisions: project ? this.records.decisions(project.id, 'current') : [],
       nonce,
       language: this.opts.language,
-      canOpenRoom: depth < Orchestrator.CHAT_MAX_DEPTH,
+      canOpenRoom: depth < Orchestrator.CHAT_MAX_DEPTH && this.chat.channel(channelId)?.kind !== 'dm',
       board: this.boardSummary(projectId),
     });
     const runId = await this.launch({
@@ -1520,7 +1524,8 @@ export class Orchestrator {
         [...parsed.mentions.map(byName), ...msg.mentions].filter((x): x is string => Boolean(x) && x !== 'ceo' && x !== run.employeeId),
       );
       for (const id of called) await this.dispatchChat(channelId, id, depth + 1, msg);
-      if (parsed.openRoom && depth < Orchestrator.CHAT_MAX_DEPTH) {
+      // 1:1 방에서는 다른 방을 열지 않는다(1:1 대화가 다른 직원에게 흘러가지 않게)
+      if (parsed.openRoom && depth < Orchestrator.CHAT_MAX_DEPTH && this.chat.channel(channelId)?.kind !== 'dm') {
         const members = parsed.openRoom.members.map(byName).filter((x): x is string => Boolean(x) && x !== run.employeeId);
         const src = this.chat.channel(channelId)!;
         const room = this.chat.createGroup({

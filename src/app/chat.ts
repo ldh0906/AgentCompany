@@ -209,6 +209,11 @@ export class Chat {
   addMembers(channelId: string, ids: string[]): Channel {
     const c = this.channel(channelId);
     if (!c) throw new Error(tr('방을 찾을 수 없습니다.', 'Channel not found.'));
+    // 1:1 방은 대표와 그 직원만: 다른 직원을 들이지 않는다(대표 요청 2026-10-03)
+    if (c.kind === 'dm' && ids.some((id) => !c.members.includes(id)))
+      throw new Error(
+        tr('1:1 방에는 다른 사람을 들일 수 없습니다. 그룹 방을 만들어 주세요.', 'A 1:1 room cannot take more members. Open a group room.'),
+      );
     return this.save({ ...c, members: [...new Set([...c.members, ...ids])] });
   }
 
