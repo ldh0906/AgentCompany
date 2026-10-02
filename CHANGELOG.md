@@ -9,6 +9,14 @@
 - Blind cross-review tickets with a claim ledger: independent analysis, anonymized cross-verdicts, mandatory rebuttal, deterministic synthesis, unresolved disputes escalated to the CEO.
 - Decision log with statuses (current, superseded, withdrawn, …); only current decisions bind employees.
 
+### Beyond single tickets
+- Projects say what they produce (screens, documents and research, programs without a screen); drafting, review and approval checks follow it. Research tickets may search the web, and every cited link is opened by the app.
+- Request-level acceptance tests (V-model): written at drafting time, checked against the merged result (with screenshots for screens), failed items become fix tickets for up to two rounds; can be turned off per project.
+- Full delegation: the top-ranked employee makes the CEO's routine decisions, all logged; checks only the CEO can do are kept for later.
+- Debates: positions, rebuttals and a moderator summary with options for the CEO to decide, opened by the CEO or flagged while drafting.
+- Costs: per-ticket estimates and budgets, an optional daily limit, and per-request totals including acceptance tests and debates.
+- Windows launcher: `npm run build:exe` builds `dist/Agent Company.exe`.
+
 ### Evidence and review
 - The orchestrator commits the worktree itself, checks write scope, protected paths, unexpected git refs and the origin working tree, and runs verify commands in a clean checkout.
 - Requirements declare the minimum evidence (`inspection`, `static_check`, `unit_test`, `runtime`, `human_attest`); weaker evidence cannot pass review.

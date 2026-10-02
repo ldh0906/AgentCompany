@@ -13,7 +13,7 @@ If you just want to see the flow, run `npm run demo` instead (no subscription ne
 ## 2. Install and check
 
 ```bash
-git clone https://github.com/<you>/agent-company && cd agent-company
+git clone https://github.com/ldh0906/AgentCompany && cd AgentCompany
 npm install && npm run build && npm link   # installs the `agent-company` command
 agent-company doctor
 ```

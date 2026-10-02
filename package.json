@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "description": "Run Claude Code, Codex and Antigravity as a local AI dev team: tickets, independent review, evidence-gated completion and human approval. No API keys.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ldh0906/AgentCompany.git"
+  },
+  "homepage": "https://github.com/ldh0906/AgentCompany#readme",
+  "bugs": "https://github.com/ldh0906/AgentCompany/issues",
   "type": "module",
   "bin": {
     "agent-company": "dist/cli/main.js"

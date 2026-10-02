@@ -29,7 +29,7 @@ Agent Company treats this as a **state machine problem, not a prompting problem*
 ## Try it in 30 seconds (no subscription needed)
 
 ```bash
-git clone https://github.com/<you>/agent-company && cd agent-company
+git clone https://github.com/ldh0906/AgentCompany && cd AgentCompany
 npm install && npm run build
 npm run demo
 ```
@@ -70,6 +70,14 @@ agent-company shortcut   # Windows: desktop + Start menu icon that starts it wit
 | Programs without a screen (API, CLI, Python) | the output of demo commands the employee leaves, run by the app on a clean copy and read by a QA colleague |
 
 Research tickets may use web search; other tickets cannot.
+
+**Beyond single tickets.**
+
+- **Acceptance tests (V-model).** When drafting, the chief of staff writes 2–6 acceptance tests for the whole request in the CEO's words. When every ticket is done, a QA employee checks the merged result against them (with screenshots for screen projects) and failed items become fix tickets, for at most two rounds. It can be switched off per project.
+- **Full delegation.** One switch hands the CEO's routine decisions (confirming drafts, answering questions, budgets, scope requests, approvals, debates) to the top-ranked employee. Every decision is logged, and checks only the CEO can do are kept as "check later".
+- **Debates.** Before a big fork, the CEO (or the chief of staff, while drafting) opens a debate: positions, rebuttals, then a moderator summary with options and a recommendation for the CEO to decide. The app shows the estimated token cost first.
+- **Costs.** Each ticket has a token estimate and budget, there is an optional daily limit, and every request shows what it cost, including acceptance tests and debates.
+- **Windows launcher.** `npm run build:exe` builds `dist/Agent Company.exe`, which starts the app without a console window.
 
 By default employees run in **app-only CLI profiles** (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) so your personal plugins, hooks and MCP servers do not leak into employee runs. Log in once per profile — `doctor` prints the exact command. Agent Company never reads credential files.
 
