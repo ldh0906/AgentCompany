@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Link, useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
 import { Avatar, EmptyState, empName, HoldChip, Icon, needsCeo, Skeleton, useAction, when } from '../components/ui.tsx';
-import { api } from '../api.ts';
+import { api, type Ticket } from '../api.ts';
+import { Segmented } from '../components/kit.tsx';
 import { fmtTokens } from '../components/usage.tsx';
 
 const COLUMNS: { key: string; statuses: string[]; dot: string; ko: string; en: string }[] = [
@@ -46,6 +47,40 @@ const COLUMNS: { key: string; statuses: string[]; dot: string; ko: string; en: s
 ];
 const LIVE = ['in_progress', 'verifying', 'in_review', 'integrating'];
 
+// 목록 보기(기본): Linear 목록처럼 묶음마다 한 줄에 하나. 대표 요청(2026-10-03): "업무판도 같은 방식으로 정리해줘".
+// 칸반은 카드가 커서 완료 칸이 끝없이 길어졌다. 완료·취소는 접어 둔다.
+const GROUPS: { key: string; ko: string; en: string; open: boolean; pick: (t: Ticket) => boolean }[] = [
+  {
+    key: 'you',
+    ko: '대표 차례',
+    en: 'Your turn',
+    open: true,
+    pick: (t) => t.status === 'awaiting_approval' || t.status === 'integrating' || needsCeo(t),
+  },
+  {
+    key: 'working',
+    ko: '진행 중',
+    en: 'In progress',
+    open: true,
+    pick: (t) => ['in_progress', 'verifying', 'in_review', 'changes_requested'].includes(t.status) && !needsCeo(t),
+  },
+  {
+    key: 'waiting',
+    ko: '시작 전',
+    en: 'Not started',
+    open: true,
+    pick: (t) => ['received', 'analyzing', 'backlog', 'assigned'].includes(t.status) && !needsCeo(t),
+  },
+  { key: 'done', ko: '완료', en: 'Done', open: false, pick: (t) => t.status === 'done' },
+  {
+    key: 'closed',
+    ko: '취소·실패',
+    en: 'Cancelled or failed',
+    open: false,
+    pick: (t) => t.status === 'cancelled' || t.status === 'failed',
+  },
+];
+
 export function Board({ onNewTicket }: { onNewTicket?: () => void }) {
   const { state, reload } = useCompany();
   const { busy, run } = useAction();
@@ -53,6 +88,14 @@ export function Board({ onNewTicket }: { onNewTicket?: () => void }) {
   const [q, setQ] = useState('');
   const [who, setWho] = useState('');
   const [project, setProject] = useState('');
+  const [view, setView] = useState<'list' | 'kanban'>(() => {
+    try {
+      return localStorage.getItem('ac-board-view') === 'kanban' ? 'kanban' : 'list';
+    } catch {
+      return 'list';
+    }
+  });
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   if (!state) return <Skeleton />;
   const ko = lang === 'ko';
   const label = (k: string) =>
@@ -75,8 +118,8 @@ export function Board({ onNewTicket }: { onNewTicket?: () => void }) {
           <h1>{t('nav_board')}</h1>
           <div className="sub">
             {ko
-              ? '카드는 상태기계가 옮깁니다. 직원의 말이 아니라 증거로 움직입니다.'
-              : 'Cards move by the state machine, on evidence, not on claims.'}
+              ? '업무는 상태기계가 옮깁니다. 직원의 말이 아니라 증거로 움직입니다. 줄을 누르면 자세히 봅니다.'
+              : 'Tickets move by the state machine, on evidence, not on claims.'}
           </div>
         </div>
         {onNewTicket && state.projects.length > 0 && (
@@ -125,6 +168,21 @@ export function Board({ onNewTicket }: { onNewTicket?: () => void }) {
               ))}
             </select>
           )}
+          <Segmented
+            value={view}
+            onChange={(v) => {
+              setView(v);
+              try {
+                localStorage.setItem('ac-board-view', v);
+              } catch {
+                // 저장이 막혀 있으면 이번 창에서만
+              }
+            }}
+            options={[
+              { value: 'list', label: ko ? '목록' : 'List' },
+              { value: 'kanban', label: ko ? '칸반' : 'Kanban' },
+            ]}
+          />
           {/* 열린 일 모두 정리(대표 요청 2026-10-03: "현재 작업중인 애들 다 날릴수있나. 다시 시작하게") */}
           {(open > 0 || drafts > 0) && (
             <button
@@ -164,6 +222,54 @@ export function Board({ onNewTicket }: { onNewTicket?: () => void }) {
               </button>
             )}
           </EmptyState>
+        </div>
+      ) : view === 'list' ? (
+        <div className="grid" style={{ alignContent: 'start' }}>
+          {GROUPS.map((g) => {
+            const items = tickets.filter(g.pick).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+            if (!items.length) return null;
+            const isOpen = openGroups[g.key] ?? g.open;
+            return (
+              <div className="card board-group" key={g.key}>
+                <button className="board-group-head" onClick={() => setOpenGroups({ ...openGroups, [g.key]: !isOpen })}>
+                  <Icon name={isOpen ? 'chevron-down' : 'chevron-right'} size={14} />
+                  <b>{ko ? g.ko : g.en}</b> <span className="chip">{items.length}</span>
+                </button>
+                {isOpen && (
+                  <div className="list">
+                    {items.map((x) => {
+                      const tokens = usage?.byTicket[x.id]?.total ?? 0;
+                      const live = LIVE.includes(x.status) && !x.hold;
+                      return (
+                        <Link to={`/tickets/${x.id}`} className="board-row" key={x.id}>
+                          <span className="inbox-id">
+                            {live && <span className="live-dot" />}
+                            {x.id}
+                          </span>
+                          <span className="board-title">{x.title}</span>
+                          <span className="board-state">
+                            {x.hold ? (
+                              <HoldChip ticket={x} />
+                            ) : (
+                              <span className="chip">
+                                {status(x.status)}
+                                {x.round > 1 ? ` R${x.round}` : ''}
+                              </span>
+                            )}
+                          </span>
+                          <span className="board-who sub">
+                            {x.assigneeId ? empName(state.employees, x.assigneeId) : ko ? '미배정' : 'Unassigned'}
+                          </span>
+                          <span className="sub board-num">{tokens > 0 ? fmtTokens(tokens, lang) : ''}</span>
+                          <span className="sub board-num">{when(x.updatedAt)}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="board">
