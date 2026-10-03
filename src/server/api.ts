@@ -402,6 +402,8 @@ export class Api {
         return this.orch.attest(id!, str(b, 'requirementId'), str(b, 'note', { optional: true, max: 2000 }));
       case 'POST tickets/:id/release':
         return this.orch.releaseHold(id!);
+      case 'POST work-clear':
+        return this.orch.clearOpenWork();
       case 'POST tickets/:id/cancel':
         return this.orch.cancel(id!, str(b, 'reason', { optional: true }) || tr('대표가 취소했습니다.', 'Canceled by the CEO.'));
 

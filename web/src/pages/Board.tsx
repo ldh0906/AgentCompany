@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link, useCompany } from '../App.tsx';
 import { useT } from '../i18n.ts';
-import { Avatar, EmptyState, empName, HoldChip, Icon, needsCeo, Skeleton, when } from '../components/ui.tsx';
+import { Avatar, EmptyState, empName, HoldChip, Icon, needsCeo, Skeleton, useAction, when } from '../components/ui.tsx';
+import { api } from '../api.ts';
 import { fmtTokens } from '../components/usage.tsx';
 
 const COLUMNS: { key: string; statuses: string[]; dot: string; ko: string; en: string }[] = [
@@ -46,7 +47,8 @@ const COLUMNS: { key: string; statuses: string[]; dot: string; ko: string; en: s
 const LIVE = ['in_progress', 'verifying', 'in_review', 'integrating'];
 
 export function Board({ onNewTicket }: { onNewTicket?: () => void }) {
-  const { state } = useCompany();
+  const { state, reload } = useCompany();
+  const { busy, run } = useAction();
   const { t, status, lang, difficulty } = useT();
   const [q, setQ] = useState('');
   const [who, setWho] = useState('');
@@ -63,6 +65,7 @@ export function Board({ onNewTicket }: { onNewTicket?: () => void }) {
       (!project || x.projectId === project),
   );
   const open = state.tickets.filter((x) => !['done', 'failed', 'cancelled'].includes(x.status)).length;
+  const drafts = state.requests.filter((r) => ['drafting', 'drafted', 'failed'].includes(r.status)).length;
   const yourTurn = state.tickets.filter((x) => x.status === 'awaiting_approval' || needsCeo(x)).length;
 
   return (
@@ -121,6 +124,27 @@ export function Board({ onNewTicket }: { onNewTicket?: () => void }) {
                 </option>
               ))}
             </select>
+          )}
+          {/* 열린 일 모두 정리(대표 요청 2026-10-03: "현재 작업중인 애들 다 날릴수있나. 다시 시작하게") */}
+          {(open > 0 || drafts > 0) && (
+            <button
+              className="btn small danger"
+              disabled={busy}
+              onClick={() =>
+                confirm(
+                  ko
+                    ? `끝나지 않은 업무 ${open}개를 모두 취소하고 확정 대기·작성 중 초안 ${drafts}개를 버릴까요?
+돌고 있는 직원 실행도 끊습니다. 되돌릴 수 없습니다. 완료된 업무(이미 반영된 것)는 그대로 둡니다.`
+                    : `Cancel all ${open} open tickets and discard ${drafts} drafts? Running work is stopped. This cannot be undone; finished work stays.`,
+                ) &&
+                run(
+                  () => api<{ tickets: number; requests: number }>('work-clear', { body: {} }),
+                  ko ? '열린 일을 모두 정리했습니다.' : 'Cleared all open work.',
+                ).then(reload)
+              }
+            >
+              {ko ? '열린 일 모두 정리' : 'Clear open work'}
+            </button>
           )}
         </div>
       </div>

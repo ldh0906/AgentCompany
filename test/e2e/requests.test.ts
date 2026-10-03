@@ -82,3 +82,34 @@ test('초안은 비서실장·기획 중 한가한 사람에게: 비서실장이
   assert.equal(b.employeeId, planner.id, '비서실장이 바쁘면 기획 직원');
   await env.orch.idle();
 });
+
+test('열린 일 모두 정리: 끝나지 않은 업무는 취소, 초안은 버리고, 끝난 업무는 그대로', { timeout: 120_000 }, async (t) => {
+  const env = await setup(t);
+  env.company.hireEmployee({ name: '비서실장', roles: ['chief-of-staff'], cli: 'fake', model: 'slow' });
+  const mk = (title: string, dir: string) =>
+    env.company.createTicket({
+      projectId: env.projectId,
+      type: 'impl',
+      title,
+      purpose: 'p',
+      requirements: [{ text: 'r', evidenceType: 'inspection' }],
+      doneCriteria: 'd',
+      writeScope: [`${dir}/**`],
+    });
+  const done = mk('끝난 일', 'a');
+  await driveUntil(env, done.id, (x) => x.status === 'awaiting_approval');
+  env.orch.decideIntegration(env.orch.records.pendingApprovalFor(done.id, 'integrate')!.id, 'approved');
+  await driveUntil(env, done.id, statusIs('done'));
+  const open1 = mk('진행 중인 일', 'b');
+  const open2 = mk('아직 안 한 일', 'c');
+  await env.orch.tick();
+  const req = await env.orch.submitRequest(env.projectId, '새 기능');
+  const r = await env.orch.clearOpenWork();
+  await env.orch.idle();
+  assert.deepEqual(r, { tickets: 2, requests: 1 });
+  assert.equal(env.company.requireTicket(open1.id).status, 'cancelled');
+  assert.equal(env.company.requireTicket(open2.id).status, 'cancelled');
+  assert.equal(env.company.requireTicket(done.id).status, 'done', '끝난 업무는 그대로');
+  assert.equal(env.orch.records.request(req.id)!.status, 'dismissed');
+  assert.ok(!env.orch.records.runsByStatus('running').some((x) => [open1.id, open2.id, req.id].includes(x.ticketId)), '돌던 실행은 끊긴다');
+});

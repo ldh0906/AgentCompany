@@ -3912,6 +3912,23 @@ ${failure.detail.slice(0, 400)}`,
     return t;
   }
 
+  /**
+   * 열린 일 모두 정리: 끝나지 않은 업무를 모두 취소하고(돌고 있는 실행은 끊는다) 확정 대기·작성 중 초안을 버린다.
+   * 완료된 업무(이미 반영된 것)는 그대로다. 대표 요청(2026-10-03): "현재 작업중인 애들 다 날릴수있나. 다시 시작하게".
+   */
+  async clearOpenWork(): Promise<{ tickets: number; requests: number }> {
+    const open = this.company.tickets().filter((t) => !TERMINAL_STATUSES.includes(t.status));
+    for (const t of open) {
+      for (const r of this.records.runsForTicket(t.id).filter((x) => x.status === 'running' && this.liveRuns.has(x.id)))
+        await this.killRun(r).catch(() => {});
+      this.cancel(t.id, tr('대표가 열린 일을 모두 정리했습니다.', 'The CEO cleared all open work.'));
+    }
+    const reqs = this.records.requests(500).filter((r) => ['drafting', 'drafted', 'failed'].includes(r.status));
+    for (const r of reqs) await this.dismissRequest(r.id);
+    this.company.store.appendEvent('ceo', 'work.cleared', 'company', { tickets: open.map((t) => t.id), requests: reqs.map((r) => r.id) });
+    return { tickets: open.length, requests: reqs.length };
+  }
+
   assign(ticketId: string, assigneeId: string, reviewerId: string): Ticket {
     const active = this.company.activeEmployees();
     const ranks = Object.fromEntries(active.map((e) => [e.id, rankOf(e)]));
