@@ -2671,3 +2671,44 @@ details.advanced[open] summary {
     display: none;
   }
 }
+
+/* 대시보드 숫자 한 줄(큰 숫자 타일 대신, 누르면 그 화면으로). 대표 요청(2026-10-03): 대시보드도 할 일처럼 정리 */
+.kpi-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.kpi {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+}
+button.kpi {
+  cursor: pointer;
+}
+button.kpi:hover {
+  border-color: var(--border-strong);
+}
+.kpi b {
+  color: var(--text);
+}
+.kpi.hot {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+/* 대시보드에서 펼친 승인: 할 일 줄 바로 아래 */
+.inbox-row.open {
+  background: var(--panel-hover);
+}
+.inbox-expand {
+  border-top: 1px dashed var(--border);
+  background: var(--panel-2);
+}

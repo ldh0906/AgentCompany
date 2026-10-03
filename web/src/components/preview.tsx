@@ -307,10 +307,30 @@ function ClipButton({ ticketId, index, label, seconds }: { ticketId: string; ind
 }
 
 /** 고급 QA: 직원이 직접 플레이해 보고 요구사항마다 한 줄 결론과 플레이 일지를 남긴다. 누를 때만(또는 요청 완료 때 자동) 돈다. */
-export function PlaytestPanel({ ticketId, requestId }: { ticketId?: string; requestId?: string }) {
+// game=false(게임이 아닌 화면 앱·웹): 같은 방식이지만 "플레이" 대신 "써 보기"(대표 요청 2026-10-03: 게임이 아니면 어떻게?)
+export function PlaytestPanel({ ticketId, requestId, game = true }: { ticketId?: string; requestId?: string; game?: boolean }) {
   const { state, reload } = useCompany();
   const { lang } = useT();
   const ko = lang === 'ko';
+  const W = game
+    ? {
+        title: '🎮 고급 QA (직접 플레이)',
+        start: '직접 플레이해 보기',
+        again: '다시 플레이',
+        running: '플레이 중… (보통 5~20분)',
+        what: '직접 플레이하고, 손맛·흐름·버그를',
+        fail: '플레이하지 못했습니다',
+        started: '고급 QA가 플레이를 시작합니다.',
+      }
+    : {
+        title: '🧪 고급 QA (직접 써 보기)',
+        start: '직접 써 보기',
+        again: '다시 써 보기',
+        running: '써 보는 중… (보통 5~20분)',
+        what: '실제 사용자처럼 써 보고, 흐름·불편한 점·버그를',
+        fail: '써 보지 못했습니다',
+        started: '고급 QA가 써 보기 시작합니다.',
+      };
   const { busy, run } = useAction();
   const key = ticketId ?? `Q:${requestId}`;
   const p = state?.playtests?.[key];
@@ -319,13 +339,13 @@ export function PlaytestPanel({ ticketId, requestId }: { ticketId?: string; requ
   const start = () =>
     run(
       () => api(ticketId ? `tickets/${ticketId}/playtest` : `requests/${requestId}/playtest`, { body: {} }),
-      ko ? '고급 QA가 플레이를 시작합니다.' : 'Play test started.',
+      ko ? W.started : 'Play test started.',
     ).then(reload);
   const v = p?.opinion ? verdictsOf(p.opinion) : [];
   return (
     <div className="screen-check">
       <div className="spread">
-        <b>{ko ? '🎮 고급 QA (직접 플레이)' : '🎮 Play test'}</b>
+        <b>{ko ? W.title : game ? '🎮 Play test' : '🧪 Hands-on test'}</b>
         {p?.state !== 'running' && (
           <button
             className="btn small"
@@ -333,19 +353,19 @@ export function PlaytestPanel({ ticketId, requestId }: { ticketId?: string; requ
             onClick={() => void start()}
             title={ko ? '한 번에 약 300만~700만 토큰(실측 637만, 약 $2.4)' : 'About 3-7M tokens'}
           >
-            {p ? (ko ? '다시 플레이' : 'Play again') : ko ? '직접 플레이해 보기' : 'Play it'}
+            {p ? (ko ? W.again : 'Again') : ko ? W.start : game ? 'Play it' : 'Try it'}
           </button>
         )}
       </div>
       {!p && (
         <div className="hint">
           {ko
-            ? 'QA 직원이 사람처럼 보고·누르며 직접 플레이하고, 손맛·흐름·버그를 적습니다. 한 번에 약 300만~700만 토큰(실측 637만, 약 $2.4).'
+            ? `QA 직원이 사람처럼 보고·누르며 ${W.what} 적습니다. 한 번에 약 300만~700만 토큰(실측 637만, 약 $2.4).`
             : 'A QA colleague plays it like a person and reports feel, flow and bugs.'}
         </div>
       )}
-      {p?.state === 'running' && <div className="hint">{ko ? '플레이 중… (보통 5~20분)' : 'Playing… (usually 5-20 min)'}</div>}
-      {p?.state === 'failed' && <div className="hint">{ko ? `플레이하지 못했습니다: ${p.note}` : `Failed: ${p.note}`}</div>}
+      {p?.state === 'running' && <div className="hint">{ko ? W.running : 'Running… (usually 5-20 min)'}</div>}
+      {p?.state === 'failed' && <div className="hint">{ko ? `${W.fail}: ${p.note}` : `Failed: ${p.note}`}</div>}
       {p?.state === 'done' && (
         <>
           {v.length > 0 && (

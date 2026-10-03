@@ -127,3 +127,11 @@ export async function deliverableFiles(repo: string, baseSha: string, headSha: s
   }
   return out;
 }
+
+/**
+ * 직접 해 볼 만한 변경인가: 문서·조사·테스트·.md/.txt 밖의 파일(코드·화면·데이터)을 바꿨는가.
+ * 실측(2026-10-03, 4777): 문서·스크립트만 바꾼 요청에도 "직접 플레이해 보기"가 떴다.
+ */
+export function isRunnablePath(p: string): boolean {
+  return !/^(docs|research|tests?|__tests__|\.github)\//i.test(p) && !/\.(md|txt)$/i.test(p) && !/\.test\./i.test(p);
+}

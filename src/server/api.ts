@@ -9,12 +9,12 @@ import { ADAPTERS } from '../adapters/index.ts';
 import type { Orchestrator } from '../app/orchestrator.ts';
 import { diffText, projectPaths } from '../workspace/workspace.ts';
 import { DELIVERABLE_KINDS, DIFFICULTIES, RANKS } from '../core/types.ts';
-import type { AccessLevel, CliKind, EvidenceType, ProjectProfile, RoleTemplate, TicketType, VerifyCommand } from '../core/types.ts';
+import type { AccessLevel, CliKind, EvidenceType, ProjectProfile, RoleTemplate, Ticket, TicketType, VerifyCommand } from '../core/types.ts';
 import { doctor, type DoctorReport, installInfo, openLoginWindow } from '../app/doctor.ts';
 import { listModels } from '../app/models.ts';
 import { debateRunTokens, requestTokens, ticketTokens } from '../app/cost.ts';
 import { createRepo, inspectRepo, listDirs, trackedDirs } from '../app/repo-inspect.ts';
-import { deliverableFiles } from '../app/deliverables.ts';
+import { deliverableFiles, isRunnablePath } from '../app/deliverables.ts';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -511,6 +511,20 @@ export class Api {
           .projects()
           .map((p) => [p.id, this.orch.profileProposal(p.id)] as const)
           .filter(([, v]) => v),
+      ),
+      // 끝난 요청에 "직접 해 보기"를 보일지: 반영된 업무가 실행할 수 있는 것(문서·조사·테스트·.md 밖)을 바꿨는지.
+      // 실측(2026-10-03, 4777): 문서·스크립트 요청에도, 업무가 모두 취소된 요청에도 "직접 플레이해 보기"가 떴다.
+      requestPlayable: Object.fromEntries(
+        r
+          .requests(30)
+          .filter((q) => q.status === 'accepted')
+          .map((q) => [
+            q.id,
+            q.ticketIds.some((id) => {
+              const t = this.company.store.get<Ticket>('tickets', id);
+              return t?.status === 'done' && (r.latestSubmission(t)?.changedPaths ?? []).some(isRunnablePath);
+            }),
+          ]),
       ),
       requestTokens: Object.fromEntries(
         r

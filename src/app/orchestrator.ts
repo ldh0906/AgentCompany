@@ -103,7 +103,7 @@ import { ScreenQa } from './screen-qa.ts';
 import { Delegation } from './delegation.ts';
 import { Debates } from './debate.ts';
 import { Acceptance } from './acceptance.ts';
-import { deliverableKindOf, projectDoc, projectDocList } from './deliverables.ts';
+import { deliverableKindOf, isRunnablePath, projectDoc, projectDocList } from './deliverables.ts';
 import { checkLinks, extractLinks, linkSummary, type LinkResult } from './link-check.ts';
 
 const ORCH: Actor = { kind: 'orchestrator' };
@@ -1901,7 +1901,11 @@ export class Orchestrator {
         ),
     );
     const project = this.company.store.get<Project>('projects', req.projectId);
-    if (!project?.profile?.game || !project.autoPlaytest || !tickets.some((t) => t.status === 'done')) return;
+    // 반영된 업무가 실행할 수 있는 것을 바꿨을 때만(문서·조사만 바꾼 요청은 플레이할 게 없다)
+    const playable = tickets.some(
+      (t) => t.status === 'done' && (this.records.latestSubmission(t)?.changedPaths ?? []).some(isRunnablePath),
+    );
+    if (!project?.profile?.game || !project.autoPlaytest || !playable) return;
     void this.playtests
       .startPlaytest({ requestId: req.id }, 'auto')
       .catch((e: unknown) =>

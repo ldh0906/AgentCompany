@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { deliverableFiles, projectDoc, projectDocList } from '../../src/app/deliverables.ts';
+import { deliverableFiles, isRunnablePath, projectDoc, projectDocList } from '../../src/app/deliverables.ts';
 import { AGENT_IDENTITY, git } from '../../src/workspace/git.ts';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
@@ -55,4 +55,15 @@ test('바뀐 문서·표·그림만 읽기 좋은 순서로, 수정 파일은 �
   assert.equal((await projectDoc(d, head, 'plan.md'))?.text, '# 계획\n새 내용\n');
   assert.equal(await projectDoc(d, head, 'main.py'), null, '읽을 파일 종류가 아니면 거절');
   assert.equal(await projectDoc(d, head, 'nope.md'), null);
+});
+
+test('직접 해 볼 만한 변경: 코드·화면·데이터는 예, 문서·조사·테스트·.md는 아니오', () => {
+  assert.equal(isRunnablePath('src/game/boss.ts'), true);
+  assert.equal(isRunnablePath('index.html'), true);
+  assert.equal(isRunnablePath('data/balance.json'), true);
+  assert.equal(isRunnablePath('docs/onboarding/README.md'), false);
+  assert.equal(isRunnablePath('research/game-ui-skill/inspect-ui.cjs'), false);
+  assert.equal(isRunnablePath('tests/save.test.js'), false);
+  assert.equal(isRunnablePath('src/save.test.ts'), false);
+  assert.equal(isRunnablePath('NOTES.md'), false);
 });

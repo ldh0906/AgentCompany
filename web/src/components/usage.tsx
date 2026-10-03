@@ -151,53 +151,69 @@ export function UsagePanel() {
         </EmptyState>
       ) : (
         <div className="body usage">
-          <div className="usage-kpis">
-            <div>
-              <div className="sub">{ko ? '오늘' : 'Today'}</div>
-              <div className="usage-hero">{fmtTokens(usage.today.total, lang)}</div>
-              <div className="sub">{ko ? `실행 ${usage.today.runs}회` : `${usage.today.runs} runs`}</div>
-            </div>
-            <div>
-              <div className="sub">{ko ? '누적' : 'All time'}</div>
-              <div className="usage-num">{fmtTokens(usage.all.total, lang)}</div>
-              <div className="sub">
-                {ko
-                  ? `입력 ${fmtTokens(usage.all.input, lang)} · 출력 ${fmtTokens(usage.all.output, lang)}`
-                  : `in ${fmtTokens(usage.all.input, lang)} · out ${fmtTokens(usage.all.output, lang)}`}
+          {/* 한 줄 요약(대시보드 정리, 2026-10-03). 그래프·직원별은 펼쳐야 보인다. */}
+          <div className="row" style={{ gap: 14, flexWrap: 'wrap' }}>
+            <span>
+              {ko ? '오늘' : 'Today'} <b>{fmtTokens(usage.today.total, lang)}</b>{' '}
+              <span className="sub">{ko ? `(실행 ${usage.today.runs}회)` : `(${usage.today.runs} runs)`}</span>
+            </span>
+            <span>
+              {ko ? '누적' : 'All time'} <b>{fmtTokens(usage.all.total, lang)}</b>
+            </span>
+            <span className="sub">
+              {ko ? '캐시 재사용' : 'Cache reuse'} {cacheRate}%
+            </span>
+          </div>
+          <details className="advanced" style={{ marginTop: 8 }}>
+            <summary>{ko ? '자세히 (날짜별·직원별)' : 'Details'}</summary>
+            <div className="usage-kpis">
+              <div>
+                <div className="sub">{ko ? '오늘' : 'Today'}</div>
+                <div className="usage-hero">{fmtTokens(usage.today.total, lang)}</div>
+                <div className="sub">{ko ? `실행 ${usage.today.runs}회` : `${usage.today.runs} runs`}</div>
+              </div>
+              <div>
+                <div className="sub">{ko ? '누적' : 'All time'}</div>
+                <div className="usage-num">{fmtTokens(usage.all.total, lang)}</div>
+                <div className="sub">
+                  {ko
+                    ? `입력 ${fmtTokens(usage.all.input, lang)} · 출력 ${fmtTokens(usage.all.output, lang)}`
+                    : `in ${fmtTokens(usage.all.input, lang)} · out ${fmtTokens(usage.all.output, lang)}`}
+                </div>
+              </div>
+              <div>
+                <div className="sub">{ko ? '캐시 재사용' : 'Cache reuse'}</div>
+                <div className="usage-num">{cacheRate}%</div>
+                {usage.all.costUsd > 0 && (
+                  <div
+                    className="sub"
+                    title={
+                      ko
+                        ? 'Claude가 보고한 API 기준 추정치(구독 요금과 다름)'
+                        : 'API-equivalent estimate reported by Claude (not your subscription price)'
+                    }
+                  >
+                    {ko ? 'Claude 추정' : 'Claude est.'} ${usage.all.costUsd.toFixed(2)}
+                  </div>
+                )}
               </div>
             </div>
-            <div>
-              <div className="sub">{ko ? '캐시 재사용' : 'Cache reuse'}</div>
-              <div className="usage-num">{cacheRate}%</div>
-              {usage.all.costUsd > 0 && (
-                <div
-                  className="sub"
-                  title={
-                    ko
-                      ? 'Claude가 보고한 API 기준 추정치(구독 요금과 다름)'
-                      : 'API-equivalent estimate reported by Claude (not your subscription price)'
-                  }
-                >
-                  {ko ? 'Claude 추정' : 'Claude est.'} ${usage.all.costUsd.toFixed(2)}
-                </div>
-              )}
-            </div>
-          </div>
-          <DailyBars daily={usage.daily} />
-          {people.length > 0 && (
-            <div className="usage-people">
-              {people.map(({ e, v }) => (
-                <div className="usage-row" key={e.id} title={`${e.name}: ${v.toLocaleString()}`}>
-                  <Avatar employees={employees} id={e.id} />
-                  <span className="nm">{e.name}</span>
-                  <span className="track">
-                    <span className="fill" style={{ width: `${Math.max(2, (v / top) * 100)}%` }} />
-                  </span>
-                  <span className="val">{fmtTokens(v, lang)}</span>
-                </div>
-              ))}
-            </div>
-          )}
+            <DailyBars daily={usage.daily} />
+            {people.length > 0 && (
+              <div className="usage-people">
+                {people.map(({ e, v }) => (
+                  <div className="usage-row" key={e.id} title={`${e.name}: ${v.toLocaleString()}`}>
+                    <Avatar employees={employees} id={e.id} />
+                    <span className="nm">{e.name}</span>
+                    <span className="track">
+                      <span className="fill" style={{ width: `${Math.max(2, (v / top) * 100)}%` }} />
+                    </span>
+                    <span className="val">{fmtTokens(v, lang)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </details>
         </div>
       )}
     </div>

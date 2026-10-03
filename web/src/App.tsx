@@ -361,7 +361,7 @@ function Shell() {
         </div>
       </aside>
       <main className="main">
-        {todos.length > 0 && !path.startsWith('/inbox') && (
+        {todos.length > 0 && !path.startsWith('/inbox') && path !== '/' && (
           // 지금 대표가 할 일: 어느 화면에서든 한 줄로(무엇이 몇 개인지만). 자세한 것은 할 일 화면에서.
           // 대표 요청(2026-10-03): 할 일 배너가 보류 메모 원문을 줄줄이 나열해 읽기 불친절했다.
           <div className="banner info todo-banner" style={{ marginBottom: 14 }}>

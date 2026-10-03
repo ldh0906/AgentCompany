@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { findChrome } from '../../src/app/screen-check.ts';
 import { ticketChannelId } from '../../src/app/chat.ts';
 import { AGENT_IDENTITY, git } from '../../src/workspace/git.ts';
-import { driveUntil, newImplTicket, setup } from './helpers.ts';
+import { driveUntil, setup } from './helpers.ts';
 
 test('승인 대기에 오면 띄워서 세 장을 찍고, QA 직원이 의견을 업무방에 단다', { skip: !findChrome(), timeout: 180_000 }, async (t) => {
   const env = await setup(t, { screenCheck: true });
@@ -109,7 +109,16 @@ test(
     writeFileSync(join(env.origin, 'index.html'), '<!doctype html><meta charset="utf-8"><body><h1>데모 게임</h1></body>');
     await git(['add', '-A'], env.origin);
     await git([...AGENT_IDENTITY, 'commit', '-q', '-m', 'page'], env.origin);
-    const tk = newImplTicket(env);
+    // 게임 코드를 바꾸는 업무(문서만 바꾼 요청은 자동 플레이를 하지 않는다: 실행할 게 없다)
+    const tk = env.company.createTicket({
+      projectId: env.projectId,
+      type: 'impl',
+      title: '보스 패턴',
+      purpose: '게임 코드 수정',
+      requirements: [{ text: '보스가 두 번째 패턴을 쓴다', evidenceType: 'unit_test' }],
+      doneCriteria: 'd',
+      writeScope: ['src/game.js'],
+    });
     await driveUntil(env, tk.id, (x) => x.status === 'awaiting_approval');
     await env.orch.playtests.startPlaytest({ ticketId: tk.id }, 'ceo');
     const waitDone = async (key: string) => {

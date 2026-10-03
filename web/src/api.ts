@@ -126,6 +126,8 @@ export interface State {
   profileProposals?: Record<string, { profile: ProjectProfile; by: string; at: string }>;
   /** 요청별 사용 토큰(초안 + 업무 + 업무방 대화) */
   requestTokens?: Record<string, { total: number; byTicket: Record<string, number> }>;
+  /** 끝난 요청에 "직접 해 보기"를 보일지(실행할 수 있는 것을 바꿨는지) */
+  requestPlayable?: Record<string, boolean>;
   playtests?: Record<
     string,
     { state: 'running' | 'done' | 'failed'; at: string; by: string; qaBy: string; opinion: string | null; note: string }

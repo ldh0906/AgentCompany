@@ -3,9 +3,10 @@ import { api, type Approval, type DomainEvent, type State } from '../api.ts';
 import { Link, useCompany, useRoute } from '../App.tsx';
 import { ACCESS, josa, useT } from '../i18n.ts';
 import { MAX_ACTIVE_EMPLOYEES } from '../../../src/core/types.ts';
-import { Avatar, empName, EmptyState, Icon, Modal, needsCeo, StatusChip, useAction, when, Skeleton } from '../components/ui.tsx';
+import { Avatar, empName, EmptyState, Icon, Modal, needsCeo, useAction, when, Skeleton } from '../components/ui.tsx';
 import { CliConnect, Segmented, useCliStatus } from '../components/kit.tsx';
-import { UsagePanel } from '../components/usage.tsx';
+import { fmtTokens, UsagePanel } from '../components/usage.tsx';
+import { sortTodos, TodoRow } from '../components/inbox.tsx';
 import { RequestBox } from './Requests.tsx';
 import { PlaytestPanel, PreviewButton, QuickCheckLink, quickQueries, ScreenCheckPanel } from '../components/preview.tsx';
 import { DeliverableView } from '../components/deliverable.tsx';
@@ -530,14 +531,24 @@ export function ApprovalItem({ a, full = false }: { a: Approval; full?: boolean 
 }
 
 export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
-  const { state, reload } = useCompany();
-  const { t, lang, hold } = useT();
-  const { busy, run } = useAction();
+  const { state } = useCompany();
+  const { t, lang } = useT();
+  const { go } = useRoute();
+  // 펼쳐 본 승인(그 자리에서 사진·확인 항목을 보고 승인한다)
+  const [openApproval, setOpenApproval] = useState<string | null>(null);
+  const [allActivity, setAllActivity] = useState(false);
   if (!state) return <Skeleton />;
-  const held = state.tickets.filter(needsCeo);
+  const ko = lang === 'ko';
+  // 대시보드는 할 일 화면과 같은 방식: 한 줄에 하나, 바로 할 일은 그 줄에서, 긴 설명은 펼쳐야 보인다.
+  // 대표 요청(2026-10-03): "대시보드도 같은 방식으로 정리해줘". 숫자 타일 넷·승인함·보류 목록·긴 안내문이 따로 있어 길었다.
+  const todos = sortTodos(state.ceoTodos ?? []);
   const active = state.tickets.filter((x) => ACTIVE.includes(x.status) && !needsCeo(x));
   const done = state.tickets.filter((x) => x.status === 'done');
-  const ko = lang === 'ko';
+  const events = [...state.events]
+    .reverse()
+    // 직원이 대표 대신 허용한 명령 원문은 대시보드에서 뺀다(실측: 돌아와 보니 powershell 명령이 줄줄이). 차단(⛔)은 남긴다.
+    .filter((e) => !isNoiseEvent(e, state) && !(e.type === 'approval.delegated' && (e.payload as { allow?: boolean } | null)?.allow));
+  const PREVIEW = 6;
 
   return (
     <>
@@ -545,9 +556,7 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
         <div>
           <h1>{t('nav_dashboard')}</h1>
           <div className="sub">
-            {ko
-              ? '대표님이 결정할 일만 모았습니다. 나머지는 직원과 시스템이 처리합니다.'
-              : 'Only what needs you. Employees and the system handle the rest.'}
+            {ko ? '회사가 지금 어떤지 한눈에. 대표 차례인 일은 맨 위에 있습니다.' : 'The company at a glance. What needs you is on top.'}
           </div>
         </div>
       </div>
@@ -555,206 +564,132 @@ export function Dashboard({ onNewTicket }: { onNewTicket: () => void }) {
       <AwaySummary />
       <SetupGuide onNewTicket={onNewTicket} />
 
-      <div className="grid cols-4" style={{ marginBottom: 16 }}>
-        <div className={`card stat warn ${state.approvals.length > 0 ? 'hot' : ''}`}>
-          <div className="label">
-            <Icon name="inbox" /> {t('waitingApproval')}
-          </div>
-          <div className="value">{state.approvals.length}</div>
-        </div>
-        <div className="card stat bad">
-          <div className="label">
-            <Icon name="pause" /> {t('onHold')}
-          </div>
-          <div className="value">{held.length}</div>
-        </div>
-        <div className="card stat info">
-          <div className="label">
-            <Icon name="bolt" /> {t('inProgress')}
-          </div>
-          <div className="value">{active.length}</div>
-        </div>
-        <div className="card stat ok">
-          <div className="label">
-            <Icon name="check" /> {t('done')}
-          </div>
-          <div className="value">{done.length}</div>
-        </div>
+      {/* 숫자는 한 줄로(누르면 그 화면으로) */}
+      <div className="kpi-strip">
+        <button className={`kpi ${todos.length ? 'hot' : ''}`} onClick={() => go('/inbox')}>
+          <Icon name="inbox" size={14} /> {ko ? '할 일' : 'Inbox'} <b>{todos.length}</b>
+        </button>
+        <button className="kpi" onClick={() => go('/board')}>
+          <Icon name="bolt" size={14} /> {t('inProgress')} <b>{active.length}</b>
+        </button>
+        <button className="kpi" onClick={() => go('/board')}>
+          <Icon name="check" size={14} /> {t('done')} <b>{done.length}</b>
+        </button>
+        {state.usage && (
+          <span className="kpi">
+            <Icon name="spark" size={14} /> {ko ? '오늘 토큰' : 'Tokens today'} <b>{fmtTokens(state.usage.today.total, lang)}</b>
+          </span>
+        )}
       </div>
 
       <div className="grid cols-2">
         <div className="grid" style={{ alignContent: 'start' }}>
-          <RequestBox />
           <div className="card">
             <h2>
               <span className="row">
-                <Icon name="inbox" /> {t('approvals')}
+                <Icon name="inbox" /> {ko ? '지금 대표 차례' : 'Needs you'}{' '}
+                {todos.length > 0 && <span className="chip warn">{todos.length}</span>}
               </span>
-              <span className="chip warn">{state.approvals.length}</span>
-            </h2>
-            {state.permissionDelegate && (
-              <div className="note" style={{ margin: '10px 18px 0' }}>
-                {ko
-                  ? `권한 요청은 ${empName(state.employees, state.permissionDelegate)}(전체 자동)이 대신 처리합니다. 드라이브·시스템 폴더 삭제, 포맷, PC 종료 같은 치명적인 명령만 막고 나머지는 허용합니다. 결과는 최근 활동에 남습니다.`
-                  : `Permission requests are handled by ${empName(state.employees, state.permissionDelegate)} (full auto): only catastrophic commands (drive/system deletes, formats, shutdown) are blocked. Results appear in recent activity.`}
-              </div>
-            )}
-            <div className="list">
-              {state.approvals.length === 0 ? (
-                <EmptyState icon="inbox">{t('noApprovals')}</EmptyState>
-              ) : (
-                state.approvals.map((a) => <ApprovalItem key={a.id} a={a} />)
+              {todos.length > PREVIEW && (
+                <button className="btn small" onClick={() => go('/inbox')}>
+                  {ko ? `모두 보기 (${todos.length})` : `All (${todos.length})`}
+                </button>
               )}
-            </div>
-          </div>
-          <div className="card">
-            <h2>
-              <span className="row">
-                <Icon name="pause" /> {t('held')}
-              </span>
-              <span className="chip bad">{held.length}</span>
             </h2>
-            <div className="list">
-              {held.length === 0 ? (
-                <EmptyState icon="shield">{t('noHeld')}</EmptyState>
-              ) : (
-                held.map((x) => (
-                  <div className="item" key={x.id}>
-                    <div className="spread">
-                      <div>
-                        <div className="title">
-                          <Link to={`/tickets/${x.id}`}>
-                            {x.id} · {x.title}
-                          </Link>
+            {todos.length === 0 ? (
+              <EmptyState icon="inbox">{ko ? '지금 대표가 할 일은 없습니다.' : 'Nothing needs you right now.'}</EmptyState>
+            ) : (
+              <div className="list">
+                {todos.slice(0, PREVIEW).map((x) => {
+                  const approval = x.kind === 'approval' ? state.approvals.find((a) => `appr:${a.id}` === x.key) : null;
+                  return (
+                    <div key={x.key}>
+                      <TodoRow
+                        x={x}
+                        expanded={Boolean(approval && openApproval === approval.id)}
+                        onToggle={approval ? () => setOpenApproval(openApproval === approval.id ? null : approval.id) : undefined}
+                      />
+                      {approval && openApproval === approval.id && (
+                        <div className="inbox-expand">
+                          <ApprovalItem a={approval} />
                         </div>
-                        <div className="meta">
-                          <StatusChip status={x.status} /> <span className="chip bad">{hold(x.hold!.reason)}</span> {when(x.hold!.since)}
-                        </div>
-                      </div>
-                      {x.hold!.reason === 'needs_permission' && x.status === 'verifying' ? (
-                        // 범위 밖 수정은 "허용/되돌리기"를 골라야 한다: 업무 화면에서 고른다.
-                        <Link to={`/tickets/${x.id}`} className="btn small primary">
-                          {ko ? '허용·되돌리기 고르기' : 'Allow or revert'}
-                        </Link>
-                      ) : (
-                        <span className="row">
-                          {/* 검증 실패로 멈춘 업무: 검사를 고친 뒤 직원을 다시 돌리지 않고 마지막 제출물을 다시 검증한다(토큰 없음).
-                              실측(2026-10-03, 4777): 깨진 검사 하나로 7개가 멈췄는데 "다시 검증"은 업무 화면에만 있었다. */}
-                          {/* 범위 밖 파일 수정 요청: 대시보드에서 바로 허용(전에는 업무 화면에만 있어 "보류 해제"만 눌렀다) */}
-                          {(() => {
-                            const m = /^(?:이 파일도 고쳐야 한다고 요청했습니다|Asked to also edit): (.+)$/m.exec(x.hold!.note);
-                            const paths = m ? m[1]!.split(', ').filter(Boolean) : [];
-                            return paths.length ? (
-                              <button
-                                className="btn small primary"
-                                disabled={busy}
-                                title={paths.join(', ')}
-                                onClick={() =>
-                                  run(
-                                    () => api(`tickets/${x.id}/scope-add`, { body: { paths } }),
-                                    ko ? '허용했습니다. 이어서 진행합니다.' : 'Allowed; continuing.',
-                                  ).then(reload)
-                                }
-                              >
-                                {ko ? `파일 ${paths.length}개 허용하고 계속` : `Allow ${paths.length} file(s)`}
-                              </button>
-                            ) : null;
-                          })()}
-                          {/검증 실패|verification failed|수정 회차 \d+회 초과|Revision limit/i.test(x.hold!.note) && (
-                            <button
-                              className="btn small primary"
-                              disabled={busy}
-                              title={
-                                ko
-                                  ? '직원에게 다시 시키지 않고 마지막 제출물을 다시 검사합니다(토큰 없음)'
-                                  : 'Re-check the last submission without another round'
-                              }
-                              onClick={() =>
-                                run(() => api(`tickets/${x.id}/reverify`, { body: {} }), ko ? '다시 검증합니다.' : 'Re-verifying.').then(
-                                  reload,
-                                )
-                              }
-                            >
-                              {ko ? '다시 검증' : 'Re-verify'}
-                            </button>
-                          )}
-                          <button
-                            className="btn small"
-                            disabled={busy}
-                            onClick={() =>
-                              run(() => api(`tickets/${x.id}/release`, { body: {} }), ko ? '보류를 해제했습니다.' : 'Released.').then(
-                                reload,
-                              )
-                            }
-                          >
-                            {t('release')}
-                          </button>
-                        </span>
                       )}
                     </div>
-                    {x.hold!.note && <div className="note">{x.hold!.note}</div>}
-                  </div>
-                ))
-              )}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-          {/* 최근 활동은 왼쪽 보류 아래: 오른쪽(팀·사용량·진행·프로젝트)만 길어 양쪽 높이가 어긋났다(대표 요청 2026-10-03). */}
+          <RequestBox />
           <div className="card">
             <h2>
               <span className="row">
                 <Icon name="activity" /> {t('activity')}
               </span>
             </h2>
-            {state.events.length === 0 && <EmptyState icon="activity">{ko ? '아직 기록이 없습니다.' : 'Nothing yet.'}</EmptyState>}
+            {events.length === 0 && <EmptyState icon="activity">{ko ? '아직 기록이 없습니다.' : 'Nothing yet.'}</EmptyState>}
             <ul className="timeline">
-              {[...state.events]
-                .reverse()
-                // 직원이 대표 대신 허용한 명령 원문은 대시보드에서 뺀다(실측: 돌아와 보니 powershell 명령이 줄줄이). 차단(⛔)은 남긴다.
-                .filter(
-                  (e) => !isNoiseEvent(e, state) && !(e.type === 'approval.delegated' && (e.payload as { allow?: boolean } | null)?.allow),
-                )
-                .slice(0, 25)
-                .map((e) => (
-                  <li key={e.seq}>
-                    <span className="when">{new Date(e.ts).toLocaleTimeString()}</span>
-                    <span>{describeEvent(e, state, lang)}</span>
-                  </li>
-                ))}
+              {events.slice(0, allActivity ? 30 : 8).map((e) => (
+                <li key={e.seq}>
+                  <span className="when">{new Date(e.ts).toLocaleTimeString()}</span>
+                  <span>{describeEvent(e, state, lang)}</span>
+                </li>
+              ))}
             </ul>
+            {events.length > 8 && (
+              <button className="link-btn" style={{ padding: '0 18px 12px' }} onClick={() => setAllActivity(!allActivity)}>
+                {allActivity ? (ko ? '접기' : 'Less') : ko ? '더 보기' : 'More'}
+              </button>
+            )}
           </div>
         </div>
 
         <div className="grid" style={{ alignContent: 'start' }}>
           <TeamPanel />
-          {/* 전권 위임 결정 기록: 대표는 이것만 읽으면 된다(대표 요청 2026-10-02) */}
-          {(state.delegation?.on || (state.delegation?.recent.length ?? 0) > 0) && (
-            <div className="card">
-              <h2>
-                <span className="row">🧭 {ko ? '대신 결정한 일' : 'Delegated decisions'}</span>
-                <span className="sub">{empName(state.employees, state.delegation!.delegate)}</span>
-              </h2>
-              <div className="list">
-                {state.delegation!.recent.length === 0 ? (
-                  <div className="hint" style={{ padding: 12 }}>
-                    {ko ? '아직 대신 결정한 일이 없습니다.' : 'Nothing decided yet.'}
-                  </div>
-                ) : (
-                  state.delegation!.recent.map((x, i) => (
-                    <div key={i} className="item">
-                      <div className="meta">{when(x.at)}</div>
-                      <div>{x.text}</div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
+          {/* 전권 위임 결정 기록: 최근 5개만(더 보기) */}
+          {(state.delegation?.on || (state.delegation?.recent.length ?? 0) > 0) && <DelegationPanel />}
           <UsagePanel />
-          {/* "진행 중" 업무 목록은 뺐다: 업무판·작업 현황과 겹치고 오른쪽만 길어졌다(대표 요청 2026-10-03). 위 숫자 칸은 남긴다. */}
           <ProjectsPanel />
         </div>
       </div>
     </>
+  );
+}
+
+/** 전권 위임으로 대신 결정한 일: 한 줄에 하나, 최근 5개(더 보기). */
+function DelegationPanel() {
+  const { state } = useCompany();
+  const { lang } = useT();
+  const [all, setAll] = useState(false);
+  if (!state?.delegation) return null;
+  const ko = lang === 'ko';
+  const recent = state.delegation.recent;
+  return (
+    <div className="card">
+      <h2>
+        <span className="row">🧭 {ko ? '대신 결정한 일' : 'Delegated decisions'}</span>
+        <span className="sub">{empName(state.employees, state.delegation.delegate)}</span>
+      </h2>
+      {recent.length === 0 ? (
+        <div className="hint" style={{ padding: 12 }}>
+          {ko ? '아직 대신 결정한 일이 없습니다.' : 'Nothing decided yet.'}
+        </div>
+      ) : (
+        <ul className="timeline">
+          {recent.slice(0, all ? 15 : 5).map((x, i) => (
+            <li key={i}>
+              <span className="when">{when(x.at)}</span>
+              <span title={x.text}>{x.text.length > 140 ? `${x.text.slice(0, 140)}…` : x.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {recent.length > 5 && (
+        <button className="link-btn" style={{ padding: '0 18px 12px' }} onClick={() => setAll(!all)}>
+          {all ? (ko ? '접기' : 'Less') : ko ? '더 보기' : 'More'}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -840,6 +775,14 @@ function TeamPanel() {
             })}
         </div>
       )}
+      {/* 권한 요청 대신 처리: 긴 안내문 대신 한 줄(대시보드 정리, 2026-10-03) */}
+      {state.permissionDelegate && (
+        <div className="hint" style={{ padding: '8px 18px 12px' }}>
+          {ko
+            ? `권한 요청은 ${empName(state.employees, state.permissionDelegate)}이(가) 대신 처리합니다(치명적인 명령만 막음).`
+            : `Permission requests are handled by ${empName(state.employees, state.permissionDelegate)} (only catastrophic commands blocked).`}
+        </div>
+      )}
     </div>
   );
 }
@@ -862,33 +805,22 @@ function ProjectsPanel() {
         </button>
       </h2>
       <div className="list">
-        {state.projects.map((p) => {
-          const open = state.tickets.filter((x) => x.projectId === p.id && !['done', 'failed', 'cancelled'].includes(x.status)).length;
-          const done = state.tickets.filter((x) => x.projectId === p.id && x.status === 'done').length;
-          return (
-            <div className="item" key={p.id}>
-              <div className="spread">
-                <div className="title">{p.name}</div>
+        {state.projects
+          .filter((p) => !p.removedAt)
+          .map((p) => {
+            const open = state.tickets.filter((x) => x.projectId === p.id && !['done', 'failed', 'cancelled'].includes(x.status)).length;
+            const done = state.tickets.filter((x) => x.projectId === p.id && x.status === 'done').length;
+            return (
+              // 한 줄에 하나(경로·반영 방식은 마우스를 올리면, 자세한 설정은 프로젝트 화면에서)
+              <div className="item spread" key={p.id} title={p.originPath}>
+                <span className="title">{p.name}</span>
                 <span className="row" style={{ gap: 6 }}>
-                  <span className="chip info">{ko ? `진행 ${open}` : `${open} open`}</span>
+                  {open > 0 && <span className="chip info">{ko ? `진행 ${open}` : `${open} open`}</span>}
                   <span className="chip ok">{ko ? `완료 ${done}` : `${done} done`}</span>
                 </span>
               </div>
-              <div className="meta mono">{p.originPath}</div>
-              <div className="meta">
-                {ko ? `자동 검사 ${p.verifyCommands.length}개` : `${p.verifyCommands.length} verify commands`} ·{' '}
-                {p.integrationMode === 'auto_after_approval'
-                  ? ko
-                    ? '승인하면 바로 반영'
-                    : 'merge on approval'
-                  : ko
-                    ? '따로 보관만'
-                    : 'branch only'}
-                {p.autoApprove ? (ko ? ' · 검수 통과 시 자동' : ' · auto after review') : ''}
-              </div>
-            </div>
-          );
-        })}
+            );
+          })}
       </div>
     </div>
   );

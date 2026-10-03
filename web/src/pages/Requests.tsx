@@ -257,7 +257,7 @@ export function RequestBox() {
                   {r.acceptanceRounds!.map((a) => {
                     const pass = a.results.filter((x) => x.mark === '✅').length;
                     return (
-                      <details key={a.round} open={a.round === r.acceptanceRounds!.length}>
+                      <details key={a.round}>
                         <summary>
                           ✔ {ko ? `인수 시험 ${a.round}회차` : `Acceptance round ${a.round}`}:{' '}
                           {a.state === 'running'
@@ -294,12 +294,19 @@ export function RequestBox() {
                   })}
                 </div>
               )}
-              {/* 요청의 업무가 모두 끝났고 게임이면: 고급 QA(직접 플레이) 결과·버튼 */}
-              {(state.projects.find((p) => p.id === r.projectId)?.profile?.game || state.playtests?.[`Q:${r.id}`]) &&
-                r.ticketIds.length > 0 &&
-                r.ticketIds.every((id) =>
-                  ['done', 'failed', 'cancelled'].includes(state.tickets.find((t) => t.id === id)?.status ?? ''),
-                ) && <PlaytestPanel requestId={r.id} />}
+              {/* 고급 QA(직접 해 보기): 화면 프로젝트이고, 업무가 모두 끝났고, 반영된 업무가 실행할 수 있는 것을 바꿨을 때만.
+                  게임이면 "직접 플레이", 아니면 "직접 써 보기". 프로그램·문서는 인수 시험이 마지막 확인이다.
+                  실측(2026-10-03, 4777): 문서·스크립트 요청과 업무가 모두 취소된 요청에도 "직접 플레이해 보기"가 떴다. */}
+              {(() => {
+                const proj = state.projects.find((p) => p.id === r.projectId);
+                const finished =
+                  r.ticketIds.length > 0 &&
+                  r.ticketIds.every((id) => ['done', 'failed', 'cancelled'].includes(state.tickets.find((t) => t.id === id)?.status ?? ''));
+                const screen = (proj?.profile?.deliverable ?? 'screen') === 'screen';
+                return state.playtests?.[`Q:${r.id}`] || (screen && finished && state.requestPlayable?.[r.id]) ? (
+                  <PlaytestPanel requestId={r.id} game={Boolean(proj?.profile?.game)} />
+                ) : null;
+              })()}
             </div>
           ))}
       </div>
