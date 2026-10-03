@@ -28,16 +28,37 @@ export class CeoDesk {
   /** 지금 대표가 할 일: 승인, 결정·허가가 필요한 보류, 확인할 초안, 실패한 초안, 하루 한도 멈춤. */
   ceoTodos(): CeoTodo[] {
     const out: CeoTodo[] = [];
+    const tickets = this.h.company.tickets();
+    const titleOf = (id: string | null) => (id ? (tickets.find((t) => t.id === id)?.title ?? '') : '');
     for (const a of this.h.records.approvals('pending'))
-      out.push({ key: `appr:${a.id}`, kind: 'approval', title: a.summary, link: a.ticketId ? `/tickets/${a.ticketId}` : '/' });
-    for (const t of this.h.company.tickets())
-      if (t.hold && !TERMINAL_STATUSES.includes(t.status) && t.hold.reason !== 'waiting_dependency')
+      out.push({
+        key: `appr:${a.id}`,
+        kind: 'approval',
+        title: a.summary,
+        link: a.ticketId ? `/tickets/${a.ticketId}` : '/',
+        ticketId: a.ticketId,
+        label: titleOf(a.ticketId) || a.summary,
+        reason:
+          a.kind === 'integrate'
+            ? tr('검수 통과 · 승인하면 반영', 'Passed review · approve to merge')
+            : tr('권한 요청', 'Permission request'),
+        at: a.createdAt,
+      });
+    for (const t of tickets)
+      if (t.hold && !TERMINAL_STATUSES.includes(t.status) && t.hold.reason !== 'waiting_dependency') {
+        const why = holdReason(t);
         out.push({
           key: `hold:${t.id}:${t.hold.since}`,
           kind: t.hold.reason === 'needs_permission' ? 'permission' : 'decision',
           title: `${t.id} ${t.title}: ${t.hold.note.split('\n')[0]!.slice(0, 120)}`,
           link: `/tickets/${t.id}`,
+          ticketId: t.id,
+          label: t.title,
+          reason: why.reason,
+          at: t.hold.since,
+          action: why.action,
         });
+      }
     for (const r of this.h.records.requests())
       if (r.status === 'drafted')
         out.push({
@@ -45,6 +66,12 @@ export class CeoDesk {
           kind: 'draft',
           title: tr(`초안 확인: ${r.text.slice(0, 60)}`, `Review drafts: ${r.text.slice(0, 60)}`),
           link: '/',
+          label: r.text.split('\n')[0]!.slice(0, 100),
+          reason: tr(
+            `업무 ${r.drafts.length}개 초안${r.questions.length ? ` · 질문 ${r.questions.length}개` : ''} · 확정하면 시작`,
+            `${r.drafts.length} draft tickets${r.questions.length ? ` · ${r.questions.length} questions` : ''}`,
+          ),
+          at: r.createdAt,
         });
       else if (r.status === 'failed' && r.error && !/자동으로 다시|retrying automatically/.test(r.error))
         out.push({
@@ -52,6 +79,12 @@ export class CeoDesk {
           kind: 'failed',
           title: tr(`초안 실패: ${r.text.slice(0, 60)}`, `Drafting failed: ${r.text.slice(0, 60)}`),
           link: '/',
+          label: r.text.split('\n')[0]!.slice(0, 100),
+          reason: tr(
+            `초안을 만들지 못함: ${r.error.split('\n')[0]!.slice(0, 80)}`,
+            `Drafting failed: ${r.error.split('\n')[0]!.slice(0, 80)}`,
+          ),
+          at: r.createdAt,
         });
     for (const d of this.h.debatesToDecide())
       out.push({
@@ -59,6 +92,8 @@ export class CeoDesk {
         kind: 'decision',
         title: tr(`토론 결정: ${d.topic.slice(0, 60)}`, `Decide the debate: ${d.topic.slice(0, 60)}`),
         link: `/chat/${encodeURIComponent(d.channelId)}`,
+        label: d.topic.slice(0, 100),
+        reason: tr('토론이 끝나 결정할 차례', 'Debate finished — your call'),
       });
     for (const p of this.h.company.projects())
       if (!p.removedAt && this.h.company.store.getSetting(`profile_proposal:${p.id}`))
@@ -67,8 +102,10 @@ export class CeoDesk {
           kind: 'decision',
           title: tr(`${p.name} 프로필 변경 제안 확인`, `Review the profile proposal for ${p.name}`),
           link: '/projects',
+          label: p.name,
+          reason: tr('직원이 프로젝트 성격을 바꾸자고 제안', 'An employee proposed a profile change'),
         });
-    for (const t of this.h.company.tickets()) {
+    for (const t of tickets) {
       const later = this.h.company.store.getSetting(`later_checks:${t.id}`);
       if (later && later !== '[]')
         for (const x of JSON.parse(later) as { id: string; text: string }[])
@@ -77,6 +114,10 @@ export class CeoDesk {
             kind: 'later',
             title: tr(`나중에 확인: ${t.id} ${x.text.slice(0, 80)}`, `Check later: ${t.id} ${x.text.slice(0, 80)}`),
             link: `/tickets/${t.id}`,
+            ticketId: t.id,
+            label: x.text.slice(0, 120),
+            reason: tr(`${t.title.slice(0, 40)} · 직접 보고 확인`, `${t.title.slice(0, 40)} · check it yourself`),
+            action: { kind: 'later-ok', requirementId: x.id },
           });
     }
     for (const s of this.h.stalled())
@@ -88,6 +129,9 @@ export class CeoDesk {
           `${s.ticketId}: silent for ${Math.round(s.quietMs / 60_000)} minutes — may be stuck`,
         ),
         link: `/live/${s.runId}`,
+        ticketId: s.ticketId.startsWith('T-') ? s.ticketId : null,
+        label: this.h.company.employees().find((e) => e.id === s.employeeId)?.name ?? '',
+        reason: tr(`${Math.round(s.quietMs / 60_000)}분째 신호 없음 · 멈췄을 수 있음`, `Silent ${Math.round(s.quietMs / 60_000)} min`),
       });
     if (this.h.paused() && (this.h.company.store.getSetting('paused_reason') ?? '').startsWith('daily:'))
       out.push({
@@ -95,6 +139,8 @@ export class CeoDesk {
         kind: 'paused',
         title: tr('하루 토큰 한도에 닿아 회사가 멈췄습니다.', 'Paused: daily token limit reached.'),
         link: '/',
+        label: tr('회사가 멈춤', 'Company paused'),
+        reason: tr('하루 토큰 한도에 닿음', 'Daily token limit reached'),
       });
     return out;
   }
@@ -164,5 +210,43 @@ export class CeoDesk {
       '/',
     );
     this.h.onRequestDone(req, tickets);
+  }
+}
+
+/**
+ * 보류가 왜 대표 차례인지 한 줄로, 그리고 대시보드에서 바로 할 수 있는 일.
+ * 대표 요청(2026-10-03): 할 일 화면에 보류 메모 원문(경로·이유 문장)이 그대로 나열돼 읽기 불친절했다.
+ */
+export function holdReason(t: Ticket): { reason: string; action: CeoTodo['action'] } {
+  const note = t.hold?.note ?? '';
+  const first = note.split('\n')[0] ?? '';
+  const scope = /^(?:이 파일도 고쳐야 한다고 요청했습니다|Asked to also edit): (.+)$/m.exec(note);
+  if (scope) {
+    const paths = scope[1]!.split(', ').filter(Boolean);
+    return {
+      reason: tr(`파일 ${paths.length}개 더 고치게 해 달라는 요청`, `Asks to edit ${paths.length} more file(s)`),
+      action: { kind: 'allow', paths },
+    };
+  }
+  if (/수정 회차 \d+회 초과|Revision limit/.test(first)) {
+    const n = /(\d+)/.exec(first)?.[1] ?? '';
+    const cause = /검증|verification/i.test(first)
+      ? tr(' · 자동 검사 실패', ' · checks failed')
+      : /검수|review/i.test(first)
+        ? tr(' · 검수 반려', ' · review rejected')
+        : '';
+    return { reason: tr(`수정 ${n}회를 넘겨 멈춤${cause}`, `Stopped after ${n} rounds${cause}`), action: { kind: 'reverify' } };
+  }
+  if (/검증 실패|verification failed/i.test(first)) return { reason: tr('자동 검사 실패', 'Checks failed'), action: { kind: 'reverify' } };
+  if (/토큰 예산|Token budget/.test(first)) return { reason: tr('토큰 예산을 넘음 · 늘릴지 결정', 'Over token budget'), action: null };
+  switch (t.hold?.reason) {
+    case 'needs_permission':
+      return { reason: tr('범위 밖 수정 · 허용하거나 되돌리기', 'Out-of-scope change · allow or revert'), action: null };
+    case 'usage_limit':
+      return { reason: tr('AI 사용량 한도 · 풀리면 자동으로 다시', 'Usage limit · retries automatically'), action: null };
+    case 'on_hold':
+      return { reason: tr('멈춰 둔 업무', 'Paused by you'), action: { kind: 'release' } };
+    default:
+      return { reason: first.slice(0, 60) || tr('대표 결정 필요', 'Needs your decision'), action: null };
   }
 }

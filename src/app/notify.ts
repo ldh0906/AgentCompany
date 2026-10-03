@@ -10,6 +10,12 @@ export interface CeoTodo {
   title: string;
   /** 대시보드 안의 이동 경로(예: /tickets/T-3) */
   link: string;
+  /** 할 일 화면용: 짧은 제목(업무 ID 없이), 왜 내 차례인지 한 줄, 언제부터, 바로 할 수 있는 일 */
+  ticketId?: string | null;
+  label?: string;
+  reason?: string;
+  at?: string | null;
+  action?: { kind: 'reverify' | 'allow' | 'release' | 'later-ok'; paths?: string[]; requirementId?: string } | null;
 }
 
 export interface CeoNotice {

@@ -112,7 +112,7 @@ export interface State {
   /** 직원이 대표를 부른 최근 메시지 */
   mentions?: ChatMessage[];
   /** 지금 대표가 할 일 */
-  ceoTodos?: { key: string; kind: string; title: string; link: string }[];
+  ceoTodos?: CeoTodo[];
   /** 출력이 오래 없는 실행(멈췄을 수 있음) */
   stalledRuns?: { runId: string; ticketId: string; employeeId: string; quietMs: number }[];
   /** 최근 알림(QA 자동 반려, 요청 완료 등) */
@@ -313,4 +313,17 @@ export function subscribe(onChange: () => void): () => void {
     closed = true;
     es?.close();
   };
+}
+
+/** 지금 대표가 할 일(src/app/notify.ts CeoTodo) */
+export interface CeoTodo {
+  key: string;
+  kind: string;
+  title: string;
+  link: string;
+  ticketId?: string | null;
+  label?: string;
+  reason?: string;
+  at?: string | null;
+  action?: { kind: 'reverify' | 'allow' | 'release' | 'later-ok'; paths?: string[]; requirementId?: string } | null;
 }

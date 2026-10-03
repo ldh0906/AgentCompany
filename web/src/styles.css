@@ -2322,15 +2322,6 @@ details.advanced[open] summary {
 }
 
 /* 지금 대표가 할 일(모든 화면 위) */
-.todo-banner summary {
-  cursor: pointer;
-}
-.todo-banner ul {
-  margin: 8px 0 0;
-  padding-left: 18px;
-  display: grid;
-  gap: 4px;
-}
 
 /* 좁은 창(예: 화면 반쪽에 띄워 둔 대시보드). 실측(2026-10-01): 375px에서 위 메뉴 글자가 "대/시/보/드"처럼 한 글자씩 세로로 쌓이고,
    머리말이 화면 1/3, 숫자 타일 넷이 첫 화면을 다 차지해 할 일이 보이지 않았다. */
@@ -2614,4 +2605,69 @@ details.advanced[open] summary {
 }
 .link-btn:hover {
   text-decoration: underline;
+}
+
+/* ---------- 할 일(대표 차례) ----------
+   대표 요청(2026-10-03): 할 일이 보류 메모 원문을 줄줄이 나열해 읽기 불친절했다.
+   Linear Inbox·GitHub Notifications처럼 한 줄에 하나: 업무 ID · 무엇(굵게) · 왜(옅게) · 언제 · 바로 할 일. */
+.todo-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.inbox-group h2 {
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.inbox-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 18px;
+  cursor: pointer;
+  transition: background 0.12s var(--ease);
+}
+.inbox-row:hover,
+.inbox-row:focus-visible {
+  background: var(--panel-hover);
+  outline: none;
+}
+.inbox-id {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+.inbox-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.inbox-main b,
+.inbox-main .sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inbox-when {
+  white-space: nowrap;
+  font-size: 12px;
+}
+.inbox-actions {
+  display: flex;
+  gap: 6px;
+}
+.inbox-bulk {
+  padding: 8px 18px 14px;
+  gap: 6px;
+}
+@media (max-width: 640px) {
+  .inbox-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .inbox-id,
+  .inbox-when {
+    display: none;
+  }
 }

@@ -11,6 +11,7 @@ import { System } from './pages/System.tsx';
 import { NewTicket } from './pages/NewTicket.tsx';
 import { ChatPage } from './pages/Chat.tsx';
 import { Live } from './pages/Live.tsx';
+import { Inbox } from './pages/Inbox.tsx';
 import { isUnread, unreadMentions } from './components/unread.ts';
 import { saveTheme, savedTheme, type Theme } from './theme.ts';
 
@@ -178,6 +179,7 @@ function Shell() {
   else if (path.startsWith('/decisions'))
     page = <Projects />; // 옛 결정 기록 주소: 규칙은 프로젝트 화면에 있다
   else if (path.startsWith('/system')) page = <System />;
+  else if (path.startsWith('/inbox')) page = <Inbox />;
   else page = <Dashboard onNewTicket={() => setNewTicket(true)} />;
 
   return (
@@ -192,8 +194,13 @@ function Shell() {
         </div>
         <div className="nav-label">{lang === 'ko' ? '운영' : 'Operate'}</div>
         <nav className="nav">
+          {/* 할 일: 대표 차례인 일만 모은 곳(맨 위). 대표 요청(2026-10-03): 할 일 화면이 읽기 불친절했다. */}
+          <Link to="/inbox">
+            <Icon name="inbox" /> {lang === 'ko' ? '할 일' : 'Inbox'}{' '}
+            {todos.length > 0 && <span className="count bad">{todos.length}</span>}
+          </Link>
           <Link to="/">
-            <Icon name="dashboard" /> {t('nav_dashboard')} {pending + held > 0 && <span className="count">{pending + held}</span>}
+            <Icon name="dashboard" /> {t('nav_dashboard')}
           </Link>
           <Link to="/board">
             <Icon name="board" /> {t('nav_board')}
@@ -354,61 +361,33 @@ function Shell() {
         </div>
       </aside>
       <main className="main">
-        {todos.length > 0 && (
-          // 지금 대표가 할 일: 어느 화면에 있든 위에 보인다(대표 요청: 알려 줄 게 있으면 알려 주기).
-          <details className="banner info todo-banner" style={{ marginBottom: 14 }}>
-            <summary>
-              <b>{lang === 'ko' ? `🔔 지금 대표가 할 일 ${todos.length}개` : `🔔 ${todos.length} things need you`}</b>{' '}
-              <span className="sub">
-                {todos
-                  .slice(0, 2)
-                  .map((x) => x.title)
-                  .join(' · ')}
-              </span>
-            </summary>
-            <ul>
-              {todos.map((x) => (
-                <li key={x.key}>
-                  <Link to={x.link}>{x.title}</Link>
-                </li>
-              ))}
-            </ul>
-            {/* "나중에 확인"을 한꺼번에(실측 2026-10-02: 전권 위임을 쓰면 빨리 쌓이는데 하나씩만 처리할 수 있었다) */}
-            {todos.filter((x) => x.kind === 'later').length > 1 && (
-              <div className="row" style={{ gap: 6, marginTop: 6 }}>
-                <span className="sub">
-                  {lang === 'ko'
-                    ? `나중에 확인 ${todos.filter((x) => x.kind === 'later').length}개를 한꺼번에:`
-                    : `All ${todos.filter((x) => x.kind === 'later').length} deferred checks:`}
-                </span>
-                <button
-                  className="btn small"
-                  onClick={() =>
-                    confirm(
-                      lang === 'ko' ? '나중에 확인 항목을 모두 "확인했어요"로 기록할까요?' : 'Mark all deferred checks as confirmed?',
-                    ) &&
-                    void api('later-checks', { body: { mode: 'ok' } })
-                      .then(reload)
-                      .catch(() => {})
-                  }
-                >
-                  {lang === 'ko' ? '모두 확인했어요' : 'All confirmed'}
-                </button>
-                <button
-                  className="btn small"
-                  title={lang === 'ko' ? '확인한 척 기록하지 않고 목록에서만 뺍니다' : 'Remove without recording a confirmation'}
-                  onClick={() =>
-                    confirm(lang === 'ko' ? '나중에 확인 항목을 확인하지 않고 모두 목록에서 뺄까요?' : 'Dismiss all deferred checks?') &&
-                    void api('later-checks', { body: { mode: 'dismiss' } })
-                      .then(reload)
-                      .catch(() => {})
-                  }
-                >
-                  {lang === 'ko' ? '모두 버리기' : 'Dismiss all'}
-                </button>
-              </div>
-            )}
-          </details>
+        {todos.length > 0 && !path.startsWith('/inbox') && (
+          // 지금 대표가 할 일: 어느 화면에서든 한 줄로(무엇이 몇 개인지만). 자세한 것은 할 일 화면에서.
+          // 대표 요청(2026-10-03): 할 일 배너가 보류 메모 원문을 줄줄이 나열해 읽기 불친절했다.
+          <div className="banner info todo-banner" style={{ marginBottom: 14 }}>
+            <span className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+              <b>{lang === 'ko' ? `🔔 대표 할 일 ${todos.length}개` : `🔔 ${todos.length} need you`}</b>
+              {(
+                [
+                  [['approval'], '승인', 'approve'],
+                  [['decision', 'permission'], '결정', 'decide'],
+                  [['draft', 'failed'], '초안', 'drafts'],
+                  [['later'], '직접 확인', 'check'],
+                  [['stalled', 'paused'], '살펴볼 것', 'watch'],
+                ] as [string[], string, string][]
+              )
+                .map(([kinds, ko, en]) => [todos.filter((x) => kinds.includes(x.kind)).length, lang === 'ko' ? ko : en] as const)
+                .filter(([n]) => n > 0)
+                .map(([n, label]) => (
+                  <span key={label} className="sub">
+                    {label} {n}
+                  </span>
+                ))}
+            </span>
+            <Link to="/inbox" className="btn small">
+              {lang === 'ko' ? '할 일 보기' : 'Open inbox'}
+            </Link>
+          </div>
         )}
         {state?.delegation?.on && (
           <div className="banner info" style={{ marginBottom: 14 }}>
