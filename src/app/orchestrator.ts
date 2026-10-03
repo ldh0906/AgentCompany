@@ -3916,6 +3916,51 @@ ${failure.detail.slice(0, 400)}`,
     return t;
   }
 
+  /** 방 삭제(그룹 방만). 진행 중인 토론 방이나 지금 누가 답하는 방은 지우지 않는다. */
+  deleteRoom(channelId: string): { ok: true } {
+    const debate = this.debates.list(200).find((d) => d.channelId === channelId);
+    if (debate && debate.phase !== 'done')
+      throw new DomainError(tr('토론이 아직 끝나지 않았습니다. 결정한 뒤에 지울 수 있습니다.', 'The debate is still open.'));
+    if (this.records.runsForTicket(channelId).some((r) => r.status === 'running' && this.liveRuns.has(r.id)))
+      throw new DomainError(tr('이 방에서 직원이 답하는 중입니다. 끝난 뒤에 지울 수 있습니다.', 'Someone is replying in this room.'));
+    this.chat.remove(channelId);
+    this.company.store.appendEvent('ceo', 'channel.deleted', channelId, {});
+    this.changed('chat', channelId);
+    return { ok: true };
+  }
+
+  /**
+   * 끝난 방 모두 보관: 끝난(완료·취소·실패) 업무의 업무방, 결정이 끝난 토론 방, 시험이 끝난 인수 시험 방.
+   * 기록은 그대로 남고, 보관함에서 되살릴 수 있다.
+   */
+  archiveFinishedRooms(): { count: number } {
+    let count = 0;
+    const doneDebates = new Set(
+      this.debates
+        .list(500)
+        .filter((d) => d.phase === 'done')
+        .map((d) => d.channelId),
+    );
+    const doneAcceptance = new Set(
+      this.records
+        .requests(500)
+        .filter((q) => !(q.acceptanceRounds ?? []).some((a) => a.state === 'running'))
+        // rooms가 생기기 전 요청은 설정에 방 ID가 있다
+        .map((q) => q.rooms?.acceptance ?? this.company.store.getSetting(`acceptance_room:${q.id}`) ?? '')
+        .filter(Boolean),
+    );
+    for (const c of this.chat.channels()) {
+      if (c.archivedAt) continue;
+      const t = c.kind === 'ticket' && c.ticketId ? this.company.store.get<Ticket>('tickets', c.ticketId) : null;
+      const finished = (t && TERMINAL_STATUSES.includes(t.status)) || doneDebates.has(c.id) || doneAcceptance.has(c.id);
+      if (!finished) continue;
+      this.chat.archive(c.id, true);
+      count++;
+    }
+    if (count) this.changed('chat', 'archive');
+    return { count };
+  }
+
   /**
    * 열린 일 모두 정리: 끝나지 않은 업무를 모두 취소하고(돌고 있는 실행은 끊는다) 확정 대기·작성 중 초안을 버린다.
    * 완료된 업무(이미 반영된 것)는 그대로다. 대표 요청(2026-10-03): "현재 작업중인 애들 다 날릴수있나. 다시 시작하게".

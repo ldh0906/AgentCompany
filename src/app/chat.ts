@@ -22,6 +22,8 @@ export interface Channel {
   topic: string;
   createdAt: string;
   lastMessageAt: string;
+  /** 보관한 방: 목록에서 숨기고 기록은 남긴다. 그 방에서 대화가 다시 오가면 저절로 다시 보인다. */
+  archivedAt?: string | null;
 }
 
 export type MessageKind =
@@ -270,9 +272,41 @@ export class Chat {
       followUp: extra.followUp ?? null,
     };
     this.store.put('chat', m.id, m, { channel_id: channelId, created_at: m.createdAt });
-    if (m.createdAt > c.lastMessageAt) this.save({ ...c, lastMessageAt: m.createdAt });
+    // 보관한 방에 진짜 대화(진행 알림·권한 기록 말고)가 오면 다시 꺼낸다(예: 끝난 업무가 다시 열림)
+    const revive = c.archivedAt && kind !== 'event' && kind !== 'permission';
+    if (m.createdAt > c.lastMessageAt || revive)
+      this.save({
+        ...c,
+        lastMessageAt: m.createdAt > c.lastMessageAt ? m.createdAt : c.lastMessageAt,
+        ...(revive ? { archivedAt: null } : {}),
+      });
     this.onMessage(m);
     return m;
+  }
+
+  /**
+   * 방 보관·되살리기. "전체" 방은 보관하지 않는다.
+   * 대표 요청(2026-10-03): 업무방을 지우거나 보관할 방법이 없어서 정리하기 힘들었다.
+   */
+  archive(channelId: string, on: boolean): Channel {
+    const c = this.channel(channelId);
+    if (!c) throw new Error(tr('방을 찾을 수 없습니다.', 'Channel not found.'));
+    if (c.kind === 'general') throw new Error(tr('"전체" 방은 보관할 수 없습니다.', 'The general room cannot be archived.'));
+    return this.save({ ...c, archivedAt: on ? new Date().toISOString() : null });
+  }
+
+  /** 그룹 방 삭제(메시지까지). 업무방·1:1 방은 업무·직원의 기록이라 보관만 한다. */
+  remove(channelId: string): void {
+    const c = this.channel(channelId);
+    if (!c) throw new Error(tr('방을 찾을 수 없습니다.', 'Channel not found.'));
+    if (c.kind !== 'group')
+      throw new Error(
+        tr('업무방·1:1 방·전체 방은 지울 수 없고 보관만 할 수 있습니다.', 'Only group rooms can be deleted; archive the others.'),
+      );
+    this.store.transact(() => {
+      this.store.deleteRows('chat', 'channel_id', channelId);
+      this.store.deleteRows('channels', 'id', channelId);
+    });
   }
 
   // ---- 이벤트 → 대화 ----

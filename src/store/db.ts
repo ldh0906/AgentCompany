@@ -172,6 +172,11 @@ export class Store {
     return rows.map((r) => JSON.parse(String(r.data)) as T);
   }
 
+  /** 행 지우기(대화방 삭제 등). 열은 id·channel_id만 받는다. 이벤트 로그(감사 기록)는 지우지 않는다. */
+  deleteRows(table: EntityTable, column: 'id' | 'channel_id', value: string): number {
+    return Number(this.db.prepare(`DELETE FROM ${table} WHERE ${column} = ?`).run(value).changes);
+  }
+
   put(table: EntityTable, id: string, data: unknown, columns: Record<string, string | number | null> = {}): void {
     const names = ['id', 'data', ...Object.keys(columns)];
     const values = [id, JSON.stringify(data), ...Object.values(columns)];

@@ -174,6 +174,8 @@ export interface Channel {
   topic: string;
   createdAt: string;
   lastMessageAt: string;
+  /** 보관한 방(목록에서 숨김, 기록은 남음) */
+  archivedAt?: string | null;
 }
 
 export interface ChatMessage {

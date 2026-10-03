@@ -34,16 +34,17 @@ export function ChatPage({ channelId }: { channelId: string | null }) {
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState(false);
   const [debating, setDebating] = useState(false);
+  // 지난 업무방·보관함은 접어 둔다(대표 요청 2026-10-03: 방이 많아 정리하기 힘들었다)
+  const [showPast, setShowPast] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const { busy, run } = useAction();
 
   // 방 목록: 상태가 바뀔 때마다(새 메시지·새 업무) 다시 받는다.
   useEffect(() => {
     void api<Channel[]>('channels').then(setChannels);
   }, [state?.channels?.length, state?.tickets.length]);
-  const list = useMemo(() => {
-    const byId = new Map((channels ?? []).map((c) => [c.id, c]));
-    for (const c of state?.channels ?? []) byId.set(c.id, c);
-    return [...byId.values()];
-  }, [channels, state?.channels]);
+  // 상태에 방 목록이 있으면 그것이 기준(지운 방이 처음 받은 목록에 남아 보이지 않게)
+  const list = useMemo(() => (state?.channels?.length ? state.channels : (channels ?? [])), [channels, state?.channels]);
 
   if (!state || channels === null) return <Skeleton />;
   const employees = state.employees.filter((e) => !e.removedAt);
@@ -55,18 +56,20 @@ export function ChatPage({ channelId }: { channelId: string | null }) {
   };
   const q = filter.trim().toLowerCase();
   const match = (c: Channel) => !q || c.name.toLowerCase().includes(q);
+  const live = list.filter((c) => !c.archivedAt);
+  const archived = list.filter((c) => c.archivedAt).sort((a, b) => (b.archivedAt ?? '').localeCompare(a.archivedAt ?? ''));
+  const recent = (a: Channel, b: Channel) => b.lastMessageAt.localeCompare(a.lastMessageAt);
+  const past = live.filter((c) => c.kind === 'ticket' && !openTicket(c)).sort(recent);
   const sections: [string, Channel[]][] = [
-    [ko ? '공용' : 'Company', list.filter((c) => c.kind === 'general')],
-    [ko ? '그룹 방' : 'Groups', list.filter((c) => c.kind === 'group').sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt))],
-    [
-      ko ? '진행 중인 업무방' : 'Open tickets',
-      list.filter((c) => c.kind === 'ticket' && openTicket(c)).sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt)),
-    ],
-    [
-      ko ? '지난 업무방' : 'Past tickets',
-      list.filter((c) => c.kind === 'ticket' && !openTicket(c)).sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt)),
-    ],
+    [ko ? '공용' : 'Company', live.filter((c) => c.kind === 'general')],
+    [ko ? '그룹 방' : 'Groups', live.filter((c) => c.kind === 'group').sort(recent)],
+    [ko ? '진행 중인 업무방' : 'Open tickets', live.filter((c) => c.kind === 'ticket' && openTicket(c)).sort(recent)],
   ];
+  const archiveFinished = () =>
+    run(
+      () => api<{ count: number }>('channels-archive-finished', { body: {} }),
+      ko ? '끝난 방을 보관함으로 옮겼습니다.' : 'Archived finished rooms.',
+    ).then(() => (reload(), void api<Channel[]>('channels').then(setChannels)));
   const dmOf = (e: Employee) => list.find((c) => c.id === `dm:${e.id}`);
   const openDm = (e: Employee) =>
     void api<Channel>(`dm/${e.id}`, { body: {} }).then((c) => (reload(), go(`/chat/${encodeURIComponent(c.id)}`)));
@@ -107,6 +110,29 @@ export function ChatPage({ channelId }: { channelId: string | null }) {
             </div>
           ) : null,
         )}
+        {past.filter(match).length > 0 && (
+          <div className="chat-section">
+            <div className="spread">
+              <button className="nav-label link-btn" onClick={() => setShowPast(!showPast)}>
+                {showPast ? '▾' : '▸'} {ko ? `지난 업무방 ${past.length}` : `Past tickets ${past.length}`}
+              </button>
+              <button
+                className="link-btn"
+                disabled={busy}
+                title={ko ? '끝난 업무방·결정된 토론 방·끝난 인수 시험 방을 보관함으로(기록은 남음)' : 'Archive finished rooms'}
+                onClick={() => void archiveFinished()}
+              >
+                {ko ? '끝난 방 모두 보관' : 'Archive finished'}
+              </button>
+            </div>
+            {(showPast || q) &&
+              past
+                .filter(match)
+                .map((c) => (
+                  <ChannelRow key={c.id} c={c} active={current?.id === c.id} onClick={() => go(`/chat/${encodeURIComponent(c.id)}`)} />
+                ))}
+          </div>
+        )}
         <div className="chat-section">
           <div className="nav-label">{ko ? '1:1 대화' : 'Direct'}</div>
           {employees
@@ -121,6 +147,19 @@ export function ChatPage({ channelId }: { channelId: string | null }) {
               );
             })}
         </div>
+        {archived.length > 0 && (
+          <div className="chat-section">
+            <button className="nav-label link-btn" onClick={() => setShowArchived(!showArchived)}>
+              {showArchived ? '▾' : '▸'} {ko ? `보관함 ${archived.length}` : `Archived ${archived.length}`}
+            </button>
+            {(showArchived || q) &&
+              archived
+                .filter(match)
+                .map((c) => (
+                  <ChannelRow key={c.id} c={c} active={current?.id === c.id} onClick={() => go(`/chat/${encodeURIComponent(c.id)}`)} />
+                ))}
+          </div>
+        )}
       </aside>
       <section className="chat-main">
         {current ? (
@@ -227,6 +266,45 @@ function Room({ channel }: { channel: Channel }) {
             <input type="checkbox" checked={showPerms} onChange={() => setShowPerms(!showPerms)} />
             {ko ? `권한 처리 보기 (${permCount})` : `Permissions (${permCount})`}
           </label>
+          {/* 보관·되살리기·삭제(대표 요청 2026-10-03: 방을 지우거나 보관할 방법이 없어 정리하기 힘들었다).
+              그룹 방만 지울 수 있다: 업무방·1:1 방은 업무·직원의 기록이라 보관만. */}
+          {channel.kind !== 'general' && (
+            <button
+              className="btn small"
+              disabled={busy}
+              title={
+                channel.archivedAt
+                  ? undefined
+                  : ko
+                    ? '목록에서 숨깁니다. 기록은 남고 보관함에서 되살릴 수 있습니다.'
+                    : 'Hide from the list; history stays.'
+              }
+              onClick={() =>
+                run(
+                  () => api(`channels/${encodeURIComponent(channel.id)}/archive`, { body: { on: !channel.archivedAt } }),
+                  channel.archivedAt ? (ko ? '되살렸습니다.' : 'Restored.') : ko ? '보관했습니다.' : 'Archived.',
+                ).then(() => (reload(), go('/chat')))
+              }
+            >
+              {channel.archivedAt ? (ko ? '되살리기' : 'Restore') : ko ? '보관' : 'Archive'}
+            </button>
+          )}
+          {channel.kind === 'group' && (
+            <button
+              className="btn small danger"
+              disabled={busy}
+              onClick={() =>
+                confirm(
+                  ko ? `"${channel.name}" 방과 대화를 지울까요? 되돌릴 수 없습니다.` : `Delete "${channel.name}" and its messages?`,
+                ) &&
+                run(() => api(`channels/${encodeURIComponent(channel.id)}/delete`, { body: {} }), ko ? '지웠습니다.' : 'Deleted.').then(
+                  () => (reload(), go('/chat')),
+                )
+              }
+            >
+              {ko ? '삭제' : 'Delete'}
+            </button>
+          )}
         </div>
       </header>
       {debate && <DebatePanel debate={debate} />}

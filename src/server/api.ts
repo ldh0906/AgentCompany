@@ -175,6 +175,15 @@ export class Api {
         this.orch.chat.post(c.id, 'system', tr('대표가 방을 열었습니다.', 'The CEO opened this room.'), 'event');
         return c;
       }
+      case 'POST channels/:id/archive': {
+        const c = this.orch.chat.archive(id!, b.on !== false);
+        this.orch.company.store.appendEvent('ceo', b.on !== false ? 'channel.archived' : 'channel.unarchived', id!, {});
+        return c;
+      }
+      case 'POST channels/:id/delete':
+        return this.orch.deleteRoom(id!);
+      case 'POST channels-archive-finished':
+        return this.orch.archiveFinishedRooms();
       case 'POST channels/:id/members':
         return this.orch.chat.addMembers(id!, strList(b, 'members'));
       case 'POST dm/:id':

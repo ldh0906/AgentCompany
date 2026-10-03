@@ -285,3 +285,34 @@ test('멘션 없이 써도 방 담당이 답한다: 업무방은 담당자, 그�
   await until(env, () => env.orch.chat.messages(group.id).some((m) => m.author === qa!.id));
   await env.orch.idle();
 });
+
+test(
+  '방 정리: 보관하면 숨고 대화가 오면 다시 보이며, 그룹 방만 지울 수 있고, 끝난 방은 한꺼번에 보관한다',
+  { timeout: 60_000 },
+  async (t) => {
+    const env = await setup(t);
+    const [impl, qa] = env.company.employees();
+    const tk = newImplTicket(env);
+    const room = env.orch.chat.ensureTicketChannel(tk.id)!;
+    // 보관 → 진행 알림으로는 다시 나오지 않고, 진짜 대화가 오면 다시 나온다
+    env.orch.chat.archive(room.id, true);
+    env.orch.chat.post(room.id, 'system', '진행 알림', 'event');
+    assert.ok(env.orch.chat.channel(room.id)!.archivedAt, '알림으로는 다시 나오지 않는다');
+    env.orch.chat.post(room.id, impl!.id, '다시 작업합니다', 'report');
+    assert.equal(env.orch.chat.channel(room.id)!.archivedAt, null, '대화가 오면 다시 보인다');
+    env.orch.chat.ensureGeneral();
+    assert.throws(() => env.orch.chat.archive('general', true), /전체/);
+    // 삭제는 그룹 방만
+    assert.throws(() => env.orch.deleteRoom(room.id), /보관만/);
+    const group = env.orch.chat.createGroup({ name: '잡담', members: [impl!.id, qa!.id], createdBy: 'ceo' });
+    env.orch.chat.post(group.id, 'ceo', '안녕', 'chat');
+    env.orch.deleteRoom(group.id);
+    assert.equal(env.orch.chat.channel(group.id), null);
+    assert.equal(env.orch.chat.messages(group.id).length, 0, '메시지도 지운다');
+    // 끝난 업무방은 한꺼번에 보관
+    env.orch.cancel(tk.id, '테스트');
+    assert.deepEqual(env.orch.archiveFinishedRooms(), { count: 1 });
+    assert.ok(env.orch.chat.channel(room.id)!.archivedAt);
+    await env.orch.idle();
+  },
+);
