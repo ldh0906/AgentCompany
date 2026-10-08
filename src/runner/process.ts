@@ -37,10 +37,32 @@ export interface RunningProcess {
   kill(): Promise<void>;
 }
 
+/**
+ * 원자적 교체용 rename. Windows는 대상 파일을 다른 프로세스(셔틀·백신·색인)가 잠깐 잡고 있으면 EPERM/EACCES/EBUSY로
+ * 실패한다: 잠깐 기다렸다가 다시 한다(그 밖의 오류와 횟수를 넘긴 실패는 그대로 던진다).
+ * 실측(2026-10-08, e2e): 병합 재검증의 run.json 교체가 EPERM으로 실패해 요청 결과물 반영이 통째로 멈췄다.
+ */
+export async function renameWithRetry(
+  from: string,
+  to: string,
+  doRename: (a: string, b: string) => Promise<void> = rename,
+  tries = 10,
+): Promise<void> {
+  for (let i = 1; ; i++) {
+    try {
+      return await doRename(from, to);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (i >= tries || !['EPERM', 'EACCES', 'EBUSY'].includes(code ?? '')) throw error;
+      await new Promise((r) => setTimeout(r, 20 * i));
+    }
+  }
+}
+
 async function writeJsonAtomic(file: string, data: unknown): Promise<void> {
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   await writeFile(tmp, JSON.stringify(data, null, 2), 'utf8');
-  await rename(tmp, file);
+  await renameWithRetry(tmp, file);
 }
 
 export function runFilePaths(runDir: string) {

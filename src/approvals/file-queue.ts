@@ -1,7 +1,8 @@
 // 파일 기반 승인 큐 (M0 작업자 B 구현, 검수 후 이식). MCP 승인 서버처럼 DB에 접근하지 않는 프로세스와 데몬을 잇는다.
-import { mkdir, writeFile, rename, readFile, unlink } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { renameWithRetry } from '../runner/process.ts';
 import { setTimeout as delay } from 'node:timers/promises';
 
 export type Decision = { decision: 'allow' | 'deny' | 'timeout'; message?: string; scope?: 'once' | 'ticket' };
@@ -12,7 +13,7 @@ export async function atomicJson(path: string, value: unknown): Promise<void> {
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, JSON.stringify(value, null, 2), { flag: 'wx', mode: 0o600 });
-    await rename(temporary, path);
+    await renameWithRetry(temporary, path);
   } finally {
     await unlink(temporary).catch(() => {});
   }
