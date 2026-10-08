@@ -57,7 +57,7 @@ export async function setup(
     await orch.stop();
     await orch.idle();
     store.close();
-    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    rmSync(root, { recursive: true, force: true, maxRetries: 15, retryDelay: 300 });
   });
   const project = company.registerProject({
     name: 'demo',

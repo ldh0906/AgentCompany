@@ -22,8 +22,11 @@ test('반영 충돌은 담당자에게 돌아가고, 최신 기준을 합쳐 정
 
   const a = env.orch.records.pendingApprovalFor(tk.id, 'integrate')!;
   env.orch.decideIntegration(a.id, 'approved');
-  const back = await driveUntil(env, tk.id, (x) => x.status === 'changes_requested' || x.status === 'done' || x.hold !== null, 60_000);
-  assert.equal(back.status, 'changes_requested', '충돌은 완료가 아니다');
+  // 돌려보낸 뒤 다음 작업이 곧바로 시작될 수 있어 지나가는 상태가 아니라 기록(이벤트)으로 본다
+  const sentBack = () => env.company.store.events(tk.id).some((e) => e.type === 'ticket.changes_requested');
+  const back = await driveUntil(env, tk.id, (x) => sentBack() || x.status === 'done' || x.hold !== null, 60_000);
+  assert.ok(sentBack(), `충돌은 완료가 아니다(상태 ${back.status})`);
+  assert.notEqual(back.status, 'done');
   const ev = env.company.store
     .events(tk.id)
     .filter((e) => e.type === 'ticket.changes_requested')
