@@ -3,8 +3,14 @@
 // 앱이 PORT(대부분의 서버·개발 서버가 읽는다)나 AC_PORT, AC_DB_NAME을 쓰면 저절로 나뉜다.
 import { createServer } from 'node:net';
 
-/** 지금 비어 있는 포트(운영체제가 고른다). 잡았다 바로 놓으므로 드물게 그사이 다른 것이 잡을 수 있다. */
-export function freePort(): Promise<number> {
+/**
+ * 이 데몬이 내준 포트(포트 → 만료 시각). 운영체제는 방금 닫은 포트를 곧바로 다시 줄 수 있어, 실행이 실제로 서버를 열기 전에
+ * 다른 실행이 같은 포트를 받을 수 있었다(QA). 내준 포트는 일정 시간 다시 내주지 않는다(회사 밖 프로세스까지 막지는 못한다).
+ */
+const leased = new Map<number, number>();
+const LEASE_MS = 6 * 60 * 60_000;
+
+function osPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = createServer();
     srv.unref();
@@ -15,6 +21,19 @@ export function freePort(): Promise<number> {
       srv.close(() => (port ? resolve(port) : reject(new Error('no port'))));
     });
   });
+}
+
+/** 지금 비어 있고, 이 데몬이 최근에 내주지 않은 포트. 내준 포트는 기록한다. */
+export async function freePort(): Promise<number> {
+  const now = Date.now();
+  for (const [p, until] of leased) if (until < now) leased.delete(p);
+  for (let i = 0; i < 50; i++) {
+    const port = await osPort();
+    if (leased.has(port)) continue;
+    leased.set(port, now + LEASE_MS);
+    return port;
+  }
+  throw new Error('no unleased port');
 }
 
 /** 실행 하나의 격리 환경 변수. slot은 실행·검사를 구분하는 이름(실행 ID 등). */

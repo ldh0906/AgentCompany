@@ -108,7 +108,7 @@ import { ScreenQa } from './screen-qa.ts';
 import { Delegation } from './delegation.ts';
 import { Debates } from './debate.ts';
 import { Acceptance, acceptanceSummary } from './acceptance.ts';
-import { applyFormula, builtInFormulas, checkFormulaDrafts, formulaBlock, formulaByName } from './formulas.ts';
+import { applyFormula, builtInFormulas, checkFormulaDrafts, formulaBlock, formulaByName, missingVerify } from './formulas.ts';
 import { deliverableKindOf, isRunnablePath, projectDoc, projectDocList } from './deliverables.ts';
 import { checkLinks, extractLinks, linkSummary, type LinkResult } from './link-check.ts';
 
@@ -660,6 +660,16 @@ export class Orchestrator {
         }
         // 사용량 한도 보류는 30분마다 스스로 다시 시도한다(아직 한도면 곧바로 다시 보류, 실행 예산은 쓰지 않음).
         // 전에는 대표가 한도가 풀렸는지 가늠해 직접 재개해야 했다.
+        // 월 예산 보류: 그 직원이 예산 안으로 돌아왔을 때만(한도 상향·다음 달) 바로 푼다. 30분 재시도는 CLI 사용량 한도에만.
+        const budgetOwner = t.hold?.reason === 'usage_limit' ? this.company.store.getSetting(`budget_hold:${t.id}`) : null;
+        if (budgetOwner) {
+          const owner = this.company.store.get<Employee>('employees', budgetOwner);
+          if (!owner || owner.removedAt || !this.overBudget(owner)) {
+            this.company.store.setSetting(`budget_hold:${t.id}`, '');
+            this.apply(t.id, { type: 'release_hold' });
+          }
+          continue;
+        }
         if (t.hold?.reason === 'usage_limit' && Date.now() - Date.parse(t.hold.since) >= USAGE_RETRY_MS) {
           this.apply(t.id, { type: 'release_hold' });
           continue;
@@ -774,11 +784,19 @@ export class Orchestrator {
     const load = (e: Employee) =>
       this.company.tickets().filter((x) => x.assigneeId === e.id && !TERMINAL_STATUSES.includes(x.status)).length;
     // 이번 달 예산을 다 쓴 직원에게는 새 업무를 주지 않는다(멈춘 직원)
+    const spent = active.filter((e) => this.overBudget(e));
     const pick = pickStaff(
       t,
-      active.filter((e) => !this.overBudget(e)),
+      active.filter((e) => !spent.includes(e)),
       load,
     );
+    if (!pick.ok && spent.length && pickStaff(t, active, load).ok) {
+      // 예산을 다 쓴 직원이 빠져서 맡을 사람이 없다: 대표 결정 보류(대표만 풀 수 있음)가 아니라 대기열에서 기다린다.
+      // 한도를 올리거나 다음 달이 되면 다음 tick에 저절로 배정된다.
+      this.noteOnce(t.id, 'ticket.waiting_budget', { employees: spent.map((e) => e.id) });
+      for (const e of spent) this.notifyBudget(e, this.overBudget(e)!, t.id);
+      return;
+    }
     if (!pick.ok) {
       const need = DIFFICULTY_RANK[difficultyOf(t)];
       const note =
@@ -1031,20 +1049,25 @@ export class Orchestrator {
         `${e.name} used up this month's token budget (${fmt(b.limit)}). Raise it on the Team page to continue (it also resumes on the 1st).`,
       ),
     });
+    this.notifyBudget(e, b, t.id);
+    return true;
+  }
+
+  /** 예산을 다 쓴 직원: 대표에게 한 달에 한 번 알린다. */
+  private notifyBudget(e: Employee, b: { used: number; limit: number }, ticketId: string): void {
+    const fmt = (n: number) => `${Math.round(n / 1e4).toLocaleString()}${tr('만', '0k')}`;
     const d = new Date();
     const key = `budget_notice:${e.id}:${d.getFullYear()}-${d.getMonth() + 1}`;
-    if (!this.company.store.getSetting(key)) {
-      this.company.store.setSetting(key, '1');
-      this.desk.notice(
-        tr(`${e.name}의 이번 달 예산을 다 썼습니다`, `${e.name} used up this month's budget`),
-        tr(
-          `토큰 ${fmt(b.used)} / 한도 ${fmt(b.limit)}. 하던 실행은 마쳤고, 새 실행은 멈췄습니다(${t.id} 등). 직원 화면에서 한도를 올리거나 다른 직원에게 맡기세요.`,
-          `${fmt(b.used)} of ${fmt(b.limit)} tokens. Running work finished; new runs are stopped (${t.id} and others). Raise the limit or reassign.`,
-        ),
-        '/org',
-      );
-    }
-    return true;
+    if (this.company.store.getSetting(key)) return;
+    this.company.store.setSetting(key, '1');
+    this.desk.notice(
+      tr(`${e.name}의 이번 달 예산을 다 썼습니다`, `${e.name} used up this month's budget`),
+      tr(
+        `토큰 ${fmt(b.used)} / 한도 ${fmt(b.limit)}. 하던 실행은 마쳤고, 새 실행은 멈췄습니다(${ticketId} 등). 직원 화면에서 한도를 올리거나 다른 직원에게 맡기세요.`,
+        `${fmt(b.used)} of ${fmt(b.limit)} tokens. Running work finished; new runs are stopped (${ticketId} and others). Raise the limit or reassign.`,
+      ),
+      '/org',
+    );
   }
 
   /** 대표가 직원 예산을 바꾸면: 예산 때문에 멈춘 그 직원의 업무를 바로 다시 본다. */
@@ -1155,6 +1178,7 @@ export class Orchestrator {
     });
     await mkdir(runDir, { recursive: true });
     for (const f of inv.files) await writeFile(f.path, f.content, 'utf8');
+    const spent = this.overBudget(p.employee);
     await writeFile(path.join(runDir, 'prompt.md'), p.prompt, 'utf8');
 
     const located =
@@ -1206,6 +1230,19 @@ export class Orchestrator {
       effort: p.employee.effort ?? null,
     });
 
+    if (spent) {
+      // 예산을 다 쓴 직원의 새 실행은 띄우지 않는다(어느 기능이 불렀든). 각 기능은 보통의 실패로 처리한다
+      // (토론은 그 사람 몫을 비우고, 인수 시험은 그 회차를 실패로 남기며, 작업은 사용량 한도로 멈춘다).
+      this.notifyBudget(p.employee, spent, p.ticket.id);
+      await this.finishRun(run, {
+        failure: 'usage_limit',
+        detail: tr(
+          `${p.employee.name}이(가) 이번 달 토큰 예산을 다 써서 실행하지 않았습니다.`,
+          `${p.employee.name} used up this month's token budget; the run was not started.`,
+        ),
+      });
+      return runId;
+    }
     if (!located?.launch) {
       await this.finishRun(run, {
         failure: 'spawn_failed',
@@ -4319,7 +4356,6 @@ ${failure.detail.slice(0, 400)}`,
       : parseDrafts(finalText, run.nonce);
     // 대표가 고른 작업 흐름: 단계가 빠지거나 순서가 틀리면 거부하고, 맞으면 단계의 필수 요구사항·순서를 입힌다.
     const formula = req?.formula ? formulaByName(req.formula) : null;
-    const project = req ? this.company.store.get<Project>('projects', req.projectId) : null;
     const flowError = raw.ok && formula ? checkFormulaDrafts(formula, raw.report.tickets) : null;
     const parsed = !raw.ok
       ? raw
@@ -4337,7 +4373,7 @@ ${failure.detail.slice(0, 400)}`,
               ...raw,
               report: {
                 ...raw.report,
-                tickets: applyFormula(formula, raw.report.tickets, new Set((project?.verifyCommands ?? []).map((v) => v.evidenceType))),
+                tickets: applyFormula(formula, raw.report.tickets),
               },
             }
           : raw;
@@ -4453,7 +4489,30 @@ ${failure.detail.slice(0, 400)}`,
         requestId,
         pending.map((index) => ({ index, answer: null })),
       );
-    const list = drafts ?? req.drafts;
+    // 작업 흐름은 확정할 때 다시 검사한다(확정 화면에서 단계를 빼거나 API로 step을 지워 우회하지 못하게, QA).
+    // 흐름이 단위 테스트 등을 요구하는데 그 검사 명령이 없으면 확정 전에 막는다(요구사항을 약하게 바꾸지 않는다).
+    const formula = req.formula ? formulaByName(req.formula) : null;
+    let list = drafts ?? req.drafts;
+    if (formula) {
+      const bad = checkFormulaDrafts(formula, list);
+      if (bad)
+        throw new DomainError(
+          tr(
+            `작업 흐름 "${formula.title}"의 단계를 지켜야 확정할 수 있습니다: ${bad}. 흐름 없이 하려면 요청을 다시 보내세요.`,
+            `Confirm only with every step of the "${formula.title}" workflow: ${bad}. Ask again without a workflow to change that.`,
+          ),
+        );
+      const project = this.company.requireProject(req.projectId);
+      const lacking = missingVerify(formula, list, new Set(project.verifyCommands.map((v) => v.evidenceType)));
+      if (lacking.length)
+        throw new DomainError(
+          tr(
+            `작업 흐름 "${formula.title}"은(는) ${lacking.join(', ')} 검사가 필요한데, 이 프로젝트에 그 검사 명령이 없습니다. 프로젝트 화면에서 검사 명령(예: npm test)을 추가한 뒤 확정하세요.`,
+            `The "${formula.title}" workflow needs ${lacking.join(', ')} checks, but this project has no such verify command. Add one (e.g. npm test) in Projects, then confirm.`,
+          ),
+        );
+      list = applyFormula(formula, list);
+    }
     const created: Ticket[] = [];
     this.company.store.transact(() => {
       // 공유 계약(첫 초안): 다른 업무는 모두 계약이 끝난 뒤 시작한다(비서실장이 빠뜨려도 코드가 건다).

@@ -23,3 +23,10 @@ test('isolationEnv: PORT·AC_PORT가 같고, 실행마다 DB 이름이 다르며
   assert.equal(b.AC_DB_NAME, 'ac_verify_t_1_2');
   assert.notEqual(a.AC_DB_NAME, b.AC_DB_NAME);
 });
+
+test('동시에 여러 실행이 받아도 같은 포트를 두 번 내주지 않는다(내준 포트는 다시 쓰지 않음)', async () => {
+  const ports = await Promise.all(Array.from({ length: 40 }, () => freePort()));
+  assert.equal(new Set(ports).size, ports.length);
+  const more = await Promise.all(Array.from({ length: 20 }, () => freePort()));
+  assert.ok(more.every((p) => !ports.includes(p)), '앞서 내준 포트를 다시 주지 않는다');
+});

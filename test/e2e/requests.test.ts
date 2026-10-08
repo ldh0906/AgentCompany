@@ -330,3 +330,33 @@ test(
     assert.match(failed.error ?? '', /작업 흐름 "리팩터링"을 따르지 않았습니다/);
   },
 );
+
+test('작업 흐름은 확정할 때 다시 검사한다: 단계를 빼거나 필요한 검사 명령이 없으면 확정하지 않는다', { timeout: 120_000 }, async (t) => {
+  const env = await setup(t);
+  env.company.hireEmployee({ name: '비서실장', roles: ['chief-of-staff'], cli: 'fake', model: 'diligent' });
+  const req = await env.orch.submitRequest(env.projectId, '정산 모듈 정리', 'refactor');
+  await env.orch.idle();
+  const drafts = env.orch.records.request(req.id)!.drafts;
+  assert.equal(drafts.length, 2);
+  // 확정 화면에서 단계 하나를 빼면 거부
+  assert.throws(() => env.orch.acceptRequest(req.id, [drafts[0]!]), /단계를 지켜야/);
+  // step을 지워 보내도 거부
+  assert.throws(
+    () =>
+      env.orch.acceptRequest(
+        req.id,
+        drafts.map((d) => ({ ...d, step: undefined })),
+      ),
+    /단계를 지켜야/,
+  );
+  // 단위 테스트 검사 명령이 없으면 요구사항을 낮추지 않고 확정을 막는다
+  const project = env.company.requireProject(env.projectId);
+  env.company.updateProject(env.projectId, { verifyCommands: [] });
+  assert.throws(() => env.orch.acceptRequest(req.id), /검사 명령이 없습니다/);
+  env.company.updateProject(env.projectId, { verifyCommands: project.verifyCommands });
+  // 요구사항 증거를 약하게 고쳐 보내도 흐름의 증거로 돌아간다
+  const weak = drafts.map((d) => ({ ...d, requirements: d.requirements.map((r) => ({ ...r, evidenceType: 'inspection' })) }));
+  const [pin, reshape] = env.orch.acceptRequest(req.id, weak);
+  assert.deepEqual(reshape!.dependsOn, [pin!.id]);
+  assert.ok(pin!.requirements.some((r) => r.text.includes('지금 동작을 확인하는 테스트') && r.evidenceType === 'unit_test'));
+});

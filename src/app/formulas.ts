@@ -5,7 +5,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { TicketDraft } from '../agents/report.ts';
-import type { EvidenceType } from '../core/types.ts';
+import { EVIDENCE_STRENGTH, type EvidenceType } from '../core/types.ts';
 import { parseYaml, type Yaml } from '../cli/yaml.ts';
 
 export interface FormulaStep {
@@ -103,31 +103,46 @@ export function checkFormulaDrafts(f: Formula, drafts: Pick<TicketDraft, 'step' 
 }
 
 /**
- * 흐름을 초안에 입힌다: 단계의 업무 종류, 필수 요구사항(이미 있으면 그대로), 앞 단계 업무 모두에 의존.
- * 프로젝트가 만들 수 없는 증거(그 종류의 검사 명령이 없음)는 검수자 판단(inspection)으로 낮춘다(영영 멈추지 않게).
+ * 흐름을 초안에 입힌다: 단계의 업무 종류, 필수 요구사항, 앞 단계 업무 모두에 의존.
+ * 필수 요구사항의 증거는 약해지지 않는다: 같은 문장이 더 약한 증거로 이미 있으면 흐름의 증거로 올린다(QA: "회귀 테스트"가
+ * 검수자 판단으로 낮아질 수 있었다). 프로젝트에 그 검사 명령이 없으면 확정할 때 막는다(missingVerify).
  */
-export function applyFormula(f: Formula, drafts: TicketDraft[], verifyTypes: Set<string>): TicketDraft[] {
+export function applyFormula(f: Formula, drafts: TicketDraft[]): TicketDraft[] {
   const stepOf = (d: TicketDraft) => f.steps.findIndex((s) => s.key === d.step);
-  const machine = new Set(['unit_test', 'static_check', 'runtime']);
+  const strength = (e: string) => EVIDENCE_STRENGTH[e as EvidenceType] ?? 0;
   return drafts.map((d, i) => {
     const k = stepOf(d);
     if (k < 0) return d;
     const step = f.steps[k]!;
-    const have = new Set(d.requirements.map((r) => r.text.trim()));
-    const added = step.requirements
-      .filter((r) => !have.has(r.text))
-      .map((r) => ({
-        text: r.text,
-        evidenceType: machine.has(r.evidenceType) && !verifyTypes.has(r.evidenceType) ? 'inspection' : r.evidenceType,
-      }));
+    const need = new Map(step.requirements.map((r) => [r.text, r.evidenceType] as const));
+    const kept = d.requirements.map((r) => {
+      const min = need.get(r.text.trim());
+      return min && strength(min) > strength(r.evidenceType) ? { ...r, evidenceType: min } : r;
+    });
+    const have = new Set(kept.map((r) => r.text.trim()));
+    const added = step.requirements.filter((r) => !have.has(r.text)).map((r) => ({ text: r.text, evidenceType: r.evidenceType }));
     const before = drafts.flatMap((x, j) => (j < i && stepOf(x) === k - 1 ? [j] : []));
     return {
       ...d,
       type: step.type,
-      requirements: [...added, ...d.requirements],
+      requirements: [...added, ...kept],
       dependsOn: [...new Set([...d.dependsOn, ...before])].sort((a, b) => a - b),
     };
   });
+}
+
+/** 흐름이 요구하는 기계 검사(단위 테스트 등) 중 프로젝트에 검사 명령이 없는 종류 */
+export function missingVerify(f: Formula, drafts: Pick<TicketDraft, 'step'>[], verifyTypes: Set<string>): string[] {
+  const machine = new Set<string>(['unit_test', 'static_check', 'runtime']);
+  const used = new Set(drafts.map((d) => d.step));
+  return [
+    ...new Set(
+      f.steps
+        .filter((s) => used.has(s.key))
+        .flatMap((s) => s.requirements.map((r) => r.evidenceType))
+        .filter((e) => machine.has(e) && !verifyTypes.has(e)),
+    ),
+  ];
 }
 
 /** 비서실장 지시에 넣을 흐름 설명 */

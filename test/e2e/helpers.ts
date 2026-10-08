@@ -57,7 +57,13 @@ export async function setup(
     await orch.stop();
     await orch.idle();
     store.close();
-    rmSync(root, { recursive: true, force: true, maxRetries: 15, retryDelay: 300 });
+    // Windows: 끝난 직후 자식 프로세스가 폴더를 잠깐 잡고 있으면 지우기가 EPERM으로 실패한다.
+    // 정리 실패로 통과한 테스트를 실패로 만들지 않는다(임시 폴더라 남아도 해가 없다).
+    try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 15, retryDelay: 300 });
+    } catch (error) {
+      console.warn(`임시 폴더를 지우지 못함(무시): ${root}: ${String((error as Error).message ?? error)}`);
+    }
   });
   const project = company.registerProject({
     name: 'demo',
