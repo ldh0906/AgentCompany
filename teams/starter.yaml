@@ -1,0 +1,13 @@
+# starter: 작게 시작. 리드 1명이 요청을 업무로 나누고 검수하며, 구현 1명이 만든다.
+# cli: primary(로그인된 첫 AI) · secondary(다른 AI가 있으면 그것) · claude · codex · agy
+name: starter
+description: 리드(계획·검수) 1명 + 구현 1명. 한 번에 하나씩 확실하게.
+seats:
+  - name: 리드
+    roles: [chief-of-staff, planner, qa]
+    rank: lead
+    cli: primary
+  - name: 구현
+    roles: [implementer]
+    rank: senior
+    cli: secondary

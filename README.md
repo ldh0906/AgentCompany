@@ -46,6 +46,21 @@ The demo company has four fake employees: a diligent one, a **lazy** one who cla
 
 <p align="center"><img src="docs/images/quarantine.png" width="820" alt="A rogue employee's out-of-scope edit is quarantined"></p>
 
+## From the terminal (fastest)
+
+Run these inside a git repository:
+
+```bash
+ac up                         # register this folder, hire the starter team (starts the company in the background)
+ac ask "add a login screen"   # the lead splits it into tickets → you confirm → work starts
+ac                            # terminal screen: team, progress, what needs you, talk to the lead
+ac approve                    # approve the request's result (one approval per request)
+```
+
+Teams are YAML files: `ac up workshop`, `ac up factory`, or your own `ac up my-team.yaml` (`ac team export my-team.yaml` saves the current one). `primary`/`secondary` pick whichever AI CLIs you are logged into. No subscription? `ac up --fake`.
+
+**One request, one result.** The tickets of a request stack on one internal branch (later tickets build on earlier ones), each verified and reviewed on the way. When they and the acceptance test are done you approve the whole result once. If several tickets must agree on names or values, the first ticket is a **shared contract**: its files are frozen for the rest of the request, and only you can allow a change.
+
 ## Use it with your real CLIs
 
 ```bash

@@ -1,0 +1,20 @@
+# workshop: 꾸준한 저장소 작업. 구현 둘이 동시에 일하고, 검수는 다른 AI가 맡는다.
+name: workshop
+description: 리드 + 구현 2명(서로 다른 AI) + 검수 1명. 일반적인 개발에 알맞음.
+seats:
+  - name: 리드
+    roles: [chief-of-staff, planner, qa]
+    rank: lead
+    cli: primary
+  - name: 구현 A
+    roles: [implementer]
+    rank: senior
+    cli: primary
+  - name: 구현 B
+    roles: [implementer]
+    rank: senior
+    cli: secondary
+  - name: 검수
+    roles: [qa]
+    rank: senior
+    cli: secondary

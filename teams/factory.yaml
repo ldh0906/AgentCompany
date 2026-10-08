@@ -1,0 +1,36 @@
+# factory: 큰 제품 작업. 설계·화면·문서까지 나눠 맡고, 검수는 AI마다 하나씩.
+name: factory
+description: 리드 + 설계 + 구현 2명 + 화면 + 검수 2명 + 기록. 큰 기능을 여러 갈래로 동시에.
+seats:
+  - name: 리드
+    roles: [chief-of-staff, planner]
+    rank: lead
+    cli: primary
+  - name: 설계
+    roles: [architect, planner, qa]
+    rank: lead
+    cli: secondary
+  - name: 구현 A
+    roles: [implementer]
+    rank: senior
+    cli: primary
+  - name: 구현 B
+    roles: [implementer]
+    rank: senior
+    cli: secondary
+  - name: 화면
+    roles: [ux, implementer]
+    rank: senior
+    cli: primary
+  - name: 검수 A
+    roles: [qa]
+    rank: senior
+    cli: primary
+  - name: 검수 B
+    roles: [qa]
+    rank: senior
+    cli: secondary
+  - name: 기록
+    roles: [recorder]
+    rank: junior
+    cli: secondary
