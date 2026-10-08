@@ -138,3 +138,17 @@ test('재시작(저장소 다시 열기) 후 티켓·직원·이벤트 유지, �
     'T-2',
   );
 });
+
+test('설정 지우기와 접두어 목록(%·_는 와일드카드가 아니다)', (t) => {
+  const s = tempDb(t).open();
+  s.setSetting('tool_pending:R-1:a', '{}');
+  s.setSetting('tool_pending:R-2:b', '{}');
+  s.setSetting('tool_pendingX', '{}');
+  s.setSetting('a%b', '1');
+  s.setSetting('axb', '1');
+  assert.deepEqual(s.settingKeys('tool_pending:').sort(), ['tool_pending:R-1:a', 'tool_pending:R-2:b']);
+  assert.deepEqual(s.settingKeys('a%'), ['a%b']);
+  s.deleteSetting('tool_pending:R-1:a');
+  assert.equal(s.getSetting('tool_pending:R-1:a'), null);
+  assert.deepEqual(s.settingKeys('tool_pending:'), ['tool_pending:R-2:b']);
+});

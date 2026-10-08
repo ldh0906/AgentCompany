@@ -160,6 +160,16 @@ export class Store {
     this.db.prepare('INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
   }
 
+  deleteSetting(key: string): void {
+    this.db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+  }
+
+  /** 이 접두어로 시작하는 설정 키(LIKE 와일드카드는 쓰지 않는다) */
+  settingKeys(prefix: string): string[] {
+    const rows = this.db.prepare('SELECT key FROM settings WHERE substr(key, 1, ?) = ?').all(prefix.length, prefix) as Row[];
+    return rows.map((r) => String(r.key));
+  }
+
   // ---- 엔터티 (JSON 문서 + 조회용 컬럼) ----
 
   get<T>(table: EntityTable, id: string): T | null {

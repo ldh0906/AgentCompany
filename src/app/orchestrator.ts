@@ -3701,7 +3701,12 @@ ${failure.detail.slice(0, 400)}`,
    * 그 실행의 직원·업무로만 동작한다. 도구는 제안만 한다: 기존 흐름(업무방 대화·후속 제안·범위 요청)을 거친다.
    */
   private async pollCompanyTools(): Promise<void> {
-    for (const run of this.records.runsByStatus('running')) {
+    const running = this.records.runsByStatus('running');
+    // 답을 받기 전에 끝난 실행의 대기 기록은 지운다(쌓이지 않게)
+    const live = new Set(running.map((r) => r.id));
+    for (const key of this.company.store.settingKeys('tool_pending:'))
+      if (!live.has(key.split(':')[1] ?? '')) this.company.store.deleteSetting(key);
+    for (const run of running) {
       if (run.kind !== 'work' && run.kind !== 'review') continue;
       const dir = companyToolsDir(run.runDir);
       for (const { req } of await openToolRequests(dir)) {
@@ -3717,8 +3722,9 @@ ${failure.detail.slice(0, 400)}`,
           if (waiting) {
             const answer = this.askAnswer(JSON.parse(waiting) as AskPending);
             if (answer) {
-              this.company.store.setSetting(waitKey, '');
+              // 응답을 쓴 뒤에 지운다: 그사이 꺼져도 다음에 같은 답을 다시 쓸 뿐, 질문을 또 보내지 않는다.
               await this.answerTool(run, dir, req, answer);
+              this.company.store.deleteSetting(waitKey);
             }
             continue;
           }
