@@ -18,6 +18,7 @@ import {
   type ParsedRun,
 } from './types.ts';
 import type { TokenUsage } from '../core/types.ts';
+import { companyToolServer } from '../approvals/company-tools.ts';
 
 function relayScript(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -32,6 +33,7 @@ export const codexAdapter: CliAdapter = {
   capabilities: {
     accessLevels: ['read-only', 'write-ask', 'write-allowlist', 'full-auto'],
     permissionRelay: true,
+    companyTools: true,
     resume: true,
     profileEnvVar: 'CODEX_HOME',
     get notes() {
@@ -78,6 +80,7 @@ export const codexAdapter: CliAdapter = {
         ...(req.model ? { AC_CODEX_MODEL: req.model } : {}),
         ...(req.effort ? { AC_CODEX_EFFORT: req.effort } : {}),
         ...(req.web ? { AC_CODEX_WEB: '1' } : {}),
+        ...(req.companyTools ? { AC_COMPANY_MCP: JSON.stringify(companyToolServer(req.companyTools)) } : {}),
       },
       stdinText: req.prompt,
       files: [],

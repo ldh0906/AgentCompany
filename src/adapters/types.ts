@@ -1,4 +1,5 @@
 import type { AccessLevel, CliKind, FailureClass, TokenUsage } from '../core/types.ts';
+import type { CompanyToolsSpec } from '../approvals/company-tools.ts';
 
 export interface InvocationRequest {
   prompt: string;
@@ -15,6 +16,8 @@ export interface InvocationRequest {
   approvalDir?: string;
   /** 웹 검색·페이지 읽기 허용(조사 업무). 없으면 막는다. */
   web?: boolean;
+  /** 회사 도구 MCP 서버를 붙인다(지원하는 CLI만, company-tools.ts). */
+  companyTools?: CompanyToolsSpec;
   runDir: string;
 }
 
@@ -75,6 +78,8 @@ export interface AdapterCapabilities {
   accessLevels: AccessLevel[];
   /** 실행 중 권한 요청을 GUI로 중계할 수 있는지. */
   permissionRelay: boolean;
+  /** 실행 중 회사 도구(MCP)를 쓸 수 있는지. */
+  companyTools: boolean;
   resume: boolean;
   /** 앱 전용 프로필 폴더 환경변수 이름(없으면 null). */
   profileEnvVar: string | null;

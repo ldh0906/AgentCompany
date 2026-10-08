@@ -21,6 +21,7 @@ import {
 } from '../agents/deliberation.ts';
 import {
   followUpsFromSummary,
+  needScopeOf,
   parseChatReply,
   parseDrafts,
   parseReport,
@@ -30,6 +31,14 @@ import {
 } from '../agents/report.ts';
 import { Chat, ticketChannelId, type Channel, type ChatMessage } from './chat.ts';
 import { writeDecision } from '../approvals/file-queue.ts';
+import {
+  companyToolsDir,
+  openToolRequests,
+  writeToolPending,
+  writeToolResponse,
+  type ToolRequest,
+  type ToolResponse,
+} from '../approvals/company-tools.ts';
 import type { Actor } from '../core/ticket-machine.ts';
 import type {
   Claim,
@@ -144,6 +153,14 @@ const LOCK_HOLDING: TicketStatus[] = [
   'integrating',
   'assigned',
 ];
+
+/** ask_colleague 가 답을 기다리는 동안 도구 폴더에 남기는 기록(데몬이 다시 시작해도 이어서 찾는다). */
+interface AskPending {
+  roomId: string;
+  to: string;
+  name: string;
+  since: string;
+}
 
 export class Orchestrator {
   readonly company: Company;
@@ -628,6 +645,7 @@ export class Orchestrator {
     this.ticking = true;
     try {
       await this.pollToolApprovals();
+      await this.pollCompanyTools();
       this.checkDailyLimit();
       await this.screens.sweepScreens().catch(() => {});
       await this.sweepWorkspaces().catch(() => {});
@@ -869,6 +887,7 @@ export class Orchestrator {
           .activeEmployees()
           .filter((e) => e.id !== employee.id)
           .map((e) => `"${e.name}" (${e.roles.join('/')})`),
+        tools: adapterFor(employee.cli).capabilities.companyTools,
         // 어려움·보통 업무의 첫 회차만 나눌 수 있다(작은 업무를 쪼개면 오히려 비싸다)
         canSplit: next.round === 1 && difficultyOf(next) !== 'easy' && this.canSplit(next),
         // 앱이 CLI로 떠 있을 때만(테스트 등에서는 없음): 직원이 화면 점검을 미리 돌려 볼 명령
@@ -1056,6 +1075,8 @@ export class Orchestrator {
     const runId = newId('R');
     const runDir = path.join(this.opts.dataDir, 'runs', runId);
     const approvalDir = adapter.capabilities.permissionRelay ? path.join(runDir, 'approvals') : null;
+    // 회사 도구는 작업·검수 실행에만(대화 실행이 또 동료를 부르는 연쇄는 만들지 않는다). 요청은 이 실행의 폴더와 nonce에 묶인다.
+    const toolKind = p.kind === 'work' || p.kind === 'review' ? p.kind : null;
     const inv = adapter.buildInvocation({
       prompt: p.prompt,
       ...(p.resumeFrom?.cliSessionId ? { resumeSessionId: p.resumeFrom.cliSessionId } : {}),
@@ -1067,6 +1088,9 @@ export class Orchestrator {
       profileEnv: this.profileEnv(p.employee),
       ...(approvalDir ? { approvalDir } : {}),
       ...(p.web ? { web: true } : {}),
+      ...(toolKind && adapter.capabilities.companyTools
+        ? { companyTools: { dir: companyToolsDir(runDir), nonce: p.nonce, kind: toolKind } }
+        : {}),
       runDir,
     });
     await mkdir(runDir, { recursive: true });
@@ -2134,9 +2158,10 @@ export class Orchestrator {
     }
   }
 
-  private postFollowUps(run: RunRecord, t: Ticket, followUps: { title: string; reason: string }[]): void {
+  /** 후속 업무 제안을 업무방에 올린다. 올린 개수(이미 비슷한 제안이 있으면 0). */
+  private postFollowUps(run: RunRecord, t: Ticket, followUps: { title: string; reason: string }[]): number {
     const room = this.chat.ensureTicketChannel(t.id);
-    if (!room || !followUps.length) return;
+    if (!room || !followUps.length) return 0;
     // 같은 제안은 한 번만: 이 방의 지난 회차뿐 아니라 같은 프로젝트의 다른 업무방(최근 7일)에 이미 올라온 비슷한 제안도 거른다.
     // 실측(2026-10-03, 4777): 같은 playwright 문제가 직원마다 다른 말로 6개 업무방에 제안됐다(similar.ts).
     const since = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
@@ -2162,6 +2187,7 @@ export class Orchestrator {
           followUp: { title: f.title, reason: f.reason, projectId: t.projectId, ticketId: t.id },
         },
       );
+    return fresh.length;
   }
 
   /**
@@ -2277,14 +2303,10 @@ ${failure.detail.slice(0, 400)}`,
       if (wr.status !== 'done' && wr.split?.length && this.splitTicket(ticket, run, wr)) return;
       // 시험용 파일만 더 쓰겠다는 요청은 대표가 판단할 것이 아니다: 다른 진행 중 업무와 겹치지 않으면 바로 허용한다.
       // 실측(2026-10-01, 물 마시기): "tests/sound/** 허용하고 계속"을 비개발자 대표가 판단하지 못한 채 눌렀다.
-      const askPaths = wr.needScope?.paths ?? [];
-      const project = this.company.requireProject(ticket.projectId);
-      if (
-        askPaths.length &&
-        askPaths.every((p) => /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.[a-z]+$/i.test(p.replaceAll('\\', '/'))) &&
-        !checkScope(askPaths, askPaths, project.protectedPaths).protectedTouched.length &&
-        !this.company.tickets().some((x) => x.id !== ticket.id && LOCK_HOLDING.includes(x.status) && scopesOverlap(x.writeScope, askPaths))
-      ) {
+      // 실행 중 회사 도구(request_scope)로 남긴 요청도 같은 흐름으로(끝내며 needScope를 다시 적지 않았을 때).
+      const needScope = wr.needScope ?? (wr.status !== 'done' ? this.toolScopeRequest(run.id) : null);
+      const askPaths = needScope?.paths ?? [];
+      if (askPaths.length && this.testScopeAllowed(ticket, askPaths)) {
         this.company.extendWriteScope(ticket.id, askPaths);
         this.apply(ticket.id, {
           type: 'run_aborted',
@@ -2303,18 +2325,18 @@ ${failure.detail.slice(0, 400)}`,
           );
         return;
       }
-      if (wr.needScope?.paths.length) {
+      if (needScope?.paths.length) {
         // 범위 밖 파일이 필요하다는 요청: 헛되이 다시 내지 않고 대표에게 한 번에 묻는다.
         // 실측(2026-09-30, T-27): 기존 보스 테스트 한 줄이 범위 밖이라 같은 실패로 세 번 제출하고 멈췄다.
-        this.company.store.setSetting(`scope_request:${ticket.id}`, JSON.stringify(wr.needScope));
+        this.company.store.setSetting(`scope_request:${ticket.id}`, JSON.stringify(needScope));
         this.apply(ticket.id, {
           type: 'run_aborted',
           reason: tr('범위 밖 파일 수정 허가 요청', 'Asked to edit files outside the write scope'),
           hold: {
             reason: 'needs_decision',
             note: tr(
-              `이 파일도 고쳐야 한다고 요청했습니다: ${wr.needScope.paths.join(', ')}\n이유: ${wr.needScope.reason}`,
-              `Asked to also edit: ${wr.needScope.paths.join(', ')}\nReason: ${wr.needScope.reason}`,
+              `이 파일도 고쳐야 한다고 요청했습니다: ${needScope.paths.join(', ')}\n이유: ${needScope.reason}`,
+              `Asked to also edit: ${needScope.paths.join(', ')}\nReason: ${needScope.reason}`,
             ),
           },
         });
@@ -2753,6 +2775,7 @@ ${failure.detail.slice(0, 400)}`,
           const c = this.contractOf(t);
           return c ? this.contractText(c, paths) : null;
         })(),
+        tools: adapterFor(reviewer.cli).capabilities.companyTools,
       });
       // 검수자는 항상 읽기 전용으로 실행한다.
       await this.launch({
@@ -3648,6 +3671,168 @@ ${failure.detail.slice(0, 400)}`,
         this.records.setApprovalState(a.id, 'expired', 'orchestrator', { reason: tr('실행이 끝났습니다.', 'Run has ended.') });
       }
     }
+  }
+
+  // ======================= 실행 중 회사 도구(MCP) =======================
+
+  /**
+   * 실행 중인 직원의 회사 도구 요청에 답한다(company-tools.ts). 요청은 그 실행의 폴더에 있고 nonce가 맞아야 하므로
+   * 그 실행의 직원·업무로만 동작한다. 도구는 제안만 한다: 기존 흐름(업무방 대화·후속 제안·범위 요청)을 거친다.
+   */
+  private async pollCompanyTools(): Promise<void> {
+    for (const run of this.records.runsByStatus('running')) {
+      if (run.kind !== 'work' && run.kind !== 'review') continue;
+      const dir = companyToolsDir(run.runDir);
+      for (const { req, pending } of await openToolRequests(dir)) {
+        try {
+          if (pending) {
+            const answer = this.askAnswer(pending as AskPending);
+            if (answer) await this.answerTool(run, dir, req, answer);
+            continue;
+          }
+          const out =
+            req.nonce === run.nonce
+              ? await this.companyTool(run, req)
+              : { ok: false, text: 'This request does not belong to this run (wrong nonce).' };
+          if ('pending' in out) {
+            await writeToolPending(dir, req.id, out.pending);
+            this.logTool(run, req, { ok: true, text: `waiting for ${out.pending.name}` });
+          } else await this.answerTool(run, dir, req, out);
+        } catch (error) {
+          await this.answerTool(run, dir, req, { ok: false, text: `Company tool failed: ${String(error).slice(0, 300)}` });
+        }
+      }
+    }
+  }
+
+  private async answerTool(run: RunRecord, dir: string, req: ToolRequest, res: ToolResponse): Promise<void> {
+    await writeToolResponse(dir, req.id, res);
+    this.logTool(run, req, res);
+  }
+
+  private logTool(run: RunRecord, req: ToolRequest, res: ToolResponse): void {
+    this.company.store.appendEvent(run.employeeId, 'tool.called', run.ticketId, {
+      runId: run.id,
+      tool: String(req.tool).slice(0, 40),
+      args: JSON.stringify(req.args ?? {}).slice(0, 500),
+      ok: res.ok,
+      result: res.text.slice(0, 500),
+    });
+    this.changed('ticket', run.ticketId);
+  }
+
+  private async companyTool(run: RunRecord, req: ToolRequest): Promise<ToolResponse | { pending: AskPending }> {
+    const t = this.company.requireTicket(run.ticketId);
+    const a = req.args ?? {};
+    const str = (v: unknown, n: number) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+    switch (req.tool) {
+      case 'board_status':
+        return { ok: true, text: this.boardSummary(t.projectId) || '(no tickets)' };
+      case 'propose_ticket': {
+        const title = str(a.title, 200);
+        if (!title) return { ok: false, text: 'A title is required.' };
+        return this.postFollowUps(run, t, [{ title, reason: str(a.reason, 2000) }])
+          ? {
+              ok: true,
+              text: 'Posted in the ticket room. The CEO decides whether it becomes a ticket; no need to repeat it in "followUps".',
+            }
+          : { ok: true, text: 'A similar follow-up was already proposed, so nothing new was posted.' };
+      }
+      case 'ask_colleague':
+        return this.askColleague(run, t, str(a.to, 60).replace(/^@/, ''), str(a.question, 2000));
+      case 'request_scope':
+        if (run.kind !== 'work') return { ok: false, text: 'Only the assignee can ask for a wider write scope.' };
+        return this.requestScopeNow(run, t, needScopeOf(a));
+      default:
+        return { ok: false, text: `Unknown tool: ${String(req.tool).slice(0, 40)}` };
+    }
+  }
+
+  /** 동료 질문: 업무방에 올리고 동료에게 답장을 시킨다(chat dispatch). 답은 다음 주기들에서 찾아 돌려준다. */
+  private async askColleague(run: RunRecord, t: Ticket, name: string, question: string): Promise<ToolResponse | { pending: AskPending }> {
+    if (!question) return { ok: false, text: 'A question is required.' };
+    const others = this.company.activeEmployees().filter((e) => e.id !== run.employeeId);
+    const to = others.find((e) => e.name === name);
+    if (!to)
+      return { ok: false, text: `No active colleague named "${name}". Colleagues: ${others.map((e) => e.name).join(', ') || '(none)'}` };
+    const room = this.chat.ensureTicketChannel(t.id);
+    if (!room) return { ok: false, text: 'This ticket has no chat room.' };
+    if (!room.members.includes(to.id)) this.chat.addMembers(room.id, [to.id]);
+    const m = this.chat.post(room.id, run.employeeId, `@${to.name} ${question}`, 'chat');
+    await this.dispatchChat(room.id, to.id, 1, m);
+    // 답장 실행이 시작되지 않았으면(회사 일시정지·대화 한도·이미 답하는 중) 기다리지 않는다: 질문은 방에 남는다.
+    const started = this.records
+      .runsForTicket(room.id)
+      .some((r) => r.kind === 'chat' && r.employeeId === to.id && r.startedAt >= m.createdAt);
+    if (!started)
+      return { ok: false, text: `${to.name} cannot answer right now. The question stays in the ticket room; continue without the answer.` };
+    return { pending: { roomId: room.id, to: to.id, name: to.name, since: m.createdAt } };
+  }
+
+  /** 동료의 답장(질문 뒤에 시작한 답장 실행이 올린 말). 실행이 답 없이 끝났으면 실패로 답한다. 아직이면 null. */
+  private askAnswer(p: AskPending): ToolResponse | null {
+    const runs = this.records.runsForTicket(p.roomId).filter((r) => r.kind === 'chat' && r.employeeId === p.to && r.startedAt >= p.since);
+    for (const r of runs) {
+      const reply = this.chat.messages(p.roomId, 200).find((m) => m.runId === r.id);
+      if (reply) return { ok: true, text: `${p.name}: ${reply.text}` };
+      if (r.status !== 'running' && r.status !== 'prepared')
+        return { ok: false, text: `${p.name} could not answer. Continue without the answer.` };
+    }
+    return null;
+  }
+
+  /**
+   * 범위 요청: 다른 업무가 쓰지 않는 시험용 파일이면 지금 넓혀 이 실행에서 계속한다(잠금도 함께).
+   * 그 밖에는 기존 흐름: 이 실행이 "blocked"로 끝나면 범위 요청으로 대표에게 올린다(finishRunTx).
+   */
+  private requestScopeNow(run: RunRecord, t: Ticket, need: { paths: string[]; reason: string } | null): ToolResponse {
+    if (!need) return { ok: false, text: 'Give relative file paths inside the project (no absolute paths, "..", or "**").' };
+    const add = need.paths.filter((p) => !t.writeScope.includes(p));
+    if (!add.length) return { ok: true, text: 'These paths are already in your write scope.' };
+    if (
+      this.testScopeAllowed(t, add) &&
+      this.records.acquireLocks(
+        { ...t, writeScope: [...t.writeScope, ...add] },
+        this.company.tickets().filter((x) => LOCK_HOLDING.includes(x.status)),
+      ).ok
+    ) {
+      this.company.extendWriteScope(t.id, add);
+      const room = ticketChannelId(t.id);
+      if (this.chat.channel(room))
+        this.chat.post(
+          room,
+          'system',
+          tr(
+            `시험용 파일이라 바로 허용했습니다: ${add.join(', ')} (다른 업무와 겹치지 않음, 실행 중 요청)`,
+            `Allowed test files right away: ${add.join(', ')} (requested during the run)`,
+          ),
+          'event',
+        );
+      return {
+        ok: true,
+        text: `Allowed: ${add.join(', ')} ${add.length > 1 ? 'are' : 'is'} now in your write scope. Continue in this run.`,
+      };
+    }
+    this.company.store.setSetting(`tool_scope_request:${run.id}`, JSON.stringify({ paths: add, reason: need.reason }));
+    return {
+      ok: true,
+      text: 'This needs the CEO. Finish what you can inside your write scope, then end your run with status "blocked"; the system attaches this request for the CEO.',
+    };
+  }
+
+  private toolScopeRequest(runId: string): { paths: string[]; reason: string } | null {
+    const raw = this.company.store.getSetting(`tool_scope_request:${runId}`);
+    return raw ? (JSON.parse(raw) as { paths: string[]; reason: string }) : null;
+  }
+
+  /** 시험용 파일만이고, 보호 경로가 아니고, 진행 중인 다른 업무와 겹치지 않으면 대표에게 묻지 않고 허용한다. */
+  private testScopeAllowed(t: Ticket, paths: string[]): boolean {
+    const project = this.company.requireProject(t.projectId);
+    return (
+      paths.every((p) => /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.[a-z]+$/i.test(p.replaceAll('\\', '/'))) &&
+      !checkScope(paths, paths, project.protectedPaths).protectedTouched.length &&
+      !this.company.tickets().some((x) => x.id !== t.id && LOCK_HOLDING.includes(x.status) && scopesOverlap(x.writeScope, paths))
+    );
   }
 
   // ======================= 검토형 업무: 블라인드 교차 검토 =======================

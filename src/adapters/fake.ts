@@ -5,6 +5,7 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { claudeAdapter } from './claude.ts';
+import { companyToolServer } from '../approvals/company-tools.ts';
 import { classifyCommon, type CliAdapter, type Invocation, type InvocationRequest } from './types.ts';
 
 export const FAKE_BEHAVIORS = ['diligent', 'lazy', 'rogue', 'slow'] as const;
@@ -24,6 +25,7 @@ export const fakeAdapter: CliAdapter = {
   capabilities: {
     accessLevels: ['read-only', 'write-ask', 'write-allowlist', 'full-auto'],
     permissionRelay: false,
+    companyTools: true,
     resume: true,
     profileEnvVar: null,
     get notes() {
@@ -39,7 +41,13 @@ export const fakeAdapter: CliAdapter = {
     return {
       file: process.execPath,
       args: ['--no-warnings', fakeAgentScript()],
-      env: { ...process.env, FAKE_BEHAVIOR: req.model ?? 'diligent', FAKE_RESUME_ID: req.resumeSessionId ?? '' },
+      env: {
+        ...process.env,
+        FAKE_BEHAVIOR: req.model ?? 'diligent',
+        FAKE_RESUME_ID: req.resumeSessionId ?? '',
+        // 회사 도구: 가짜 직원도 실제 CLI처럼 이 MCP 서버를 띄워 부른다(tooluser 성격).
+        ...(req.companyTools ? { FAKE_COMPANY_MCP: JSON.stringify(companyToolServer(req.companyTools)) } : {}),
+      },
       stdinText: req.prompt,
       files: [],
     };

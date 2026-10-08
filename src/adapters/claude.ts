@@ -18,6 +18,7 @@ import {
   type ParsedRun,
 } from './types.ts';
 import type { TokenUsage } from '../core/types.ts';
+import { COMPANY_SERVER, companyToolPermissions, companyToolServer } from '../approvals/company-tools.ts';
 
 const READ_TOOLS = ['Read', 'Glob', 'Grep'];
 const WRITE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
@@ -30,17 +31,22 @@ export function approverScriptPath(): string {
   return existsSync(ts) ? ts : path.join(here, '..', 'approvals', 'mcp-approver.js');
 }
 
-function permissionArgs(level: AccessLevel, allowedCommands: string[][], relay: boolean, web = false): string[] {
-  // 웹 도구는 조사 업무에서만 허용한다(읽기만 하는 도구라 승인 없이).
+function permissionArgs(level: AccessLevel, allowedCommands: string[][], relay: boolean, web = false, company: string[] = []): string[] {
+  // 웹 도구는 조사 업무에서만 허용한다(읽기만 하는 도구라 승인 없이). 회사 도구는 제안만 하므로 승인 없이.
   const net = web ? NETWORK_TOOLS : [];
   const blockedNet = web ? [] : NETWORK_TOOLS;
   switch (level) {
     case 'read-only':
-      return ['--allowedTools', [...READ_TOOLS, ...net].join(','), '--disallowedTools', [...WRITE_TOOLS, 'Bash', ...blockedNet].join(',')];
+      return [
+        '--allowedTools',
+        [...READ_TOOLS, ...net, ...company].join(','),
+        '--disallowedTools',
+        [...WRITE_TOOLS, 'Bash', ...blockedNet].join(','),
+      ];
     case 'write-ask':
     case 'write-allowlist': {
       const bash = level === 'write-allowlist' ? allowedCommands.map((argv) => `Bash(${argv.join(' ')}:*)`) : [];
-      const args = ['--allowedTools', [...READ_TOOLS, ...WRITE_TOOLS, ...net, ...bash].join(',')];
+      const args = ['--allowedTools', [...READ_TOOLS, ...WRITE_TOOLS, ...net, ...company, ...bash].join(',')];
       if (blockedNet.length) args.push('--disallowedTools', blockedNet.join(','));
       if (relay) args.push('--permission-prompt-tool', `mcp__${APPROVER_SERVER}__approve`);
       return args;
@@ -57,6 +63,7 @@ export const claudeAdapter: CliAdapter = {
   capabilities: {
     accessLevels: ['read-only', 'write-ask', 'write-allowlist', 'full-auto'],
     permissionRelay: true,
+    companyTools: true,
     resume: true,
     profileEnvVar: 'CLAUDE_CONFIG_DIR',
     get notes() {
@@ -81,23 +88,21 @@ export const claudeAdapter: CliAdapter = {
     const relay = Boolean(req.approvalDir) && (req.accessLevel === 'write-ask' || req.accessLevel === 'write-allowlist');
     const files: Invocation['files'] = [];
     const args = ['-p', '--output-format', 'stream-json', '--verbose', '--setting-sources', 'user', '--strict-mcp-config'];
-    if (relay) {
+    const servers: Record<string, unknown> = {};
+    if (relay)
+      servers[APPROVER_SERVER] = {
+        command: process.execPath,
+        args: [approverScriptPath()],
+        env: { AC_APPROVAL_DIR: req.approvalDir!, AC_APPROVAL_SOURCE: 'claude' },
+      };
+    if (req.companyTools) servers[COMPANY_SERVER] = companyToolServer(req.companyTools);
+    if (Object.keys(servers).length) {
       const configPath = path.join(req.runDir, 'mcp-config.json');
-      files.push({
-        path: configPath,
-        content: JSON.stringify({
-          mcpServers: {
-            [APPROVER_SERVER]: {
-              command: process.execPath,
-              args: [approverScriptPath()],
-              env: { AC_APPROVAL_DIR: req.approvalDir!, AC_APPROVAL_SOURCE: 'claude' },
-            },
-          },
-        }),
-      });
+      files.push({ path: configPath, content: JSON.stringify({ mcpServers: servers }) });
       args.push('--mcp-config', configPath);
     }
-    args.push(...permissionArgs(req.accessLevel, req.allowedCommands, relay, req.web === true));
+    const company = req.companyTools ? companyToolPermissions(req.companyTools.kind) : [];
+    args.push(...permissionArgs(req.accessLevel, req.allowedCommands, relay, req.web === true, company));
     if (req.model) args.push('--model', req.model);
     if (req.effort) args.push('--effort', req.effort); // 실측(2.1.202): low|medium|high|xhigh|max
     if (req.resumeSessionId) args.push('--resume', req.resumeSessionId);

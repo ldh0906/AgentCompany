@@ -90,6 +90,8 @@ export interface WorkPromptInput {
   resumedRound?: number | null;
   /** 요청의 공유 계약 파일 내용("--- 경로 ---" 다음 내용). 없으면 계약 없음. */
   contract?: string | null;
+  /** 이 실행에 회사 도구(MCP)가 붙어 있다(company-tools.ts). */
+  tools?: boolean;
 }
 
 /** 공유 계약 블록: 같은 요청의 업무들이 같은 이름·타입·값을 쓰게 한다(파일은 시스템이 고정한다). */
@@ -195,7 +197,12 @@ ${
 `
     : ''
 }- To ask a colleague something (for example the owner of another area), add it to "ask" with their exact name; it is posted in this ticket's chat room and they will answer there (not within this run). Colleagues: ${(i.colleagues ?? []).join(', ') || '(none)'}.
-- Saying "done" does not complete the ticket. The system runs its own verification and an independent reviewer checks your work.
+${
+  i.tools
+    ? `- Company tools (MCP server "ac_company") are available in this run. Prefer them to the JSON fields: "ask_colleague" posts your question in this ticket's room and returns the answer within this run; "propose_ticket" posts a follow-up suggestion (instead of "followUps"); "request_scope" asks for files outside your write scope (test files no other ticket uses are allowed at once and you keep working; anything else goes to the CEO, so finish what you can and end with status "blocked"); "board_status" shows the ticket board. The tools only propose: the CEO and the system decide. The JSON fields still work if a tool is unavailable.
+`
+    : ''
+}- Saying "done" does not complete the ticket. The system runs its own verification and an independent reviewer checks your work.
 - Never read credential or auth files (~/.claude, ~/.codex, tokens, .env secrets).
 - Stay in your directory (plus the OS temp directory for scratch files). Do not read other folders on this PC, in particular the Agent Company app itself; everything you need about the company's tools is in this prompt.
 - Never leave a command running in the background or waiting forever (a dev server, a watcher, a test script that does not exit): stop what you started before you finish, and give long commands a timeout. A run that waits on a stuck command stalls the ticket.
@@ -270,6 +277,8 @@ export interface ReviewPromptInput {
   language: string;
   /** 요청의 공유 계약 파일 내용 */
   contract?: string | null;
+  /** 이 실행에 회사 도구(MCP)가 붙어 있다 */
+  tools?: boolean;
 }
 
 export function buildReviewPrompt(i: ReviewPromptInput): string {
@@ -328,7 +337,12 @@ ${
       : ''
   }- Small slips you notice that do not block approval (a wrong label, an internal contradiction, a typo in a number that is not relied on) go in "minorFixes", one short line each naming the file and what to fix. They are passed to the tickets that build on this work and to the final acceptance test, so they get fixed later without another round here.
 - Problems you notice outside this ticket's scope are not reasons to request changes: list them in "followUps" (title + reason) so the CEO can turn them into tickets with one click.
-
+${
+  i.tools
+    ? `- Company tools (MCP server "ac_company") are available in this run: "propose_ticket" posts a follow-up suggestion (instead of "followUps"), "ask_colleague" asks a colleague and returns the answer, "board_status" shows the ticket board. They only propose; the CEO decides.
+`
+    : ''
+}
 ${dataBlock('System-generated evidence', evidenceText)}
 
 ${dataBlock('Changed paths', i.changedPaths.join('\n'))}

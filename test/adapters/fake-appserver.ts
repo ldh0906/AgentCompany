@@ -8,9 +8,21 @@ for await (const line of createInterface({ input: process.stdin })) {
   else if (m.method === 'thread/start') {
     if (m.params.approvalPolicy !== 'untrusted' || m.params.approvalsReviewer !== 'user' || m.params.sandbox !== 'workspace-write')
       process.exit(3);
+    // 회사 도구 MCP 서버가 점 경로 설정 키로 붙었는지
+    const company = m.params.config?.['mcp_servers.ac_company'];
+    if (process.env.AC_EXPECT_COMPANY_MCP && (company?.env?.AC_TOOL_NONCE !== 'n1' || !(company.tool_timeout_sec > 60))) process.exit(6);
     send({ id: m.id, result: { thread: { id: 'thread-1' } } });
+  } else if (m.id === 'e1' || m.id === 'e2') {
+    // 회사 도구 호출 확인(elicitation): 우리 서버만 받아들인다
+    const want = m.id === 'e1' ? 'accept' : 'decline';
+    if (m.result?.action !== want) process.exit(7);
   } else if (m.method === 'turn/start') {
     if (process.env.AC_EXPECT_EFFORT && m.params.effort !== process.env.AC_EXPECT_EFFORT) process.exit(5);
+    if (process.env.AC_EXPECT_COMPANY_MCP) {
+      const params = { threadId: 'thread-1', turnId: 'turn-1', mode: 'form', _meta: null, message: 'run tool?', requestedSchema: {} };
+      send({ id: 'e1', method: 'mcpServer/elicitation/request', params: { ...params, serverName: 'ac_company' } });
+      send({ id: 'e2', method: 'mcpServer/elicitation/request', params: { ...params, serverName: 'other' } });
+    }
     send({ id: m.id, result: { turn: { id: 'turn-1', status: 'inProgress', items: [], error: null } } });
     send({
       id: 'c1',

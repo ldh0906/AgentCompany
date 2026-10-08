@@ -3,13 +3,16 @@
 //   stubborn(2회차부터 고치지 않고 반박) | picky(검수: 1회차만 반려) | harsh(검수: 항상 반려)
 //   contract-breaker(공유 계약 파일을 고침)
 //   asker(현재 결정도 대표 메모도 없으면 대표 결정을 요청)
+//   tooluser(회사 도구 MCP를 실제로 불러 쓴다: 업무판·후속 제안·동료 질문·범위 요청)
 // stdin으로 프롬프트를 받고, Claude의 stream-json과 비슷한 JSONL을 출력한다.
 
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createInterface } from 'node:readline';
 import { parseTaskHeader, type TaskHeader } from '../agents/prompt.ts';
+import { waitToolResponse, writeToolRequest } from '../approvals/company-tools.ts';
 
 const behavior = process.env.FAKE_BEHAVIOR ?? 'diligent';
 let english = false;
@@ -30,6 +33,47 @@ function targetFile(h: TaskHeader): string {
   if (!/[*?[{]/.test(glob)) return glob;
   const prefix = glob.slice(0, glob.search(/[*?[{]/)).replace(/\/$/, '');
   return path.posix.join(prefix || '.', 'agent-company-demo', `${h.ticketId}.md`);
+}
+
+/** 회사 도구 MCP 서버를 실제 CLI처럼 띄워 stdio JSON-RPC로 도구를 차례로 부른다. */
+async function callCompanyTools(calls: { name: string; arguments: object }[]): Promise<{ text: string; isError: boolean }[]> {
+  const spec = JSON.parse(process.env.FAKE_COMPANY_MCP!) as { command: string; args: string[]; env: Record<string, string> };
+  const child = spawn(spec.command, spec.args, {
+    env: { ...process.env, ...spec.env },
+    stdio: ['pipe', 'pipe', 'inherit'],
+    windowsHide: true,
+  });
+  const waiting = new Map<number, (m: any) => void>();
+  createInterface({ input: child.stdout }).on('line', (line) => {
+    const m = JSON.parse(line);
+    waiting.get(m.id)?.(m);
+    waiting.delete(m.id);
+  });
+  let next = 1;
+  const rpc = (method: string, params: object) =>
+    new Promise<any>((resolve) => {
+      const id = next++;
+      waiting.set(id, resolve);
+      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+    });
+  await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fake-agent', version: '0' } });
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+  const listed = (await rpc('tools/list', {})).result?.tools?.map((t: { name: string }) => t.name) ?? [];
+  const out: { text: string; isError: boolean }[] = [];
+  for (const c of calls) {
+    if (!listed.includes(c.name)) {
+      out.push({ text: `not listed: ${c.name}`, isError: true });
+      continue;
+    }
+    emit({
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'tool_use', name: `mcp__ac_company__${c.name}`, input: c.arguments }] },
+    });
+    const r = await rpc('tools/call', c);
+    out.push({ text: r.result?.content?.[0]?.text ?? JSON.stringify(r.error), isError: Boolean(r.result?.isError || r.error) });
+  }
+  child.stdin.end();
+  return out;
 }
 
 function finalWith(json: object, text: string): string {
@@ -89,6 +133,42 @@ async function work(h: TaskHeader, prompt: string): Promise<string> {
       },
       L('허가 요청.', 'Asking.'),
     );
+  // 도구로 범위 밖(시험용 아님) 파일을 요청하고, needScope 없이 "blocked"로 끝낸다(허용되면 평소처럼 일한다)
+  if (behavior === 'toolscoper' && process.env.FAKE_COMPANY_MCP && !h.writeScope.includes('extra/fix.md')) {
+    const [r] = await callCompanyTools([{ name: 'request_scope', arguments: { paths: ['extra/fix.md'], reason: 'old doc' } }]);
+    return finalWith(
+      {
+        nonce: h.nonce,
+        kind: 'work',
+        status: 'blocked',
+        summary: r?.text ?? '',
+        requirements: h.requirementIds.map((id) => ({ id, claim: 'not_met', notes: '' })),
+        questions: [],
+      },
+      L('허가 요청.', 'Asking.'),
+    );
+  }
+  // 회사 도구를 쓴다: 업무판 읽기 → 후속 제안 → 동료 질문(답을 기다림) → 시험용 파일 범위 요청 → 남의 nonce로 요청
+  let toolNotes = '';
+  if (behavior === 'tooluser' && process.env.FAKE_COMPANY_MCP && prompt.includes('Company tools (MCP server "ac_company")')) {
+    const colleague = prompt.match(/Colleagues: "([^"]+)"/)?.[1] ?? '';
+    const r = await callCompanyTools([
+      { name: 'board_status', arguments: {} },
+      { name: 'propose_ticket', arguments: { title: 'README 오타 정리', reason: '범위 밖에서 오타를 봤습니다' } },
+      { name: 'ask_colleague', arguments: { to: colleague, question: '검수 기준이 뭔가요?' } },
+      { name: 'request_scope', arguments: { paths: ['tests/extra.test.js'], reason: 'needs a test file' } },
+    ]);
+    const spec = JSON.parse(process.env.FAKE_COMPANY_MCP) as { env: Record<string, string> };
+    const forged = await writeToolRequest(spec.env.AC_TOOL_DIR!, { tool: 'board_status', args: {}, nonce: 'not-this-run' });
+    const forgedAnswer = await waitToolResponse(spec.env.AC_TOOL_DIR!, forged, 30_000);
+    if (r[3]?.text.startsWith('Allowed')) {
+      mkdirSync('tests', { recursive: true });
+      writeFileSync('tests/extra.test.js', '// extra\n');
+    }
+    toolNotes = [...r.map((x, i) => `[tool ${i}] ${x.isError ? 'ERROR ' : ''}${x.text}`), `[forged] ${forgedAnswer?.text ?? 'none'}`].join(
+      '\n',
+    );
+  }
   const lazyNow = behavior === 'lazy' && h.round === 1;
   const rebut = behavior === 'stubborn' && h.round > 1;
   if (!lazyNow && !rebut) {
@@ -126,11 +206,12 @@ async function work(h: TaskHeader, prompt: string): Promise<string> {
       nonce: h.nonce,
       kind: 'work',
       status: 'done',
-      summary: lazyNow
-        ? L('완료했습니다.', 'Done.')
-        : rebut
-          ? L('지적 사항은 이미 충족되어 있어 고치지 않고 다시 제출합니다.', 'The feedback is already addressed; resubmitting unchanged.')
-          : L('요구사항을 구현했습니다.', 'Implemented the requirements.'),
+      summary:
+        (lazyNow
+          ? L('완료했습니다.', 'Done.')
+          : rebut
+            ? L('지적 사항은 이미 충족되어 있어 고치지 않고 다시 제출합니다.', 'The feedback is already addressed; resubmitting unchanged.')
+            : L('요구사항을 구현했습니다.', 'Implemented the requirements.')) + (toolNotes ? `\n${toolNotes}` : ''),
       requirements: h.requirementIds.map((id) => ({ id, claim: 'met', notes: '' })),
       questions: [],
       // 전권 위임 중이면 작은 결정은 스스로 정했다고 적는다

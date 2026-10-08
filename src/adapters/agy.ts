@@ -27,6 +27,7 @@ export const agyAdapter: CliAdapter = {
   capabilities: {
     accessLevels: ['read-only', 'full-auto'],
     permissionRelay: false,
+    companyTools: false,
     resume: true,
     profileEnvVar: null,
     get notes() {

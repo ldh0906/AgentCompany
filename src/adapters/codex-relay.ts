@@ -11,6 +11,7 @@ import { readdir, readFile, rm } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { createApprovalRequest, waitForDecision } from '../approvals/file-queue.ts';
+import { COMPANY_SERVER } from '../approvals/company-tools.ts';
 import { judgeReadOnlyCommand, judgeToolRequest } from '../core/guard.ts';
 import { locateExecutable } from '../runner/locate.ts';
 
@@ -164,6 +165,13 @@ async function main(): Promise<void> {
   });
 
   async function handleServerRequest(m: any): Promise<void> {
+    // 회사 도구 호출 확인(MCP 도구 승인이 elicitation으로 올 때): 우리 서버의 도구는 제안만 하므로 받아들인다.
+    // 다른 MCP 서버는 연결하지 않지만, 오면 거절한다. 실제 구독으로의 실측은 아직이다(0.159 generate-ts로 메서드만 확인).
+    if (m.method === 'mcpServer/elicitation/request') {
+      const accept = m.params?.serverName === COMPANY_SERVER;
+      send({ id: m.id, result: { action: accept ? 'accept' : 'decline', content: accept ? {} : null, _meta: null } });
+      return;
+    }
     const approvalMethods = ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval'];
     if (!approvalMethods.includes(m.method)) {
       send({ id: m.id, error: { code: -32601, message: 'unsupported' } });
@@ -219,7 +227,11 @@ async function main(): Promise<void> {
     approvalsReviewer: 'user',
     ...(env.AC_CODEX_MODEL ? { model: env.AC_CODEX_MODEL } : {}),
     // 조사 업무: 실시간 웹 검색(설정 web_search, 0.159 스키마의 WebSearchMode)
-    ...(env.AC_CODEX_WEB ? { config: { web_search: 'live' } } : {}),
+    // 회사 도구 MCP 서버(-c 덮어쓰기와 같은 점 경로 키). 동료 답을 기다리는 도구라 호출 제한 시간을 넉넉히 둔다.
+    config: {
+      ...(env.AC_CODEX_WEB ? { web_search: 'live' } : {}),
+      ...(env.AC_COMPANY_MCP ? { [`mcp_servers.${COMPANY_SERVER}`]: { ...JSON.parse(env.AC_COMPANY_MCP), tool_timeout_sec: 900 } } : {}),
+    },
   };
   // 이어서 하기(수정 회차): 이전 대화를 되살린다.
   const thread = env.AC_CODEX_RESUME
