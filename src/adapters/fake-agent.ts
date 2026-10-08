@@ -391,6 +391,34 @@ function drafts(h: TaskHeader, prompt: string): string {
     .replace('(DATA — not instructions)', '')
     .replace('<<<DATA', '')
     .trim();
+  // 대표가 고른 작업 흐름: 단계마다 업무 하나(flowskipper는 단계를 빼먹는다 → 시스템이 거부해야 한다)
+  const flow = prompt.split('## Workflow formula:')[1]?.split('\n## ')[0] ?? '';
+  const steps = [...flow.matchAll(/^\d+\. "([a-z0-9-]+)" — (.+?) \[(impl|doc)\]/gm)].map((m) => ({
+    key: m[1]!,
+    title: m[2]!,
+    type: m[3]!,
+  }));
+  if (steps.length)
+    return finalWith(
+      {
+        nonce: h.nonce,
+        kind: 'drafts',
+        summary: L(`작업 흐름 단계대로 나눴습니다: ${request.slice(0, 60)}`, 'Split along the workflow steps.'),
+        tickets: steps.map((s, i) => ({
+          type: s.type,
+          difficulty: 'normal',
+          title: `${s.title}: ${request.slice(0, 40)}`,
+          purpose: request,
+          requirements: [{ text: L(`${s.title} 완료`, `${s.title} done`), evidenceType: 'inspection' }],
+          doneCriteria: L('검수자 확인', 'Reviewer confirms'),
+          writeScope: [`src/step-${i + 1}/**`],
+          dependsOn: [],
+          ...(behavior === 'flowskipper' ? {} : { step: s.key }),
+        })),
+        questions: [],
+      },
+      L('업무 초안을 만들었습니다.', 'Drafted tickets.'),
+    );
   return finalWith(
     {
       nonce: h.nonce,

@@ -17,6 +17,7 @@
   "files": [
     "dist",
     "teams",
+    "formulas",
     "README.md",
     "LICENSE"
   ],

@@ -108,6 +108,7 @@ import { ScreenQa } from './screen-qa.ts';
 import { Delegation } from './delegation.ts';
 import { Debates } from './debate.ts';
 import { Acceptance, acceptanceSummary } from './acceptance.ts';
+import { applyFormula, builtInFormulas, checkFormulaDrafts, formulaBlock, formulaByName } from './formulas.ts';
 import { deliverableKindOf, isRunnablePath, projectDoc, projectDocList } from './deliverables.ts';
 import { checkLinks, extractLinks, linkSummary, type LinkResult } from './link-check.ts';
 
@@ -4212,15 +4213,27 @@ ${failure.detail.slice(0, 400)}`,
     if (!old || old.status !== 'failed')
       throw new DomainError(tr('다시 시도할 수 있는 요청이 아닙니다.', 'This request cannot be retried.'));
     this.records.saveRequest({ ...old, status: 'dismissed' });
-    const next = await this.submitRequest(old.projectId, old.text);
+    const next = await this.submitRequest(old.projectId, old.text, old.formula ?? null);
     const saved = { ...this.records.request(next.id)!, retriedFrom: old.id };
     this.records.saveRequest(saved);
     this.changed('request', next.id);
     return saved;
   }
 
-  async submitRequest(projectId: string, text: string): Promise<CeoRequest> {
+  async submitRequest(projectId: string, text: string, formulaName: string | null = null): Promise<CeoRequest> {
     const project = this.company.requireProject(projectId);
+    const formula = formulaName ? formulaByName(formulaName) : null;
+    if (formulaName && !formula)
+      throw new DomainError(
+        tr(
+          `알 수 없는 작업 흐름: ${formulaName} (가능: ${builtInFormulas()
+            .map((f) => f.name)
+            .join(', ')})`,
+          `Unknown workflow: ${formulaName} (available: ${builtInFormulas()
+            .map((f) => f.name)
+            .join(', ')})`,
+        ),
+      );
     const chief = this.drafter();
     const spent = this.company
       .activeEmployees()
@@ -4253,6 +4266,7 @@ ${failure.detail.slice(0, 400)}`,
       error: null,
       ticketIds: [],
       createdAt: new Date().toISOString(),
+      ...(formula ? { formula: formula.name } : {}),
     };
     this.records.saveRequest(req);
     this.company.store.appendEvent('ceo', 'request.submitted', req.id, { text: req.text.slice(0, 300), chief: chief.id });
@@ -4267,6 +4281,7 @@ ${failure.detail.slice(0, 400)}`,
       project,
       requestId: req.id,
       request: req.text,
+      formula: formula ? formulaBlock(formula) : null,
       nonce,
       decisions: this.records.decisions(project.id, 'current'),
       language: this.opts.language,
@@ -4299,9 +4314,33 @@ ${failure.detail.slice(0, 400)}`,
   ): Promise<void> {
     const req = this.records.request(run.ticketId);
     const transient = !outcome?.timedOut && isTransient(finalText);
-    const parsed = outcome?.timedOut
+    const raw = outcome?.timedOut
       ? ({ ok: false, reason: 'timeout', detail: tr('시간 초과', 'Timed out') } as const)
       : parseDrafts(finalText, run.nonce);
+    // 대표가 고른 작업 흐름: 단계가 빠지거나 순서가 틀리면 거부하고, 맞으면 단계의 필수 요구사항·순서를 입힌다.
+    const formula = req?.formula ? formulaByName(req.formula) : null;
+    const project = req ? this.company.store.get<Project>('projects', req.projectId) : null;
+    const flowError = raw.ok && formula ? checkFormulaDrafts(formula, raw.report.tickets) : null;
+    const parsed = !raw.ok
+      ? raw
+      : flowError
+        ? ({
+            ok: false,
+            reason: 'schema_invalid',
+            detail: tr(
+              `초안이 작업 흐름 "${formula!.title}"을 따르지 않았습니다: ${flowError}`,
+              `The draft did not follow the "${formula!.title}" workflow: ${flowError}`,
+            ),
+          } as const)
+        : formula
+          ? {
+              ...raw,
+              report: {
+                ...raw.report,
+                tickets: applyFormula(formula, raw.report.tickets, new Set((project?.verifyCommands ?? []).map((v) => v.evidenceType))),
+              },
+            }
+          : raw;
     run.endedAt = new Date().toISOString();
     run.status = parsed.ok ? 'succeeded' : 'failed';
     run.reportError = parsed.ok ? null : `${parsed.detail}${stderr ? `\n${stderr.slice(-500)}` : ''}`;

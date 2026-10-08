@@ -20,6 +20,8 @@ export function RequestBox() {
   const { busy, run } = useAction();
   const [text, setText] = useState('');
   const [projectId, setProjectId] = useState('');
+  // 작업 흐름(빈 값 = 비서실장이 알아서): 정해진 절차를 틀로 쓴다
+  const [formula, setFormula] = useState('');
   // 확정 대기 초안은 하나만 펼친다(기본: 맨 위). 실측(2026-10-03, 4777): 초안 3개가 모두 펼쳐져 대시보드가 글자로 가득 찼다.
   const [shownDraft, setShownDraft] = useState<string | null>(null);
   if (!state || state.projects.length === 0) return null;
@@ -90,6 +92,22 @@ export function RequestBox() {
               ))}
             </select>
           )}
+          {(state.formulas?.length ?? 0) > 0 && (
+            <select
+              value={formula}
+              onChange={(e) => setFormula(e.target.value)}
+              style={{ width: 'auto' }}
+              aria-label={ko ? '작업 흐름' : 'Workflow'}
+              title={state.formulas!.find((f) => f.name === formula)?.steps.join(' → ') ?? ''}
+            >
+              <option value="">{ko ? '작업 흐름: 알아서' : 'Workflow: free'}</option>
+              {state.formulas!.map((f) => (
+                <option key={f.name} value={f.name}>
+                  {f.title} — {f.description}
+                </option>
+              ))}
+            </select>
+          )}
           <span className="sub" style={{ flex: 1, minWidth: 220 }}>
             {ko
               ? '비서실장이 프로젝트 폴더를 읽어 보고(고치지 않음) 할 일을 나눈 초안을 만듭니다. 확정은 대표가 합니다.'
@@ -99,9 +117,10 @@ export function RequestBox() {
             className="btn primary"
             disabled={busy || !text.trim() || !state.chiefOfStaff}
             onClick={() =>
-              run(() => api('requests', { body: { projectId: pid, text } }), ko ? '비서실장에게 보냈습니다.' : 'Sent.').then(
-                (ok) => ok && (setText(''), reload()),
-              )
+              run(
+                () => api('requests', { body: { projectId: pid, text, ...(formula ? { formula } : {}) } }),
+                ko ? '비서실장에게 보냈습니다.' : 'Sent.',
+              ).then((ok) => ok && (setText(''), reload()))
             }
           >
             {ko ? '초안 요청' : 'Draft tickets'}
@@ -476,7 +495,7 @@ function DraftReview({ r }: { r: CeoRequest }) {
                       <b>
                         {i + 1}. {ed.title}
                       </b>{' '}
-                      <span className="chip">{d.type}</span>{' '}
+                      <span className="chip">{d.type}</span> {d.step && <span className="chip info">{d.step}</span>}{' '}
                       {d.contract && i === 0 && (
                         <span
                           className="chip warn"

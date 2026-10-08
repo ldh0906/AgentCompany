@@ -294,3 +294,39 @@ test('요청 승인 카드: 취소된 업무는 "끝나지 않은 업무"로, �
   assert.ok(pendingRequest(), '자동으로 승인하지 않고 기다린다');
   assert.equal(env.orch.records.request(req.id)!.integration ?? null, null);
 });
+
+test(
+  '작업 흐름: 비서실장이 단계대로 초안을 내면 필수 요구사항·순서가 들어가고, 단계를 빼먹으면 거부된다',
+  { timeout: 120_000 },
+  async (t) => {
+    const env = await setup(t);
+    const chief = env.company.hireEmployee({ name: '비서실장', roles: ['chief-of-staff'], cli: 'fake', model: 'diligent' });
+    await assert.rejects(env.orch.submitRequest(env.projectId, 'x', 'deploy'), /알 수 없는 작업 흐름/);
+
+    const req = await env.orch.submitRequest(env.projectId, '정산 모듈 정리', 'refactor');
+    await env.orch.idle();
+    const drafted = env.orch.records.request(req.id)!;
+    assert.equal(drafted.status, 'drafted', drafted.error ?? '');
+    assert.equal(drafted.formula, 'refactor');
+    assert.deepEqual(
+      drafted.drafts.map((d) => d.step),
+      ['pin', 'reshape'],
+    );
+    assert.deepEqual(drafted.drafts[1]!.dependsOn, [0], '구조 개선은 동작 고정 뒤에');
+    assert.ok(
+      drafted.drafts[0]!.requirements.some((r) => r.text.includes('지금 동작을 확인하는 테스트') && r.evidenceType === 'unit_test'),
+    );
+    const run = env.orch.records.runsForTicket(req.id).find((r) => r.kind === 'analysis')!;
+    const { readFile } = await import('node:fs/promises');
+    assert.match(await readFile(join(run.runDir, 'prompt.md'), 'utf8'), /Workflow formula: 리팩터링/);
+
+    // 단계를 빼먹은 초안은 거부(실패한 요청으로 남고 이유가 보인다)
+    env.company.setEmployeeActive(chief.id, false);
+    env.company.hireEmployee({ name: '건너뛰는 비서실장', roles: ['chief-of-staff'], cli: 'fake', model: 'flowskipper' });
+    const bad = await env.orch.submitRequest(env.projectId, '정산 모듈 정리', 'refactor');
+    await env.orch.idle();
+    const failed = env.orch.records.request(bad.id)!;
+    assert.equal(failed.status, 'failed');
+    assert.match(failed.error ?? '', /작업 흐름 "리팩터링"을 따르지 않았습니다/);
+  },
+);

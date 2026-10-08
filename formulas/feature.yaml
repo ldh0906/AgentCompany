@@ -1,0 +1,20 @@
+# 기능 추가: 만들고, 테스트로 증명하고, 쓰는 법을 남긴다.
+# 비서실장은 단계마다 업무를 만들고(한 단계에 여러 업무도 가능) 쓰기 범위를 채운다. 필수 요구사항과 단계 순서는 시스템이 넣는다.
+name: feature
+title: 기능 추가
+description: 구현과 단위 테스트 → 사용법·문서 반영
+steps:
+  - key: build
+    title: 구현
+    type: impl
+    guide: 기능을 구현하고, 동작을 증명하는 단위 테스트를 같은 업무 안에서 함께 쓴다.
+    requirements:
+      - text: 기능의 핵심 동작을 증명하는 단위 테스트가 있고 통과한다
+        evidence: unit_test
+  - key: docs
+    title: 사용법 반영
+    type: doc
+    guide: 사용자가 이 기능을 어떻게 쓰는지 README나 문서에 짧게 적는다(바뀐 설정·명령 포함).
+    requirements:
+      - text: 새 기능을 쓰는 방법이 문서에 있다(무엇을, 어떻게, 예시 하나)
+        evidence: inspection

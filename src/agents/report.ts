@@ -235,6 +235,8 @@ export interface TicketDraft {
   difficulty: Difficulty; // 비서실장 제안. 모르는 값은 보통
   /** 공유 계약 업무(첫 초안만): 여러 업무가 함께 쓸 이름·타입·값을 먼저 고정한다 */
   contract?: boolean;
+  /** 작업 흐름(formula)의 단계 key */
+  step?: string;
 }
 
 /** 비서실장이 제안하는 검증 명령: 요구사항에 필요한 검사를 프로젝트가 아직 못 돌릴 때(예: 타입 검사). */
@@ -331,6 +333,7 @@ export function parseDrafts(
       dependsOn: Array.isArray(d.dependsOn)
         ? (d.dependsOn as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n < i)
         : [],
+      ...(isStr(d.step) && /^[a-z0-9-]{1,40}$/.test(d.step) ? { step: d.step } : {}),
     });
   }
   return {

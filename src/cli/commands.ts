@@ -33,6 +33,7 @@ const HELP = () =>
   aco open / aco down                             웹 화면 열기 · 회사 끄기
   (처음 등록할 때 폴더를 신뢰하는지 묻습니다. 묻지 않으려면 --trust)
   (승인·반려는 지금 폴더의 프로젝트 것만 다룹니다. 회사 전체: --all)
+  (정해진 절차로: aco ask --flow feature|bugfix|refactor "…")
   (모든 aco 명령: --demo 데모 회사, --data-dir DIR, --port N)
 
 사용법:
@@ -58,6 +59,7 @@ Quick (in a repository folder):
   aco open / aco down                             Open the web dashboard · stop the company
   (registering a folder asks whether you trust it first; --trust skips the question)
   (approve/reject only touch this folder's project; --all for the whole company)
+  (a fixed procedure: aco ask --flow feature|bugfix|refactor "...")
   (every aco command: --demo for the demo company, --data-dir DIR, --port N)
 
 Usage:

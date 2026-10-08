@@ -15,6 +15,7 @@ import { listModels } from '../app/models.ts';
 import { debateRunTokens, requestTokens, ticketTokens } from '../app/cost.ts';
 import { createRepo, inspectRepo, listDirs, trackedDirs } from '../app/repo-inspect.ts';
 import { deliverableFiles, isRunnablePath } from '../app/deliverables.ts';
+import { builtInFormulas } from '../app/formulas.ts';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -451,7 +452,11 @@ export class Api {
       }
 
       case 'POST requests':
-        return this.orch.submitRequest(str(b, 'projectId'), str(b, 'text', { max: 10_000 }));
+        return this.orch.submitRequest(
+          str(b, 'projectId'),
+          str(b, 'text', { max: 10_000 }),
+          str(b, 'formula', { optional: true, max: 40 }) || null,
+        );
       case 'POST requests/:id/accept':
         return this.orch.acceptRequest(id!, Array.isArray(b.drafts) ? (b.drafts as never) : undefined);
       case 'POST requests/:id/answer': {
@@ -559,6 +564,13 @@ export class Api {
           }),
       ),
       chiefOfStaff: this.orch.chiefOfStaff()?.id ?? null,
+      // 작업 흐름(기능 추가·버그 수정·리팩터링 …): 요청할 때 고른다
+      formulas: builtInFormulas().map((f) => ({
+        name: f.name,
+        title: f.title,
+        description: f.description,
+        steps: f.steps.map((s) => s.title),
+      })),
       // 직원별 이번 달 토큰과 한도(한도가 있는 직원만)
       employeeBudgets: Object.fromEntries(
         this.company

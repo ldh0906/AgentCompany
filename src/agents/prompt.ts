@@ -386,6 +386,8 @@ export interface DraftPromptInput {
   project: Project;
   requestId: string;
   request: string;
+  /** 대표가 고른 작업 흐름 설명(formulaBlock). 없으면 자유롭게 나눈다. */
+  formula?: string | null;
   nonce: string;
   decisions: Decision[];
   language: string;
@@ -455,6 +457,7 @@ ${dataBlock('Team (name, rank, roles) — who can work in parallel', (i.team ?? 
 ${filesBlock(i.files)}
 
 ${dataBlock('CEO request', i.request)}
+${i.formula ? `\n${i.formula}` : ''}
 
 ${dataBlock('Project verify commands (evidence the system can produce)', i.project.verifyCommands.map((v) => `- ${v.label} [${v.evidenceType}]: ${v.argv.join(' ')}`).join('\n'))}
 
@@ -474,7 +477,7 @@ ${dataBlock('Project document rules', i.project.docRules)}
 ## Final answer format (required)
 Write titles and text in language "${i.language}". End with exactly one JSON code block:
 ${fence}json
-{"nonce":"${i.nonce}","kind":"drafts","summary":"...","tickets":[{"type":"impl|doc|review|research","difficulty":"easy|normal|hard","title":"...","purpose":"...","requirements":[{"text":"...","evidenceType":"unit_test"}],"doneCriteria":"...","writeScope":["src/feature/**"],"dependsOn":[],"contract":false}],"questions":[{"question":"...","proposal":"..."}],"verifySuggestions":[{"label":"typecheck","command":"npx tsc --noEmit","evidenceType":"static_check"}],"debate":null,"acceptance":[{"check":"what the CEO gets, in their words","how":"how to check it"}]}
+{"nonce":"${i.nonce}","kind":"drafts","summary":"...","tickets":[{"type":"impl|doc|review|research","difficulty":"easy|normal|hard","title":"...","purpose":"...","requirements":[{"text":"...","evidenceType":"unit_test"}],"doneCriteria":"...","writeScope":["src/feature/**"],"dependsOn":[],"contract":false${i.formula ? ',"step":"<step key>"' : ''}}],"questions":[{"question":"...","proposal":"..."}],"verifySuggestions":[{"label":"typecheck","command":"npx tsc --noEmit","evidenceType":"static_check"}],"debate":null,"acceptance":[{"check":"what the CEO gets, in their words","how":"how to check it"}]}
 ${fence}
 `;
 }

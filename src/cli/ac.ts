@@ -140,14 +140,14 @@ async function askLead(argv: string[], dataDir: string): Promise<void> {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
-    options: { yes: { type: 'boolean', short: 'y' }, path: { type: 'string' } },
+    options: { yes: { type: 'boolean', short: 'y' }, path: { type: 'string' }, flow: { type: 'string' } },
   });
   const text = positionals.join(' ').trim() || (process.stdin.isTTY ? await ask('무엇을 만들까요? ') : '');
   if (!text) fail('요청 내용을 적어 주세요: aco ask "로그인 화면 만들어줘"');
   const client = await connect(dataDir);
   const state = await client.get<CliState>('state');
   const project = projectFor(state, values.path ?? process.cwd()) ?? fail('이 폴더의 프로젝트가 없습니다. 먼저 `aco up`을 실행하세요.');
-  const req = await client.post<CeoRequest>('requests', { projectId: project.id, text });
+  const req = await client.post<CeoRequest>('requests', { projectId: project.id, text, ...(values.flow ? { formula: values.flow } : {}) });
   const lead = state.employees.find((e) => e.id === req.employeeId);
   say(`${c.dim('→')} ${lead?.name ?? '리드'}에게 보냈습니다. 업무로 나누는 중…`);
   const done = await waitDrafted(client, req.id);

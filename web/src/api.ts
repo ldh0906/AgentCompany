@@ -53,6 +53,8 @@ export interface CeoRequest {
     difficulty?: 'easy' | 'normal' | 'hard';
     /** 공유 계약 업무(첫 초안만) */
     contract?: boolean;
+    /** 작업 흐름의 단계 key */
+    step?: string;
   }[];
   questions: string[];
   proposals?: (string | null)[];
@@ -91,6 +93,8 @@ export interface State {
   /** 권한 요청을 대표 대신 처리하는 전체 자동 직원(없으면 null → 대표가 처리). */
   permissionDelegate?: string | null;
   usage?: UsageSummary;
+  /** 작업 흐름(기능 추가·버그 수정·리팩터링 …) */
+  formulas?: { name: string; title: string; description: string; steps: string[] }[];
   /** 직원별 이번 달 토큰과 한도(한도가 있는 직원만) */
   employeeBudgets?: Record<string, { used: number; limit: number }>;
   previews?: PreviewInfo[];
