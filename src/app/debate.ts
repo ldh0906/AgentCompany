@@ -57,7 +57,7 @@ export interface DebateHost extends OrchHost {
   debateDir(projectId: string | null, ticketId: string | null, debateId: string): Promise<string>;
   /** 업무 토론의 결론을 담당자에게 전하고 업무를 이어간다 */
   resumeTicket(ticketId: string, text: string): void;
-  holdTicket(ticketId: string, note: string): void;
+  holdTicket(ticketId: string, note: string, debateId: string): void;
   delegationOn(): boolean;
   delegate(): Employee | null;
   logDelegated(entityId: string, text: string, ticketId?: string): void;
@@ -174,7 +174,11 @@ export class Debates {
       'event',
     );
     if (d.ticketId)
-      this.h.holdTicket(d.ticketId, tr(`토론 중: ${topic.slice(0, 80)} (결론이 나면 이어갑니다)`, `In debate: ${topic.slice(0, 80)}`));
+      this.h.holdTicket(
+        d.ticketId,
+        tr(`토론 중: ${topic.slice(0, 80)} (결론이 나면 이어갑니다)`, `In debate: ${topic.slice(0, 80)}`),
+        d.id,
+      );
     this.save(d);
     // 시작도 단계 넘기기와 같은 잠금 안에서: 사본 준비(수 초) 동안 tick이 단계를 넘기지 못하게.
     // 실측(2026-10-02, 가계부 할부 토론): 시작 직후 tick이 "기대 0, 답 0"으로 보고 반박까지 띄워 8개 실행이 함께 돌았다.
@@ -345,7 +349,10 @@ export class Debates {
 
   /** tick: 끊긴 토론 잇기 + 전권 위임이면 추천안으로 결정 */
   async sweep(): Promise<void> {
-    for (const d of this.list(20)) {
+    // 끝나지 않은 토론을 먼저 고른다(끝난 최신 토론에 밀려 오래된 토론이 다시 이어지지 않는 일이 없게, QA)
+    for (const d of this.list(500)
+      .filter((x) => x.phase !== 'done')
+      .slice(0, 50)) {
       if (['opening', 'rebuttal', 'summary'].includes(d.phase)) await this.advance(d.id);
       else if (d.phase === 'decide' && this.h.delegationOn() && d.recommendation !== null) {
         const del = this.h.delegate();

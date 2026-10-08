@@ -204,3 +204,27 @@ test('전권 위임: 위임 질문이 계속 실패하면 두 번까지만 다�
   );
   assert.equal(env.company.requireTicket(tk.id).hold?.reason, 'needs_decision', '대표 할 일로 남는다');
 });
+
+test(
+  '전권 위임: 실행을 띄우기도 전에 실패한 질문도 정리하고 횟수 안에서 다시 묻는다(대기 기록이 남지 않게)',
+  { timeout: 240_000 },
+  async (t) => {
+    const env = await setup(t, { implementer: 'asker' });
+    env.company.hireEmployee({ name: '팀장', roles: ['planner'], cli: 'fake', model: 'diligent', rank: 'lead' });
+    env.orch.delegation.set(true);
+    let tries = 0;
+    (env.orch.delegation as unknown as { h: { launchChat: () => Promise<string> } }).h.launchChat = async () => {
+      tries++;
+      throw new Error('지시가 너무 깁니다');
+    };
+    const tk = newImplTicket(env);
+    await driveUntil(env, tk.id, (x) => x.hold?.reason === 'needs_decision', 150_000);
+    for (let i = 0; i < 10; i++) {
+      await env.orch.tick();
+      await env.orch.idle();
+    }
+    assert.equal(tries, 3, '처음 1번 + 다시 2번');
+    assert.deepEqual(env.store.settingKeys('delegate_pending:'), [], '대기 기록이 남지 않는다');
+    assert.equal(env.company.requireTicket(tk.id).hold?.reason, 'needs_decision', '대표 할 일로 남는다');
+  },
+);

@@ -415,7 +415,7 @@ function drafts(h: TaskHeader, prompt: string): string {
           dependsOn: [],
           ...(behavior === 'flowskipper' ? {} : { step: s.key }),
         })),
-        questions: [],
+        questions: [{ question: L('기존 함수 이름은 유지할까요?', 'Keep the old function names?'), proposal: L('유지', 'Keep') }],
       },
       L('업무 초안을 만들었습니다.', 'Drafted tickets.'),
     );

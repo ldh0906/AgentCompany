@@ -741,7 +741,7 @@ function DraftReview({ r }: { r: CeoRequest }) {
         <button className="btn" disabled={busy} onClick={() => run(() => api(`requests/${r.id}/dismiss`, { body: {} })).then(reload)}>
           {ko ? '버리기' : 'Dismiss'}
         </button>
-        {fixable && (
+        {fixable && !r.formula && (
           <button
             className="btn"
             disabled={busy || kept.length === 0}

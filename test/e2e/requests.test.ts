@@ -352,7 +352,9 @@ test('작업 흐름은 확정할 때 다시 검사한다: 단계를 빼거나 �
   // 단위 테스트 검사 명령이 없으면 요구사항을 낮추지 않고 확정을 막는다
   const project = env.company.requireProject(env.projectId);
   env.company.updateProject(env.projectId, { verifyCommands: [] });
+  const decisionsBefore = env.orch.records.decisions(env.projectId).length;
   assert.throws(() => env.orch.acceptRequest(req.id), /검사 명령이 없습니다/);
+  assert.equal(env.orch.records.decisions(env.projectId).length, decisionsBefore, '거부되면 질문 답(결정)도 남기지 않는다');
   env.company.updateProject(env.projectId, { verifyCommands: project.verifyCommands });
   // 요구사항 증거를 약하게 고쳐 보내도 흐름의 증거로 돌아간다
   const weak = drafts.map((d) => ({ ...d, requirements: d.requirements.map((r) => ({ ...r, evidenceType: 'inspection' })) }));

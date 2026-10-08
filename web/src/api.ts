@@ -41,6 +41,8 @@ export interface CeoRequest {
   text: string;
   status: 'drafting' | 'drafted' | 'failed' | 'accepted' | 'dismissed';
   employeeId: string;
+  /** 대표가 고른 작업 흐름 이름 */
+  formula?: string | null;
   summary: string;
   drafts: {
     type: string;

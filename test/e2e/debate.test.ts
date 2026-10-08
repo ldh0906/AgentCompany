@@ -75,9 +75,13 @@ test(
     const env = await setup(t);
     const tk = newImplTicket(env);
     const host = (
-      env.orch.debates as unknown as { h: { holdTicket(id: string, note: string): void; resumeTicket(id: string, text: string): void } }
+      env.orch.debates as unknown as {
+        h: { holdTicket(id: string, note: string, debateId: string): void; resumeTicket(id: string, text: string): void };
+      }
     ).h;
-    host.holdTicket(tk.id, '토론 중: 저장 방식');
+    // 열려 있는 토론(진행 중)
+    env.store.setSetting('debate:D-open', JSON.stringify({ id: 'D-open', phase: 'opening' }));
+    host.holdTicket(tk.id, '토론 중: 저장 방식', 'D-open');
     const held = env.company.requireTicket(tk.id);
     assert.equal(held.hold?.reason, 'on_hold');
     assert.ok(!env.orch.desk.ceoTodos().some((x) => x.key.startsWith(`hold:${tk.id}:`)), '업무 보류 할 일을 따로 띄우지 않는다');
@@ -92,8 +96,23 @@ test(
     );
     // 토론이 건 보류는 토론 결론으로 풀린다
     const tk2 = newImplTicket(env);
-    host.holdTicket(tk2.id, '토론 중');
+    host.holdTicket(tk2.id, '토론 중', 'D-open');
     host.resumeTicket(tk2.id, '토론 결론: 파일');
     assert.equal(env.company.requireTicket(tk2.id).hold, null);
+    // 토론이 없어지거나 끝났는데 보류가 남았으면 대표에게 보인다(숨은 채 멈추지 않게)
+    const tk3 = newImplTicket(env);
+    host.holdTicket(tk3.id, '토론 중', 'D-gone');
+    assert.ok(env.orch.desk.ceoTodos().some((x) => x.key.startsWith(`hold:${tk3.id}:`)));
   },
 );
+
+test('토론 잇기는 끝나지 않은 토론을 먼저 고른다: 끝난 최신 토론이 20개 넘게 쌓여도 오래된 진행 중 토론을 잇는다', async (t) => {
+  const env = await setup(t);
+  const ids = ['D-old', ...Array.from({ length: 25 }, (_, i) => `D-done-${i}`)].reverse(); // 최신이 앞
+  env.store.setSetting('debate_index', JSON.stringify(ids));
+  for (const id of ids) env.store.setSetting(`debate:${id}`, JSON.stringify({ id, phase: id === 'D-old' ? 'opening' : 'done', topic: id }));
+  const advanced: string[] = [];
+  (env.orch.debates as unknown as { advance: (id: string) => Promise<void> }).advance = async (id) => void advanced.push(id);
+  await env.orch.debates.sweep();
+  assert.deepEqual(advanced, ['D-old']);
+});

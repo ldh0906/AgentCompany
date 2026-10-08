@@ -270,15 +270,16 @@ export class Orchestrator {
         if (room) this.chat.post(room.id, 'ceo', text, 'chat'); // 업무방 메모는 다음 작업 지시에 들어간다
         // 토론이 건 그 보류만 푼다(그사이 다른 이유로 다시 멈췄으면 그대로 둔다)
         const t = this.company.store.get<Ticket>('tickets', ticketId);
-        const mine = this.company.store.getSetting(`debate_hold:${ticketId}`);
+        const mine = (this.company.store.getSetting(`debate_hold:${ticketId}`) ?? '').split('|')[0];
         this.company.store.deleteSetting(`debate_hold:${ticketId}`);
         if (t?.hold && mine && t.hold.since === mine) this.releaseHold(ticketId);
       },
-      holdTicket: (ticketId, note) => {
+      holdTicket: (ticketId, note, debateId) => {
         const t = this.company.store.get<Ticket>('tickets', ticketId);
         if (t && !t.hold && !TERMINAL_STATUSES.includes(t.status)) {
           const held = this.apply(ticketId, { type: 'hold', reason: 'on_hold', note });
-          if (held.hold) this.company.store.setSetting(`debate_hold:${ticketId}`, held.hold.since);
+          // 어느 보류(시각)를 어느 토론이 걸었는지: 결론은 그 보류만 풀고, 토론이 열려 있는 동안만 대표 할 일을 토론 하나로
+          if (held.hold) this.company.store.setSetting(`debate_hold:${ticketId}`, `${held.hold.since}|${debateId}`);
         }
       },
       delegationOn: () => this.delegation.on,
@@ -4512,13 +4513,6 @@ ${failure.detail.slice(0, 400)}`,
   acceptRequest(requestId: string, drafts?: TicketDraft[]): Ticket[] {
     const req = this.records.request(requestId);
     if (!req || req.status !== 'drafted') throw new DomainError(tr('확정할 수 있는 초안이 없습니다.', 'No draft available to confirm.'));
-    // 답하지 않은 질문은 비서실장 제안대로 간다(실측: "기록이 없으면 0을 보여 줄까요?"처럼 뻔한 질문에 대표가 매번 멈췄다).
-    const pending = req.questions.map((_, i) => i).filter((i) => !req.answers?.[i] && req.proposals?.[i]?.trim());
-    if (pending.length)
-      this.answerQuestions(
-        requestId,
-        pending.map((index) => ({ index, answer: null })),
-      );
     // 작업 흐름은 확정할 때 다시 검사한다(확정 화면에서 단계를 빼거나 API로 step을 지워 우회하지 못하게, QA).
     // 흐름이 단위 테스트 등을 요구하는데 그 검사 명령이 없으면 확정 전에 막는다(요구사항을 약하게 바꾸지 않는다).
     const formula = req.formula ? formulaByName(req.formula) : null;
@@ -4543,6 +4537,14 @@ ${failure.detail.slice(0, 400)}`,
         );
       list = applyFormula(formula, list);
     }
+    // 답하지 않은 질문은 비서실장 제안대로 간다(실측: "기록이 없으면 0을 보여 줄까요?"처럼 뻔한 질문에 대표가 매번 멈췄다).
+    // 확정을 막는 검사(작업 흐름)를 모두 통과한 뒤에 기록한다: 거부됐는데 결정만 남지 않게(QA).
+    const pending = req.questions.map((_, i) => i).filter((i) => !req.answers?.[i] && req.proposals?.[i]?.trim());
+    if (pending.length)
+      this.answerQuestions(
+        requestId,
+        pending.map((index) => ({ index, answer: null })),
+      );
     const created: Ticket[] = [];
     this.company.store.transact(() => {
       // 공유 계약(첫 초안): 다른 업무는 모두 계약이 끝난 뒤 시작한다(비서실장이 빠뜨려도 코드가 건다).

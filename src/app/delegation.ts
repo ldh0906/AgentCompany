@@ -213,12 +213,21 @@ export class Delegation {
   }
 
   private async askDelegate(t: Ticket, d: Employee): Promise<void> {
+    const nonce = randomBytes(6).toString('hex');
+    try {
+      await this.launchQuestion(t, d, nonce);
+    } catch {
+      // 실행을 띄우기도 전에 실패(지시가 너무 길다 등): 실행 실패와 같이 정리하고 횟수 안에서 다시 묻는다(QA)
+      this.retryLater(nonce, { ticketId: t.id, since: t.hold!.since });
+    }
+  }
+
+  private async launchQuestion(t: Ticket, d: Employee, nonce: string): Promise<void> {
     const room = this.h.chat.ensureTicketChannel(t.id);
     if (!room) return;
     const raw = this.h.company.store.getSetting(`ticket_questions:${t.id}`);
     const questions: string[] = raw ? (JSON.parse(raw) as string[]) : [];
     const project = this.h.company.requireProject(t.projectId);
-    const nonce = randomBytes(6).toString('hex');
     this.pending.set(nonce, { ticketId: t.id, since: t.hold!.since });
     const cwd = path.join(this.h.dataDir, 'delegate', t.id);
     await mkdir(cwd, { recursive: true });
@@ -247,8 +256,11 @@ export class Delegation {
   /** 위임 실행이 답 없이 끝났다(예산·시간 초과 등): 기다리던 기록과 "물어봄" 표시를 지워 다음 단계에 다시 묻는다. */
   onChatFailed(run: RunRecord): void {
     const p = this.pending.get(run.nonce);
-    if (!p) return;
-    this.pending.delete(run.nonce);
+    if (p) this.retryLater(run.nonce, p);
+  }
+
+  private retryLater(nonce: string, p: PendingDecision): void {
+    this.pending.delete(nonce);
     // 같은 보류에 두 번까지만 다시 묻는다: 계속 실패하는 원인(실행 파일 없음 등)이면 매 주기 실행이 쌓이지 않게
     // "물어봄" 표시를 남겨 두고 대표 할 일로 둔다(QA: 실패마다 표시를 지워 1.5초마다 다시 실행했다).
     const key = `delegate_tries:${p.ticketId}:${p.since}`;
@@ -263,6 +275,7 @@ export class Delegation {
     const p = this.pending.get(run.nonce);
     if (!p) return false;
     this.pending.delete(run.nonce);
+    this.h.company.store.deleteSetting(`delegate_tries:${p.ticketId}:${p.since}`);
     const t = this.h.company.store.get<Ticket>('tickets', p.ticketId);
     if (!t || t.hold?.reason !== 'needs_decision' || t.hold.since !== p.since) return true;
     const raw = finalText ? (extractLastJson(finalText) as Record<string, unknown> | null) : null;

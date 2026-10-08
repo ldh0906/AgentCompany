@@ -51,8 +51,9 @@ export class CeoDesk {
         t.hold &&
         !TERMINAL_STATUSES.includes(t.status) &&
         t.hold.reason !== 'waiting_dependency' &&
-        // 토론이 건 보류는 토론 할 일 하나로(업무만 재개하면 토론 결론 없이 진행되고 토론 할 일이 남았다)
-        this.h.company.store.getSetting(`debate_hold:${t.id}`) !== t.hold.since
+        // 토론이 건 보류는 토론 할 일 하나로(업무만 재개하면 토론 결론 없이 진행되고 토론 할 일이 남았다).
+        // 그 토론이 아직 열려 있을 때만 숨긴다: 토론이 없어지거나 끝났는데 보류가 남았으면 대표에게 보인다.
+        !this.debateHolding(t.id, t.hold.since)
       ) {
         const why = holdReason(t);
         out.push({
@@ -195,6 +196,14 @@ export class CeoDesk {
     if (!prev || !this.toastOn) return;
     const fresh = todos.filter((x) => !prev.has(x.key));
     for (const x of fresh.slice(0, 3)) showToast(tr('대표가 할 일', 'Needs you'), x.title);
+  }
+
+  /** 이 업무의 지금 보류를 열려 있는 토론이 걸었는가 */
+  private debateHolding(ticketId: string, since: string): boolean {
+    const [at, debateId] = (this.h.company.store.getSetting(`debate_hold:${ticketId}`) ?? '').split('|');
+    if (at !== since || !debateId) return false;
+    const raw = this.h.company.store.getSetting(`debate:${debateId}`);
+    return Boolean(raw && (JSON.parse(raw) as { phase?: string }).phase !== 'done');
   }
 
   /** 요청 하나의 업무가 모두 끝나면 알린다(게임 프로젝트면 고급 QA 자동 실행의 계기). */

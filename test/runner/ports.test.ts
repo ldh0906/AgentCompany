@@ -28,5 +28,8 @@ test('동시에 여러 실행이 받아도 같은 포트를 두 번 내주지 �
   const ports = await Promise.all(Array.from({ length: 40 }, () => freePort()));
   assert.equal(new Set(ports).size, ports.length);
   const more = await Promise.all(Array.from({ length: 20 }, () => freePort()));
-  assert.ok(more.every((p) => !ports.includes(p)), '앞서 내준 포트를 다시 주지 않는다');
+  assert.ok(
+    more.every((p) => !ports.includes(p)),
+    '앞서 내준 포트를 다시 주지 않는다',
+  );
 });
