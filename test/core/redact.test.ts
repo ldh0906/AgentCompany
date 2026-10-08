@@ -57,6 +57,12 @@ test('Node 프로젝트에서 흔한 형태(QA): .npmrc 토큰, Basic 인증, UR
     redact('Authorization: AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20261008/us-east-1/s3/aws4_request, Signature=0123456789abcdef'),
     `Authorization: AWS4-HMAC-SHA256 ${REDACTED}`,
   );
+  // 줄 끝의 역슬래시(셸 줄 잇기)가 있어도 다음 줄은 가리지 않는다(QA 확인 회차)
+  for (const nl of ['\n', '\r\n'])
+    assert.equal(
+      redact(`Authorization: Digest response=abc\\${nl}NEXT SHOULD SURVIVE${nl}THIRD survives`),
+      `Authorization: Digest ${REDACTED}${nl}NEXT SHOULD SURVIVE${nl}THIRD survives`,
+    );
   // 따옴표 안의 헤더는 그 따옴표까지만(뒤의 명령은 그대로), JSON 문자열 안의 이스케이프도
   assert.equal(
     redact('curl -H "Authorization: Digest username=\\"a\\", response=\\"66\\"" https://api.example.com/x'),

@@ -29,7 +29,8 @@ function valueEnd(text: string, from: number, q: string | null): number {
   for (let i = from; i < text.length; i++) {
     const ch = text[i]!;
     if (ch === '\n' || ch === '\r') return i;
-    if (ch === '\\') i++;
+    // 역슬래시는 다음 글자를 건너뛰되, 줄바꿈은 건너뛰지 않는다(다음 줄까지 가리지 않게, QA)
+    if (ch === '\\' && text[i + 1] !== '\n' && text[i + 1] !== '\r') i++;
     else if (q && ch === q) return i;
   }
   return text.length;
