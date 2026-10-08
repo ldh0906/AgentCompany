@@ -28,6 +28,8 @@ export interface DelegationHost extends OrchHost {
     decision: 'approved' | 'rejected',
     opts: { reason?: string; attested?: string[]; deferred?: string[]; by?: string; attestNote?: string },
   ): Ticket;
+  /** 이 직원이 이번 달 예산을 다 썼는가(그러면 위임 판단 실행을 띄우지 않는다) */
+  overBudget(e: Employee): boolean;
   /** 요청 전체 반영 승인(확인 항목은 "업무ID:요구사항ID") */
   decideRequest(approvalId: string, decision: 'approved' | 'rejected', opts: { deferred?: string[]; by?: string }): Promise<unknown>;
   scopeRequestOf(ticketId: string): { paths: string[]; reason: string } | null;
@@ -193,6 +195,9 @@ export class Delegation {
     // 같은 보류에는 한 번만 묻는다(재시작으로 끊기면 설정으로 기억한다).
     const asked = this.h.company.store.getSetting(`delegate_q:${t.id}`);
     if (asked === t.hold!.since) return;
+    // 위임받은 직원이 예산을 다 썼으면 묻지 않는다("물어봄" 표시도 남기지 않아 예산이 돌아오면 그때 묻는다).
+    // 그동안 보류는 대표 할 일에 그대로 보인다.
+    if (this.h.overBudget(d)) return;
     this.h.company.store.setSetting(`delegate_q:${t.id}`, t.hold!.since);
     this.h.track(`delegate:${t.id}`, this.askDelegate(t, d));
   }
@@ -227,6 +232,15 @@ export class Delegation {
       accessLevel: 'read-only',
       baseSha: null,
     });
+  }
+
+  /** 위임 실행이 답 없이 끝났다(예산·시간 초과 등): 기다리던 기록과 "물어봄" 표시를 지워 다음 단계에 다시 묻는다. */
+  onChatFailed(run: RunRecord): void {
+    const p = this.pending.get(run.nonce);
+    if (!p) return;
+    this.pending.delete(run.nonce);
+    if (this.h.company.store.getSetting(`delegate_q:${p.ticketId}`) === p.since)
+      this.h.company.store.setSetting(`delegate_q:${p.ticketId}`, '');
   }
 
   /** 위임 실행의 답: 그 답으로 업무를 재개한다(규칙이면 프로젝트 규칙으로 남긴다). */

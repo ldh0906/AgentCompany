@@ -184,3 +184,18 @@ test('업무 목록과 진행 기록도 지금 폴더의 프로젝트 것만: �
   const none = render(model({ s: two, project: null, projectId: null }), 100, 30).join('\n');
   assert.doesNotMatch(none, /T-28|T-1 작업 시작/);
 });
+
+test('팀 칸도 다른 프로젝트의 일은 제목 없이 "다른 프로젝트 작업 중"으로만 보인다', () => {
+  const busy = {
+    ...state,
+    tickets: [
+      ...state.tickets,
+      { id: 'T-28', projectId: 'P-2', title: 'PUBG 층별 문서', status: 'in_progress', hold: null, requirements: [] },
+    ],
+    runs: [{ id: 'R-9', ticketId: 'T-28', employeeId: 'E-1', kind: 'work', status: 'running', startedAt: now }, ...state.runs],
+  } as unknown as CliState;
+  const text = render(model({ s: busy }), 100, 30).join('\n');
+  assert.doesNotMatch(text, /PUBG 층별 문서|T-28/);
+  assert.match(text, /다른 프로젝트 작업 중/);
+  assert.match(text, /작업 T-1/, '이 프로젝트 일은 그대로 보인다');
+});

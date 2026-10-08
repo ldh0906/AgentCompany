@@ -147,7 +147,7 @@ export function render(m: Model, W: number, H: number): string[] {
   const rightW = twoCols ? W - leftW - 3 : W;
 
   // 왼쪽: 팀
-  const team = s ? teamRows(s) : [];
+  const team = s ? teamRows(s, m.projectId ?? null) : [];
   const left: string[] = [c.bold('팀')];
   if (s && !team.length) left.push(c.dim('직원 없음 — q로 나가서 aco up'));
   for (const r of team) {

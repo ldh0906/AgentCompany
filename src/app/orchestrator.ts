@@ -224,7 +224,9 @@ export class Orchestrator {
       onRequestDone: (req, tickets) => this.onRequestDone(req, tickets),
       stalled: () => this.stalledRuns(),
       // 위임 중이면 위임받은 직원이 결정하므로 대표 할 일로 올리지 않는다.
-      debatesToDecide: () => (this.delegation.on ? [] : this.debates.list(20).filter((d) => d.phase === 'decide')),
+      // 위임 중이면 위임받은 직원이 추천안으로 결정한다. 추천이 없으면(요약 실패 등) 위임자도 못 하므로 대표에게 보인다.
+      debatesToDecide: () =>
+        this.debates.list(20).filter((d) => d.phase === 'decide' && (!this.delegation.on || d.recommendation === null)),
     });
     this.playtests = new Playtests(host);
     this.screens = new ScreenQa({
@@ -243,6 +245,7 @@ export class Orchestrator {
       resolveScopeHold: (id, allow) => this.resolveScopeHold(id, allow, 'delegate'),
       decideIntegration: (approvalId, decision, o) => this.decideIntegration(approvalId, decision, o),
       decideRequest: (approvalId, decision, o) => this.decideRequest(approvalId, decision, o),
+      overBudget: (e) => Boolean(this.overBudget(e)),
       scopeRequestOf: (id) => this.scopeRequestOf(id),
       qaCheck: (id) => this.screens.screenCheckView(id),
       screenCheckOn: this.opts.screenCheck,
@@ -1332,6 +1335,8 @@ export class Orchestrator {
   }
 
   private async finishRun(run: RunRecord, failure: { failure: FailureClass; detail: string; orphan?: boolean } | null): Promise<void> {
+    // 대화·초안·검토 실행은 각자의 마무리로 가므로 실패 원인(예산 등)을 먼저 남겨 둔다
+    if (failure && run.kind !== 'work' && run.kind !== 'review') run.failureClass = failure.failure;
     if (run.kind === 'analysis' && run.phase) return this.finishDeliberationRun(run, null, failure?.detail ?? tr('실패', 'Failed'));
     if (run.kind === 'analysis') return this.finishDrafts(run, null, null, failure?.detail ?? '');
     if (run.kind === 'chat') return this.finishChat(run, null, failure?.detail ?? '');
@@ -1780,6 +1785,7 @@ export class Orchestrator {
     this.chatDepth.delete(run.id);
     if (!this.chat.channel(channelId)) return;
     if (failed || !parsed) {
+      this.delegation.onChatFailed(run); // 위임 질문이 실패하면 다음에 다시 묻는다(멈춘 채로 두지 않게)
       this.debates.onChatReply(run, null, finalText); // 토론은 그 사람 몫만 비우고 다음 단계로
       this.acceptance.onChatReply(run, null, finalText);
       this.chat.post(

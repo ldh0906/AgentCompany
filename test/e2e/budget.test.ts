@@ -84,6 +84,7 @@ test(
     const run = env.orch.records.run(runId)!;
     assert.equal(run.pid, null, '프로세스를 띄우지 않았다');
     assert.equal(run.status, 'failed');
+    assert.equal(run.failureClass, 'usage_limit', '실패 원인이 기록에 남는다');
     assert.match(run.reportError ?? '', /예산/);
     // 30분 재시도 시각이 지나도(보류 시각을 과거로) 아직 예산을 넘었으면 그대로 둔다
     const cur = env.company.requireTicket(tk.id);
@@ -99,3 +100,80 @@ test(
     assert.equal(env.orch.records.runsForTicket(tk.id).filter((r) => r.kind === 'work').length, 1, '새 실행 없음');
   },
 );
+
+const spend = (env: Awaited<ReturnType<typeof setup>>, employeeId: string) =>
+  env.orch.records.saveRun({
+    id: `R-spent-${employeeId}`,
+    ticketId: 'T-x',
+    employeeId,
+    kind: 'chat',
+    status: 'succeeded',
+    startedAt: new Date().toISOString(),
+    usage: { input: 10, cacheRead: 0, output: 10, total: 20, costUsd: null },
+  } as never);
+
+test(
+  '전권 위임: 위임받은 직원이 예산을 다 썼으면 묻지 않고 기다리다, 한도를 올리면 그때 물어 재개한다',
+  { timeout: 240_000 },
+  async (t) => {
+    const env = await setup(t, { implementer: 'asker' });
+    const lead = env.company.hireEmployee({ name: '팀장', roles: ['planner'], cli: 'fake', model: 'diligent', rank: 'lead' });
+    env.orch.setEmployeeMonthlyLimit(lead.id, 1);
+    spend(env, lead.id);
+    env.orch.delegation.set(true);
+    const tk = newImplTicket(env);
+    const held = await driveUntil(env, tk.id, (x) => x.hold?.reason === 'needs_decision', 150_000);
+    for (let i = 0; i < 5; i++) await env.orch.tick();
+    await env.orch.idle();
+    assert.equal(env.company.requireTicket(tk.id).hold?.since, held.hold!.since, '그대로 기다린다');
+    assert.equal(env.store.getSetting(`delegate_q:${tk.id}`) ?? '', '', '"물어봄" 표시를 남기지 않는다');
+    assert.ok(!env.orch.records.recentRuns(50).some((r) => r.employeeId === lead.id && r.id !== `R-spent-${lead.id}`));
+    // 한도를 올리면 다음 단계에 물어 답하고 재개한다
+    env.orch.setEmployeeMonthlyLimit(lead.id, 0);
+    await driveUntil(env, tk.id, (x) => x.hold === null || x.status === 'awaiting_approval', 150_000);
+    assert.ok(env.orch.delegation.recent().some((x) => x.text.includes('질문에 답하고 재개')));
+  },
+);
+
+test('위임 중이어도 추천이 없는 결정 대기 토론(요약 실패 등)은 대표 할 일에 보인다', { timeout: 60_000 }, async (t) => {
+  const env = await setup(t);
+  env.orch.delegation.set(true);
+  const base = {
+    channelId: 'g:x',
+    context: '',
+    origin: 'ceo',
+    projectId: null,
+    ticketId: null,
+    requestId: null,
+    participants: [],
+    moderator: 'E-x',
+    phase: 'decide',
+    runs: {},
+    positions: {},
+    rebuttals: {},
+    summary: null,
+    options: [],
+    dissent: '',
+    decision: null,
+    decidedBy: null,
+    createdAt: new Date().toISOString(),
+  };
+  env.store.setSetting('debate:D-norec', JSON.stringify({ ...base, id: 'D-norec', topic: '추천 없는 토론', recommendation: null }));
+  env.store.setSetting(
+    'debate:D-rec',
+    JSON.stringify({
+      ...base,
+      id: 'D-rec',
+      topic: '추천 있는 토론',
+      recommendation: 0,
+      options: [{ title: 'A', supporters: [], pros: [], cons: [], decision: 'A' }],
+    }),
+  );
+  env.store.setSetting('debate_index', JSON.stringify(['D-norec', 'D-rec']));
+  const titles = env.orch.desk.ceoTodos().map((x) => x.title);
+  assert.ok(
+    titles.some((x) => x.includes('추천 없는 토론')),
+    '위임자가 결정할 수 없으니 대표에게',
+  );
+  assert.ok(!titles.some((x) => x.includes('추천 있는 토론')), '추천이 있으면 위임자가 결정한다');
+});
