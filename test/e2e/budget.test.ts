@@ -195,5 +195,12 @@ test('전권 위임: 위임 질문이 계속 실패하면 두 번까지만 다�
     await env.orch.idle();
   }
   assert.equal(asks(), 3, '처음 1번 + 다시 2번');
+  assert.ok(
+    env.orch.records
+      .recentRuns(200)
+      .filter((r) => r.employeeId === lead.id && r.kind === 'chat')
+      .every((r) => r.status === 'failed' && r.failureClass),
+    '실행 중 실패한 대화 실행도 실패 원인이 기록된다',
+  );
   assert.equal(env.company.requireTicket(tk.id).hold?.reason, 'needs_decision', '대표 할 일로 남는다');
 });

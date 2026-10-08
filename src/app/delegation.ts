@@ -56,7 +56,15 @@ const QA_WAIT_MS = 15 * 60_000;
 
 export class Delegation {
   private readonly h: DelegationHost;
-  private readonly pending = new Map<string, PendingDecision>();
+  /** 위임 질문을 보낸 실행(nonce → 업무·보류 시각). DB에 두어 데몬이 다시 켜져도 답·실패를 그 보류에 잇는다. */
+  private readonly pending = {
+    set: (nonce: string, p: PendingDecision) => this.h.company.store.setSetting(`delegate_pending:${nonce}`, JSON.stringify(p)),
+    get: (nonce: string): PendingDecision | undefined => {
+      const raw = this.h.company.store.getSetting(`delegate_pending:${nonce}`);
+      return raw ? (JSON.parse(raw) as PendingDecision) : undefined;
+    },
+    delete: (nonce: string) => this.h.company.store.deleteSetting(`delegate_pending:${nonce}`),
+  };
 
   constructor(host: DelegationHost) {
     this.h = host;

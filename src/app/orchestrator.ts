@@ -268,12 +268,18 @@ export class Orchestrator {
       resumeTicket: (ticketId, text) => {
         const room = this.chat.ensureTicketChannel(ticketId);
         if (room) this.chat.post(room.id, 'ceo', text, 'chat'); // 업무방 메모는 다음 작업 지시에 들어간다
+        // 토론이 건 그 보류만 푼다(그사이 다른 이유로 다시 멈췄으면 그대로 둔다)
         const t = this.company.store.get<Ticket>('tickets', ticketId);
-        if (t?.hold) this.releaseHold(ticketId);
+        const mine = this.company.store.getSetting(`debate_hold:${ticketId}`);
+        this.company.store.deleteSetting(`debate_hold:${ticketId}`);
+        if (t?.hold && mine && t.hold.since === mine) this.releaseHold(ticketId);
       },
       holdTicket: (ticketId, note) => {
         const t = this.company.store.get<Ticket>('tickets', ticketId);
-        if (t && !t.hold && !TERMINAL_STATUSES.includes(t.status)) this.apply(ticketId, { type: 'hold', reason: 'on_hold', note });
+        if (t && !t.hold && !TERMINAL_STATUSES.includes(t.status)) {
+          const held = this.apply(ticketId, { type: 'hold', reason: 'on_hold', note });
+          if (held.hold) this.company.store.setSetting(`debate_hold:${ticketId}`, held.hold.since);
+        }
       },
       delegationOn: () => this.delegation.on,
       delegate: () => this.delegation.delegate(),
@@ -1303,14 +1309,28 @@ export class Orchestrator {
     run.exitCode = outcome?.exitCode ?? null;
 
     const fresh = run;
-    if (run.kind === 'analysis' && run.phase)
-      return this.finishDeliberationRun(
-        run,
-        outcome?.timedOut ? null : parsed.finalText,
-        outcome?.timedOut ? tr('시간 초과', 'Timed out') : stderr,
-      );
-    if (run.kind === 'analysis') return this.finishDrafts(run, parsed.finalText, outcome, stderr);
-    if (run.kind === 'chat') return this.finishChat(run, outcome?.timedOut ? null : parsed.finalText, parsed.errorText ?? stderr);
+    if (run.kind === 'analysis' || run.kind === 'chat') {
+      if (run.kind === 'analysis' && run.phase)
+        await this.finishDeliberationRun(
+          run,
+          outcome?.timedOut ? null : parsed.finalText,
+          outcome?.timedOut ? tr('시간 초과', 'Timed out') : stderr,
+        );
+      else if (run.kind === 'analysis') await this.finishDrafts(run, parsed.finalText, outcome, stderr);
+      else await this.finishChat(run, outcome?.timedOut ? null : parsed.finalText, parsed.errorText ?? stderr);
+      // 대화·초안·검토 실행이 실행 중에 실패했으면(시간 초과·CLI 오류·형식 오류) 원인도 기록에 남긴다
+      const done = this.records.run(run.id);
+      if (done?.status === 'failed' && !done.failureClass) {
+        const cls = adapter.classifyFailure({
+          exitCode: outcome?.exitCode ?? null,
+          timedOut: Boolean(outcome?.timedOut),
+          stderr: parsed.errorText ?? stderr,
+          finalText: parsed.finalText,
+        });
+        this.records.saveRun({ ...done, failureClass: cls === 'unknown' && parsed.finalText ? 'schema_invalid' : cls });
+      }
+      return;
+    }
 
     const ticket = this.company.requireTicket(run.ticketId);
     const report = parseReport(parsed.finalText, {

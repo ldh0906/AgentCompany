@@ -67,3 +67,33 @@ test('검수에서 두 번 반려되면 담당자·검수자가 토론하고, �
   assert.equal(after.hold, null, '결론이 나면 업무를 이어간다');
   assert.ok(env.orch.chat.messages(`t:${tk.id}`, 50).some((m) => m.author === 'ceo' && m.text.includes('토론 결론')));
 });
+
+test(
+  '토론이 건 보류는 토론 할 일 하나로 보이고, 토론 결론은 그 보류만 푼다(그사이 다른 이유로 멈췄으면 그대로)',
+  { timeout: 60_000 },
+  async (t) => {
+    const env = await setup(t);
+    const tk = newImplTicket(env);
+    const host = (
+      env.orch.debates as unknown as { h: { holdTicket(id: string, note: string): void; resumeTicket(id: string, text: string): void } }
+    ).h;
+    host.holdTicket(tk.id, '토론 중: 저장 방식');
+    const held = env.company.requireTicket(tk.id);
+    assert.equal(held.hold?.reason, 'on_hold');
+    assert.ok(!env.orch.desk.ceoTodos().some((x) => x.key.startsWith(`hold:${tk.id}:`)), '업무 보류 할 일을 따로 띄우지 않는다');
+    // 대표가 업무를 풀었다가 다른 이유로 다시 멈춤 → 토론 결론은 그 보류를 풀지 않는다
+    env.orch.releaseHold(tk.id);
+    env.company.applyTicket(tk.id, { type: 'hold', reason: 'needs_decision', note: '대표 결정 필요' }, { kind: 'ceo' });
+    host.resumeTicket(tk.id, '토론 결론: SQLite');
+    assert.equal(env.company.requireTicket(tk.id).hold?.reason, 'needs_decision', '토론이 걸지 않은 보류는 그대로');
+    assert.ok(
+      env.orch.desk.ceoTodos().some((x) => x.key.startsWith(`hold:${tk.id}:`)),
+      '이 보류는 대표 할 일로 보인다',
+    );
+    // 토론이 건 보류는 토론 결론으로 풀린다
+    const tk2 = newImplTicket(env);
+    host.holdTicket(tk2.id, '토론 중');
+    host.resumeTicket(tk2.id, '토론 결론: 파일');
+    assert.equal(env.company.requireTicket(tk2.id).hold, null);
+  },
+);

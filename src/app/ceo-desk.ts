@@ -47,7 +47,13 @@ export class CeoDesk {
         at: a.createdAt,
       });
     for (const t of tickets)
-      if (t.hold && !TERMINAL_STATUSES.includes(t.status) && t.hold.reason !== 'waiting_dependency') {
+      if (
+        t.hold &&
+        !TERMINAL_STATUSES.includes(t.status) &&
+        t.hold.reason !== 'waiting_dependency' &&
+        // 토론이 건 보류는 토론 할 일 하나로(업무만 재개하면 토론 결론 없이 진행되고 토론 할 일이 남았다)
+        this.h.company.store.getSetting(`debate_hold:${t.id}`) !== t.hold.since
+      ) {
         const why = holdReason(t);
         out.push({
           key: `hold:${t.id}:${t.hold.since}`,

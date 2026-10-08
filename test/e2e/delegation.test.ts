@@ -1,6 +1,7 @@
 // 전권 위임 모드: 대표 할 일을 최고 직급 직원이 대신 처리하고 모두 기록한다(대표 요청 2026-10-02).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Orchestrator } from '../../src/app/orchestrator.ts';
 import { driveUntil, newImplTicket, setup, statusIs } from './helpers.ts';
 
 test('위임: 초안을 제안대로 확정하고, 검수를 통과한 업무를 승인해 반영한다', { timeout: 240_000 }, async (t) => {
@@ -81,4 +82,35 @@ test('위임: 대표 직접 확인 항목은 자동 점검이 없으면 승인�
     !env.orch.records.evidenceFor(tk.id).some((e) => e.type === 'human_attest' && e.requirementId === 'R2' && e.label === '대표 직접 확인'),
   );
   assert.ok(env.company.store.events(tk.id).some((e) => e.type === 'evidence.later_dismissed'));
+});
+
+test('위임: 질문하는 도중 데몬이 다시 켜져도, 늦게 온 답으로 그 보류를 재개한다(대기 기록은 DB에)', { timeout: 240_000 }, async (t) => {
+  const env = await setup(t, { implementer: 'asker' });
+  const lead = env.company.hireEmployee({ name: '팀장', roles: ['planner'], cli: 'fake', model: 'slow', rank: 'lead' });
+  env.orch.delegation.set(true);
+  const tk = newImplTicket(env);
+  await driveUntil(env, tk.id, (x) => x.hold?.reason === 'needs_decision', 150_000);
+  process.env.FAKE_DELAY_MS = '5000';
+  t.after(() => void delete process.env.FAKE_DELAY_MS);
+  // 위임 질문 실행이 뜰 때까지
+  const deadline = Date.now() + 30_000;
+  while (!env.orch.records.recentRuns(50).some((r) => r.employeeId === lead.id && r.status === 'running')) {
+    if (Date.now() > deadline) throw new Error('위임 질문이 시작되지 않음');
+    await env.orch.tick();
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.equal(env.store.settingKeys('delegate_pending:').length, 1, '대기 기록은 DB에');
+  await env.orch.stop(); // 첫 데몬은 멈춘다(직원 실행은 계속 돈다)
+  const again = new Orchestrator(env.company, { dataDir: env.dataDir, language: 'ko', screenCheck: false });
+  t.after(async () => {
+    await again.stop();
+    await again.idle();
+  });
+  await again.recover();
+  again.delegation.set(true);
+  const env2 = { ...env, orch: again };
+  const resumed = await driveUntil(env2, tk.id, (x) => x.hold === null || x.status === 'awaiting_approval', 150_000);
+  assert.ok(resumed.hold === null || resumed.status === 'awaiting_approval', '새 데몬이 늦은 답으로 재개');
+  assert.ok(again.delegation.recent().some((x) => x.text.includes('질문에 답하고 재개')));
+  assert.equal(env.store.settingKeys('delegate_pending:').length, 0, '답을 쓰면 대기 기록을 지운다');
 });
