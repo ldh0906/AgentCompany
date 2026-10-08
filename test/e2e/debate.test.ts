@@ -130,3 +130,15 @@ test('토론 색인을 최근 50개로 자를 때도 끝나지 않은 토론은 
   await env.orch.debates.sweep();
   assert.deepEqual(advanced, ['D-old']);
 });
+
+test('업그레이드: 예전 버전이 색인에서 뺀 진행 중 토론도 다시 찾아 잇는다', async (t) => {
+  const env = await setup(t);
+  env.store.setSetting('debate:D-lost', JSON.stringify({ id: 'D-lost', channelId: 'g:lost', phase: 'rebuttal', topic: 'lost' }));
+  env.store.setSetting('debate:D-over', JSON.stringify({ id: 'D-over', channelId: 'g:over', phase: 'done', topic: 'over' }));
+  env.store.setSetting('debate_index', JSON.stringify([]));
+  const advanced: string[] = [];
+  (env.orch.debates as unknown as { advance: (id: string) => Promise<void> }).advance = async (id) => void advanced.push(id);
+  await env.orch.debates.sweep();
+  assert.deepEqual(advanced, ['D-lost']);
+  assert.deepEqual(JSON.parse(env.store.getSetting('debate_index') ?? '[]'), ['D-lost'], '끝난 토론은 되살리지 않는다');
+});

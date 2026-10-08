@@ -87,6 +87,19 @@ export class Debates {
     this.h.changed('chat', d.channelId);
   }
 
+  /**
+   * 색인에서 빠진 미완료 토론을 다시 넣는다: 예전 버전은 색인을 최근 50개로 자르며 진행 중인 토론도 뺐다
+   * (업그레이드 뒤에도 그 토론이 이어지고 업무 보류가 풀리게, QA).
+   */
+  private restoreOpen(): void {
+    const ids = this.ids();
+    const missing = this.h.company.store
+      .settingKeys('debate:')
+      .map((k) => k.slice('debate:'.length))
+      .filter((id) => !ids.includes(id) && (this.get(id)?.phase ?? 'done') !== 'done');
+    if (missing.length) this.h.company.store.setSetting('debate_index', JSON.stringify([...ids, ...missing]));
+  }
+
   private ids(): string[] {
     const raw = this.h.company.store.getSetting('debate_index');
     return raw ? (JSON.parse(raw) as string[]) : [];
@@ -355,6 +368,7 @@ export class Debates {
 
   /** tick: 끊긴 토론 잇기 + 전권 위임이면 추천안으로 결정 */
   async sweep(): Promise<void> {
+    this.restoreOpen();
     // 끝나지 않은 토론을 먼저 고른다(끝난 최신 토론에 밀려 오래된 토론이 다시 이어지지 않는 일이 없게, QA)
     for (const d of this.list(500)
       .filter((x) => x.phase !== 'done')
