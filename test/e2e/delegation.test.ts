@@ -16,11 +16,22 @@ test('위임: 초안을 제안대로 확정하고, 검수를 통과한 업무를
   const first = accepted.ticketIds[0]!;
   const done = await driveUntil(env, first, (x) => x.status === 'done' || x.hold !== null, 150_000);
   assert.equal(done.status, 'done', `보류: ${done.hold?.note}`);
+  // 요청의 업무는 검수를 통과하면 요청 결과물에 저절로 합쳐진다(업무별 대표 승인 없음)
   const approval = env.orch.records.approvals().find((a) => a.ticketId === first && a.kind === 'integrate' && a.state !== 'expired');
-  const decided = env.company.store.events(approval!.id).find((e) => e.type === 'approval.approved');
+  const auto = env.company.store.events(approval!.id).find((e) => e.type === 'approval.approved');
+  assert.equal(auto?.actor, 'auto');
+  // 요청 전체 반영 승인은 위임받은 직원이 한다
+  const deadline = Date.now() + 150_000;
+  while (!env.orch.records.request(req.id)!.integration && Date.now() < deadline) {
+    await env.orch.tick();
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  const whole = env.orch.records.approvals().find((a) => a.kind === 'integrate_request' && a.state !== 'expired');
+  const decided = env.company.store.events(whole!.id).find((e) => e.type === 'approval.approved');
   assert.match(String(decided?.actor ?? ''), /^delegate:/, '승인한 사람이 위임받은 직원으로 남는다');
+  assert.ok(env.orch.records.request(req.id)!.integration, '요청 결과물이 원본에 들어갔다');
   assert.ok(env.orch.delegation.recent().some((x) => x.text.includes('초안을 확정')));
-  assert.ok(env.orch.delegation.recent().some((x) => x.text.includes(`${first}`) && x.text.includes('승인')));
+  assert.ok(env.orch.delegation.recent().some((x) => x.text.includes('요청 결과물을 승인')));
   // 작은 결정은 멈추지 않고 정했고, 무엇을 정했는지 위임 기록에 남는다
   assert.ok(env.orch.delegation.recent().some((x) => x.text.includes('멈추지 않고 정한 것') && x.text.includes('해산')));
 });

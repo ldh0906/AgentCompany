@@ -198,6 +198,196 @@ export function describeEvent(e: DomainEvent, s: State | null, lang: string): st
 }
 
 export function ApprovalItem({ a, full = false }: { a: Approval; full?: boolean }) {
+  return a.kind === 'integrate_request' ? <RequestApprovalItem a={a} /> : <TicketApprovalItem a={a} full={full} />;
+}
+
+interface RequestApprovalDetail {
+  requestId: string;
+  projectId: string;
+  text: string;
+  changedPaths: string[];
+  mode: 'manual' | 'auto_after_approval';
+  tickets: { id: string; title: string; status: string; belowRank: boolean }[];
+  checks: { ticketId: string; id: string; text: string }[];
+  acceptance: { round: number; passed: number; total: number; left: string[] } | null;
+}
+
+/** 요청 하나 = 결과물 하나: 업무들이 쌓인 요청 결과물 전체를 한 번에 승인한다. */
+function RequestApprovalItem({ a }: { a: Approval }) {
+  const { reload, state } = useCompany();
+  const { t, lang } = useT();
+  const ko = lang === 'ko';
+  const { busy, run } = useAction();
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
+  const [checked, setChecked] = useState<string[]>([]);
+  const [later, setLater] = useState<string[]>([]);
+  const d = a.detail as RequestApprovalDetail;
+  const key = (c: { ticketId: string; id: string }) => `${c.ticketId}:${c.id}`;
+  const unchecked = d.checks.some((c) => !checked.includes(key(c)) && !later.includes(key(c)));
+  const proj = state?.projects.find((p) => p.id === d.projectId);
+  const kind = proj?.profile?.deliverable ?? 'screen';
+  const belowRank = d.tickets.filter((x) => x.belowRank).map((x) => x.id);
+  const toggle = (list: string[], set: (x: string[]) => void, k: string) =>
+    set(list.includes(k) ? list.filter((x) => x !== k) : [...list, k]);
+  const decide = (decision: 'approved' | 'rejected', mode?: string) =>
+    run(
+      () =>
+        api(`approvals/${a.id}/decide`, {
+          body: {
+            decision,
+            ...(mode ? { mode } : {}),
+            reason,
+            ...(decision === 'approved' ? { attested: checked, deferred: later.filter((x) => !checked.includes(x)) } : {}),
+          },
+        }),
+      decision === 'approved' ? (ko ? '승인했습니다.' : 'Approved.') : ko ? '고칠 업무를 만들었습니다.' : 'Created a fix ticket.',
+    ).then(reload);
+  return (
+    <div className="item">
+      <div className="spread">
+        <div>
+          <div className="title">
+            <span className="approval-mark">
+              <Icon name="check" size={13} />
+            </span>
+            {a.summary}
+          </div>
+          <div className="meta">
+            {ko ? '요청 결과물 한 번에 반영' : 'Merge the whole request at once'} ·{' '}
+            {d.mode === 'auto_after_approval' ? (ko ? '승인하면 내 폴더에 반영' : 'auto merge') : ko ? '따로 보관만' : 'branch only'} ·{' '}
+            {when(a.createdAt)}
+          </div>
+        </div>
+        <div className="row">
+          {kind === 'screen' && <PreviewButton projectId={d.projectId} ticketId={d.requestId} />}
+          {d.mode === 'auto_after_approval' ? (
+            <>
+              <button className="btn ok small" disabled={busy || unchecked} onClick={() => decide('approved', 'auto_after_approval')}>
+                {t('approveMerge')}
+              </button>
+              <button className="btn small" disabled={busy || unchecked} onClick={() => decide('approved', 'manual')}>
+                {t('approveBranch')}
+              </button>
+            </>
+          ) : (
+            <button className="btn ok small" disabled={busy || unchecked} onClick={() => decide('approved')}>
+              {t('approve')}
+            </button>
+          )}
+          <button className="btn danger small" disabled={busy} onClick={() => setRejecting(true)}>
+            {t('reject')}
+          </button>
+        </div>
+      </div>
+      <div className="approval-scroll">
+        <div className="note">
+          <b>{ko ? '요청' : 'Request'}</b> {d.text}
+        </div>
+        <div className="note">
+          <b>{ko ? '업무' : 'Tickets'}</b>{' '}
+          {d.tickets.map((x, i) => (
+            <span key={x.id}>
+              {i > 0 && ' · '}
+              <Link to={`/tickets/${x.id}`}>{x.id}</Link> {x.title}
+              {x.status !== 'done' && ` (${x.status})`}
+            </span>
+          ))}
+        </div>
+        {d.acceptance && (
+          <div className={`banner ${d.acceptance.left.length ? 'warn' : 'info'}`} style={{ margin: '8px 0 0' }}>
+            {ko
+              ? `인수 시험 ${d.acceptance.round}회차: ${d.acceptance.passed}/${d.acceptance.total} 통과`
+              : `Acceptance round ${d.acceptance.round}: ${d.acceptance.passed}/${d.acceptance.total} passed`}
+            {d.acceptance.left.map((x) => (
+              <div key={x} className="sub">
+                {x}
+              </div>
+            ))}
+          </div>
+        )}
+        {belowRank.length > 0 && (
+          <div className="banner warn" style={{ margin: '8px 0 0' }}>
+            {ko
+              ? `하위 직급이 검수한 업무가 있습니다(${belowRank.join(', ')}). 더 꼼꼼히 보고 승인하세요.`
+              : `Some tickets were reviewed by a lower rank (${belowRank.join(', ')}). Check them more closely.`}
+          </div>
+        )}
+        <details className="note">
+          <summary>{ko ? `바뀐 파일 ${d.changedPaths.length}개` : `${d.changedPaths.length} files changed`}</summary>
+          <pre className="code" style={{ maxHeight: 200 }}>
+            {d.changedPaths.join('\n')}
+          </pre>
+        </details>
+        {d.checks.length > 0 && (
+          <div className="ceo-checks">
+            <b>{ko ? '대표 직접 확인' : 'Your own check'}</b>
+            {d.checks.map((c) => (
+              <label key={key(c)} className="check-row">
+                <input
+                  type="checkbox"
+                  checked={checked.includes(key(c))}
+                  disabled={later.includes(key(c))}
+                  onChange={() => toggle(checked, setChecked, key(c))}
+                />
+                <span>
+                  <b>
+                    {c.ticketId} {c.id}
+                  </b>{' '}
+                  {c.text}{' '}
+                  {!checked.includes(key(c)) && (
+                    <button
+                      type="button"
+                      className={`btn small ${later.includes(key(c)) ? 'on' : ''}`}
+                      onClick={(ev) => {
+                        ev.preventDefault();
+                        toggle(later, setLater, key(c));
+                      }}
+                    >
+                      {later.includes(key(c))
+                        ? ko
+                          ? '✓ 나중에 확인 (할 일에 남김)'
+                          : '✓ Check later'
+                        : ko
+                          ? '지금 확인 못 함 → 나중에'
+                          : "Can't check now → later"}
+                    </button>
+                  )}
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+      {rejecting && (
+        <Modal
+          title={t('reject')}
+          onClose={() => setRejecting(false)}
+          actions={
+            <button
+              className="btn danger"
+              disabled={busy || !reason.trim()}
+              onClick={() => decide('rejected').then(() => setRejecting(false))}
+            >
+              {t('reject')}
+            </button>
+          }
+        >
+          <div className="form">
+            <label>
+              {ko
+                ? '무엇을 고쳐야 하나요? (이 내용으로 고칠 업무를 만들고, 끝나면 다시 승인을 받습니다)'
+                : 'What needs to change? (A fix ticket is created; you approve again when it is done)'}
+              <textarea value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
+            </label>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function TicketApprovalItem({ a, full = false }: { a: Approval; full?: boolean }) {
   const { reload, state } = useCompany();
   const { t, lang } = useT();
   const { busy, run } = useAction();
@@ -958,7 +1148,7 @@ function AwaySummary() {
   const ids = (type: string) => [...new Set(after.filter((e) => e.type === type).map((e) => e.entityId))];
   const doneIds = ids('ticket.done');
   const drafted = ids('request.drafted').filter((id) => state.requests.find((r) => r.id === id)?.status === 'drafted');
-  const waiting = state.approvals.filter((a) => a.kind === 'integrate');
+  const waiting = state.approvals.filter((a) => a.kind === 'integrate' || a.kind === 'integrate_request');
   const stuck = state.tickets.filter(
     (t) => t.hold && t.hold.reason !== 'waiting_dependency' && !['done', 'cancelled', 'failed'].includes(t.status),
   );

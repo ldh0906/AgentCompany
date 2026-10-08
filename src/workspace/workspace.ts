@@ -286,6 +286,61 @@ async function fetchExactSha(originPath: string, paths: ProjectPaths, sha: strin
     );
 }
 
+/** 요청 브랜치(미러 안에만 있다): 없으면 기준 브랜치에서 만든다. 만들었으면 만든 SHA, 이미 있으면 null. */
+export async function ensureMirrorBranch(paths: ProjectPaths, branch: string, baseBranch: string): Promise<string | null> {
+  const ref = `refs/heads/${branch}`;
+  if ((await git(['rev-parse', '--verify', '-q', ref], paths.mirror, { allowFail: true })).code === 0) return null;
+  const sha = await headSha(paths.mirror, `refs/heads/${baseBranch}`);
+  await git(['update-ref', '-m', 'agent-company: request branch', ref, sha, ''], paths.mirror);
+  return sha;
+}
+
+/**
+ * 업무를 요청 브랜치에 합친다(미러 안에서만: 원본 저장소는 그대로, 원본 반영은 요청 승인 때 한 번).
+ * 충돌하거나 합친 결과 검사가 실패하면 합치지 않는다. 그사이 브랜치가 움직였으면 충돌로 본다(비교-교체).
+ */
+export async function mergeIntoMirrorBranch(
+  paths: ProjectPaths,
+  key: string,
+  branch: string,
+  expectedHead: string,
+  message: string,
+  verifyMerge?: (mergeSha: string) => Promise<{ ok: boolean; reason?: string }>,
+): Promise<{ kind: 'merged'; before: string; mergeSha: string } | { kind: 'conflict' | 'verify_failed'; reason: string }> {
+  const ref = `refs/heads/${branch}`;
+  const before = await headSha(paths.mirror, ref);
+  const tmp = path.join(paths.root, 'merge-tmp', key);
+  await rm(tmp, { recursive: true, force: true });
+  await mkdir(path.dirname(tmp), { recursive: true });
+  await git(['worktree', 'add', '--detach', tmp, before], paths.mirror);
+  let mergeSha: string;
+  try {
+    const merged = await git([...AGENT_IDENTITY, 'merge', '--no-ff', '--no-edit', '-m', message, expectedHead], tmp, { allowFail: true });
+    if (merged.code !== 0) {
+      await git(['merge', '--abort'], tmp, { allowFail: true });
+      return {
+        kind: 'conflict',
+        reason: tr('요청 브랜치와 충돌해 합칠 수 없습니다.', 'Conflicts with the request branch.'),
+      };
+    }
+    mergeSha = await headSha(tmp);
+  } finally {
+    await removeWorktree(paths, tmp);
+  }
+  if (verifyMerge) {
+    const v = await verifyMerge(mergeSha);
+    if (!v.ok)
+      return {
+        kind: 'verify_failed',
+        reason: tr(`합친 결과 재검증 실패: ${v.reason ?? ''}`, `Merged result failed verification: ${v.reason ?? ''}`),
+      };
+  }
+  const cas = await git(['update-ref', '-m', `agent-company: ${message}`, ref, mergeSha, before], paths.mirror, { allowFail: true });
+  if (cas.code !== 0)
+    return { kind: 'conflict', reason: tr('요청 브랜치가 그사이 바뀌었습니다.', 'The request branch moved in the meantime.') };
+  return { kind: 'merged', before, mergeSha };
+}
+
 /** manual: 원본 저장소에 ac/<ticket> 브랜치만 만든다. 대표가 직접 병합한다. */
 export async function integrateAsBranch(
   originPath: string,

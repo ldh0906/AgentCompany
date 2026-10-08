@@ -41,7 +41,9 @@ export class CeoDesk {
         reason:
           a.kind === 'integrate'
             ? tr('검수 통과 · 승인하면 반영', 'Passed review · approve to merge')
-            : tr('권한 요청', 'Permission request'),
+            : a.kind === 'integrate_request'
+              ? tr('요청 결과물 완성 · 승인하면 한 번에 반영', 'Request finished · approve to merge it all at once')
+              : tr('권한 요청', 'Permission request'),
         at: a.createdAt,
       });
     for (const t of tickets)

@@ -67,7 +67,7 @@ import {
   startProcess,
   waitForExit,
 } from '../runner/process.ts';
-import { AGENT_IDENTITY, git } from '../workspace/git.ts';
+import { AGENT_IDENTITY, git, gitOut } from '../workspace/git.ts';
 import {
   changedPaths,
   checkScope,
@@ -76,10 +76,12 @@ import {
   commitWorktree,
   reviewDiffText,
   ensureDetachedWorktree,
+  ensureMirrorBranch,
   ensureTicketWorktree,
   headSha,
   integrateAsBranch,
   integrateWithMerge,
+  mergeIntoMirrorBranch,
   originFingerprint,
   projectPaths,
   refChanges,
@@ -228,6 +230,7 @@ export class Orchestrator {
       addWriteScope: (id, paths) => this.addWriteScope(id, paths),
       resolveScopeHold: (id, allow) => this.resolveScopeHold(id, allow),
       decideIntegration: (approvalId, decision, o) => this.decideIntegration(approvalId, decision, o),
+      decideRequest: (approvalId, decision, o) => this.decideRequest(approvalId, decision, o),
       scopeRequestOf: (id) => this.scopeRequestOf(id),
       qaCheck: (id) => this.screens.screenCheckView(id),
       screenCheckOn: this.opts.screenCheck,
@@ -260,9 +263,15 @@ export class Orchestrator {
     this.acceptance = new Acceptance({
       ...host,
       nameOf: (id) => this.nameOf(id),
-      snapshotDir: (projectId, key) => this.debateDir(projectId, null, key),
+      snapshotDir: async (projectId, key, requestId) => {
+        const req = requestId ? this.records.request(requestId) : null;
+        if (!req?.branch) return this.debateDir(projectId, null, key);
+        const paths = projectPaths(this.opts.dataDir, projectId);
+        const sha = await headSha(paths.mirror, `refs/heads/${req.branch}`);
+        return ensureDetachedWorktree(paths, 'review', `debate-${key}`, sha);
+      },
       integrationChecks: (project, dir, key) => this.integrationChecks(project, dir, key),
-      acceptanceScreens: (project, scenarios, outDir) => this.acceptanceScreens(project, scenarios, outDir),
+      acceptanceScreens: (project, scenarios, outDir, requestId) => this.acceptanceScreens(project, scenarios, outDir, requestId),
     });
   }
 
@@ -275,14 +284,17 @@ export class Orchestrator {
     project: Project,
     scenarios: ScreenScenario[],
     outDir: string,
+    requestId?: string,
   ): Promise<{ shots: { file: string; label: string }[]; errors: string[]; text: string } | null> {
     if (deliverableOf(project) !== 'screen' || !this.opts.screenCheck) return null;
     const chrome = findChrome();
     if (!chrome) return null;
-    const key = `${project.id}:base`;
+    // 요청 브랜치가 있으면 요청 결과물을 띄운다(아직 기준 브랜치에는 없다)
+    const target = requestId && this.records.request(requestId)?.branch ? requestId : null;
+    const key = `${project.id}:${target ?? 'base'}`;
     const wasRunning = this.previews.list().some((p) => `${p.projectId}:${p.ticketId ?? 'base'}` === key);
     try {
-      const info = await this.preview(project.id, null);
+      const info = await this.preview(project.id, target);
       if (!info.url) return null;
       const cap = await captureScreens(info.url, outDir, chrome, scenarios, { mobile: project.profile?.mobile ?? true });
       return {
@@ -383,16 +395,24 @@ export class Orchestrator {
   async preview(projectId: string, ticketId: string | null): Promise<PreviewInfo> {
     const project = this.company.requireProject(projectId);
     const paths = projectPaths(this.opts.dataDir, project.id);
+    // 요청 ID면 요청 결과물(요청 브랜치) 전체를 띄운다(요청 승인 카드의 "실행해 보기").
+    const request = ticketId ? this.records.request(ticketId) : null;
     const { sha, dir } = await this.withProjectLock(project.id, async () => {
       let sha: string | null;
+      if (request) {
+        if (!request.branch) throw new DomainError(tr('이 요청에는 결과물 브랜치가 없습니다.', 'This request has no result branch.'));
+        sha = await headSha(paths.mirror, `refs/heads/${request.branch}`);
+        return { sha, dir: await ensureDetachedWorktree(paths, 'preview', request.id, sha) };
+      }
       if (ticketId) {
         const t = this.company.requireTicket(ticketId);
         const sub = this.records.latestSubmission(t);
         sha = sub?.headSha ?? null;
         if (!sha) throw new DomainError(tr('이 업무에는 아직 실행해 볼 제출물이 없습니다.', 'This ticket has no submission to run yet.'));
         // 제출물만 띄우면 그사이 병합된 다른 업무가 빠진다(실측: T-5 미리보기에 T-11 맵이 없음).
-        // 최신 기준 브랜치에 제출물을 합친 모습을 띄우고, 충돌하면 제출물만 띄운다.
-        const base = await this.syncMirrorRecorded(project, paths);
+        // 최신 기준 브랜치(요청의 업무면 요청 브랜치)에 제출물을 합친 모습을 띄우고, 충돌하면 제출물만 띄운다.
+        const rb = this.requestOf(t)?.branch;
+        const base = rb ? await headSha(paths.mirror, `refs/heads/${rb}`) : await this.syncMirrorRecorded(project, paths);
         const dir = await ensureDetachedWorktree(paths, 'preview', ticketId, base);
         const merged = await git([...AGENT_IDENTITY, 'merge', '--no-edit', '--no-ff', sha], dir, { allowFail: true });
         if (merged.code !== 0) {
@@ -404,7 +424,7 @@ export class Orchestrator {
       return { sha, dir: await ensureDetachedWorktree(paths, 'preview', 'base', sha) };
     });
     // 직원이 알려 준 열어 볼 페이지(예: 알림음 확인용 demo.html)
-    const t = ticketId ? this.company.requireTicket(ticketId) : null;
+    const t = ticketId && !request ? this.company.requireTicket(ticketId) : null;
     const rep = t ? this.records.latestSubmission(t)?.report : null;
     const page = rep?.kind === 'work' ? (rep.previewPage ?? null) : null;
     return this.previews.start({ projectId, ticketId, sha, dir, page });
@@ -533,7 +553,7 @@ export class Orchestrator {
     const project = this.company.requireProject(ticket.projectId);
     const paths = projectPaths(this.opts.dataDir, project.id);
     await this.withProjectLock(project.id, async () => {
-      const wt = await ensureTicketWorktree(paths, ticket.id, project.baseBranch);
+      const wt = await ensureTicketWorktree(paths, ticket.id, this.baseBranchOf(ticket, project));
       const branchRef = `refs/heads/${ticketBranch(ticket.id)}`;
       const windowSeq = run.moveSeqBefore ?? 0;
       // 오케스트레이터의 커밋 이전 상태로 비교해야 직원의 ref 조작과 구분된다.
@@ -616,6 +636,7 @@ export class Orchestrator {
       this.desk.notifyNewTodos();
       // 우선순위(1 높음 → 3 낮음) 순, 같으면 먼저 만든 순: 쓰기 범위가 겹칠 때 높은 업무가 먼저 잠금을 잡는다.
       this.expireOrphanApprovals();
+      await this.ensureRequestApprovals().catch((e: unknown) => this.noteOnce('requests', 'orchestrator.error', { error: String(e) }));
       for (const snap of [...this.company.tickets()].sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2))) {
         // 앞 업무를 처리하는 동안(await) 대표가 승인하는 등 상태가 바뀌었을 수 있다: 매번 최신 상태로 판단한다.
         // 실측(2026-10-02, 식단 T-52): 6초 전 목록의 "승인 대기"를 보고, 대표가 막 승인한 업무에 승인 요청을 또 만들었다.
@@ -801,14 +822,15 @@ export class Orchestrator {
       await this.syncMirrorRecorded(project, paths);
       const branchRef = `refs/heads/${ticketBranch(t.id)}`;
       const existed = (await git(['rev-parse', '--verify', '-q', branchRef], paths.mirror, { allowFail: true })).stdout.trim() || null;
-      const wt = await ensureTicketWorktree(paths, t.id, project.baseBranch);
+      const baseBranch = await this.ensureBaseBranchOf(t, project, paths);
+      const wt = await ensureTicketWorktree(paths, t.id, baseBranch);
       this.records.recordRefMove(project.id, 'mirror', branchRef, existed, await headSha(wt.path));
       // 반영 충돌로 돌아온 업무: 최신 기준을 업무 폴더에 합쳐 둔다. 충돌이면 표시를 남긴 채 두고(직원이 정리),
       // 제출 때 시스템 커밋이 병합을 마친다. 이제 비교 기준은 최신 기준이다(다른 업무의 변경이 범위 위반으로 보이지 않게).
       if (this.company.store.getSetting(`catch_up:${t.id}`)) {
         this.company.store.setSetting(`catch_up:${t.id}`, '');
         const before = await headSha(wt.path);
-        const baseRef = `refs/heads/${project.baseBranch}`;
+        const baseRef = `refs/heads/${baseBranch}`;
         const merged = await git([...AGENT_IDENTITY, 'merge', '--no-ff', '--no-edit', baseRef], wt.path, { allowFail: true });
         if (merged.code === 0) this.records.recordRefMove(project.id, 'mirror', branchRef, before, await headSha(wt.path));
         const conflicted = (await git(['diff', '--name-only', '--diff-filter=U'], wt.path, { allowFail: true })).stdout.trim();
@@ -895,6 +917,29 @@ export class Orchestrator {
     if (!last?.cliSessionId || last.employeeId !== employee.id || last.cli !== employee.cli || last.worktreePath !== cwd) return null;
     if (last.resumedFrom && !last.report) return null;
     return last;
+  }
+
+  /** 요청 브랜치가 있는 요청의 업무면 그 요청(직접 만든 업무, 요청 브랜치 이전의 요청은 null). */
+  private requestOf(t: Pick<Ticket, 'id' | 'projectId'>): (CeoRequest & { branch: string }) | null {
+    const req = this.records.requestOfTicket(t);
+    return req?.branch ? (req as CeoRequest & { branch: string }) : null;
+  }
+
+  /** 업무가 출발하고 합쳐지는 브랜치: 요청의 업무는 요청 브랜치(미러 안), 아니면 프로젝트 기준 브랜치. */
+  private baseBranchOf(t: Pick<Ticket, 'id' | 'projectId'>, project: Project): string {
+    return this.requestOf(t)?.branch ?? project.baseBranch;
+  }
+
+  /** baseBranchOf + 요청 브랜치가 아직 없으면 지금 기준 브랜치에서 만든다(프로젝트 잠금 안에서, 미러를 맞춘 뒤). */
+  private async ensureBaseBranchOf(t: Ticket, project: Project, paths: ReturnType<typeof projectPaths>): Promise<string> {
+    const req = this.requestOf(t);
+    if (!req) return project.baseBranch;
+    const created = await ensureMirrorBranch(paths, req.branch, project.baseBranch);
+    if (created) {
+      this.records.recordRefMove(project.id, 'mirror', `refs/heads/${req.branch}`, null, created);
+      this.company.store.appendEvent('orchestrator', 'request.branch_created', req.id, { branch: req.branch, sha: created });
+    }
+    return req.branch;
   }
 
   private lastFeedback(t: Ticket): string | null {
@@ -1984,6 +2029,9 @@ export class Orchestrator {
         ticket.id,
         created.map((c) => c.id),
       );
+      // 요청의 업무를 나눴으면 조각도 그 요청에 속한다(같은 요청 브랜치에 쌓인다).
+      const req = this.records.requestOfTicket(ticket);
+      if (req) this.records.saveRequest({ ...req, ticketIds: [...req.ticketIds, ...created.map((c) => c.id)] });
       this.company.store.setSetting(
         `split_note:${ticket.id}`,
         tr(
@@ -2752,8 +2800,12 @@ ${failure.detail.slice(0, 400)}`,
    */
   private maybeAutoApprove(t: Ticket): void {
     const project = this.company.requireProject(t.projectId);
-    if (!project.autoApprove || t.hold || t.type === 'review' || t.reviewBelowRank) return;
-    if (t.requirements.some((r) => r.evidenceType === 'human_attest')) return;
+    // 요청의 업무는 요청 브랜치(미러)에 합칠 뿐이라 대표 승인이 필요 없다: 대표 직접 확인·하위 직급 검수는 요청 승인 때 함께 본다.
+    const inRequest = Boolean(this.requestOf(t));
+    if (t.hold || t.type === 'review') return;
+    if (!inRequest && (!project.autoApprove || t.reviewBelowRank)) return;
+    const checks = t.requirements.filter((r) => r.evidenceType === 'human_attest').map((r) => r.id);
+    if (!inRequest && checks.length) return;
     const a = this.records.pendingApprovalFor(t.id, 'integrate');
     const reviewed = this.records
       .runsForTicket(t.id)
@@ -2767,16 +2819,21 @@ ${failure.detail.slice(0, 400)}`,
       );
     if (!a || !reviewed) return;
     try {
-      this.decideIntegration(a.id, 'approved', { auto: true });
+      this.decideIntegration(a.id, 'approved', inRequest ? { auto: true, deferred: checks, forRequest: true } : { auto: true });
       const room = this.chat.ensureTicketChannel(t.id);
       if (room)
         this.chat.post(
           room.id,
           'system',
-          tr(
-            '검수를 통과해 대표 설정(검수 통과하면 자동 반영)에 따라 반영합니다.',
-            'Review passed; merging automatically per the project setting.',
-          ),
+          inRequest
+            ? tr(
+                '검수를 통과해 요청 결과물(요청 브랜치)에 합칩니다. 대표 폴더에는 요청 전체를 승인할 때 들어갑니다.',
+                "Review passed; adding it to the request's result. It reaches your folder when you approve the whole request.",
+              )
+            : tr(
+                '검수를 통과해 대표 설정(검수 통과하면 자동 반영)에 따라 반영합니다.',
+                'Review passed; merging automatically per the project setting.',
+              ),
           'event',
         );
     } catch {
@@ -2797,6 +2854,7 @@ ${failure.detail.slice(0, 400)}`,
       by?: string;
       /** 직접 확인 기록에 남길 말(전권 위임: 누가 무엇을 보고 대신 확인했는지) */
       attestNote?: string;
+      forRequest?: boolean;
     } = {},
   ): Ticket {
     const t = this.decideIntegrationCore(approvalId, decision, opts);
@@ -2816,6 +2874,8 @@ ${failure.detail.slice(0, 400)}`,
       auto?: boolean;
       by?: string;
       attestNote?: string;
+      /** 요청의 업무: 미룬 확인은 "나중에 확인"이 아니라 요청 승인 카드로 간다(그때는 아직 대표 폴더에 없다). */
+      forRequest?: boolean;
     },
   ): Ticket {
     const a = this.records.approval(approvalId);
@@ -2878,9 +2938,11 @@ ${failure.detail.slice(0, 400)}`,
         opts.by?.startsWith('delegate:') ? tr('전권 위임 확인', 'Delegated confirmation') : undefined,
       );
     if (deferred.length) {
+      const key = opts.forRequest ? `request_checks:${t.id}` : `later_checks:${t.id}`;
+      const have = JSON.parse(this.company.store.getSetting(key) || '[]') as { id: string; text: string; at: string }[];
       this.company.store.setSetting(
-        `later_checks:${t.id}`,
-        JSON.stringify([...this.laterChecks(t.id), ...deferred.map((r) => ({ id: r.id, text: r.text, at: new Date().toISOString() }))]),
+        key,
+        JSON.stringify([...have, ...deferred.map((r) => ({ id: r.id, text: r.text, at: new Date().toISOString() }))]),
       );
       this.company.store.appendEvent('ceo', 'evidence.deferred', t.id, { requirementIds: deferred.map((r) => r.id) });
     }
@@ -2926,6 +2988,402 @@ ${failure.detail.slice(0, 400)}`,
     await this.withProjectLock(project.id, () => this.integrateLocked(t, project, sub, approval, mode, paths));
   }
 
+  /**
+   * 합친 결과로 검사 명령을 다시 돌린다(반영 직전). 검사가 원본 저장소나 미러를 바꾸면 반영을 멈춘다.
+   * key: 검사 기록·남은 검사 정리에 쓰는 이름(업무 ID 또는 요청 ID).
+   */
+  private mergeVerifier(
+    key: string,
+    project: Project,
+    paths: ReturnType<typeof projectPaths>,
+    runDir: string,
+  ): (mergeSha: string) => Promise<{ ok: boolean; reason?: string }> {
+    return async (mergeSha) => {
+      if (!project.verifyCommands.length) return { ok: true };
+      await this.stopLeftoverVerify(key);
+      const vwt = await ensureDetachedWorktree(paths, 'verify', key, mergeSha);
+      const base = await this.verifyBaseline(`mergeverify_base:${key}`, project, paths, false);
+      const fp = base.origin;
+      const originRefs = base.originRefs;
+      const mirrorRefs = base.refs;
+      const seq = base.seq;
+      let failed: string | null = null;
+      try {
+        const setup = dependencySetup(vwt, project.verifyCommands);
+        for (const [i, vc] of (setup ? [setup, ...project.verifyCommands] : project.verifyCommands).entries()) {
+          const r = await this.runVerifyCommand(vc, vwt, path.join(runDir, `merge-verify-${Date.now()}`, String(i)), key);
+          if (!r.passed) {
+            failed = `${vc.label}: ${r.summary.slice(-300)}`;
+            break;
+          }
+        }
+      } finally {
+        const touched =
+          (await originFingerprint(project.originPath)) !== fp ||
+          this.unexplained(project, 'origin', originRefs, await snapshotRefs(project.originPath), seq).length > 0 ||
+          this.unexplained(project, 'mirror', mirrorRefs, await snapshotRefs(paths.mirror), seq).length > 0;
+        // 정책 위반은 일반 테스트 실패와 다르다: 브랜치 반영으로 강등하지 않고 반영 자체를 멈춘다.
+        if (touched)
+          throw new Error(
+            tr(
+              '병합 재검증 명령이 원본 저장소나 미러를 변경했습니다. 반영을 중단했습니다.',
+              'Merge re-verification changed the original repository or mirror. Integration stopped.',
+            ),
+          );
+      }
+      if (failed) return { ok: false, reason: failed };
+      return { ok: true };
+    };
+  }
+
+  // ======================= 요청 단위 결과물 =======================
+  // 요청 하나 = 결과물 하나: 업무들은 요청 브랜치(미러)에 쌓이고, 모두 끝나면(인수 시험까지) 대표가 요청 전체를 한 번 승인한다.
+
+  /** 요청 브랜치의 지금 모습: 기준 브랜치에서 갈라진 곳, 머리, 바뀐 파일. 브랜치가 아직 없으면 null. */
+  private async requestHead(
+    project: Project,
+    paths: ReturnType<typeof projectPaths>,
+    branch: string,
+  ): Promise<{ baseSha: string; headSha: string; changedPaths: string[] } | null> {
+    const ref = `refs/heads/${branch}`;
+    const head = (await git(['rev-parse', '--verify', '-q', ref], paths.mirror, { allowFail: true })).stdout.trim();
+    if (!head) return null;
+    const baseSha = await gitOut(['merge-base', `refs/heads/${project.baseBranch}`, ref], paths.mirror);
+    return { baseSha, headSha: head, changedPaths: await changedPaths(paths.mirror, baseSha, head) };
+  }
+
+  private requestSubject(requestId: string, h: { baseSha: string; headSha: string; changedPaths: string[] }): string {
+    return [requestId, h.baseSha, h.headSha, sha256(h.changedPaths.join('\n'))].join('|');
+  }
+
+  /** 요청 승인 카드로 미뤄 둔 대표 직접 확인(업무별) */
+  private requestChecks(ticketId: string): { id: string; text: string; at: string }[] {
+    return JSON.parse(this.company.store.getSetting(`request_checks:${ticketId}`) || '[]') as { id: string; text: string; at: string }[];
+  }
+
+  /**
+   * tick마다: 업무가 모두 끝나고 인수 시험도 돌고 있지 않은 요청에 "요청 전체 반영" 승인을 하나 만든다.
+   * 그사이 요청 브랜치가 바뀌었거나(고칠 업무가 들어옴) 다시 일이 생겼으면 낡은 승인은 만료한다.
+   */
+  private async ensureRequestApprovals(): Promise<void> {
+    const pending = this.records.approvals('pending').filter((a) => a.kind === 'integrate_request');
+    const pendingOf = (id: string) => pending.find((a) => (a.detail as { requestId?: string }).requestId === id);
+    for (const req of this.records.requests(100)) {
+      if (req.status !== 'accepted' || !req.branch || req.integration) continue;
+      const project = this.company.store.get<Project>('projects', req.projectId);
+      if (!project || project.removedAt) continue;
+      const tickets = req.ticketIds.map((id) => this.company.store.get<Ticket>('tickets', id)).filter((x): x is Ticket => Boolean(x));
+      const ready =
+        tickets.every((t) => TERMINAL_STATUSES.includes(t.status)) &&
+        tickets.some((t) => t.status === 'done') &&
+        !(req.acceptanceRounds ?? []).some((r) => r.state === 'running');
+      const have = pendingOf(req.id);
+      if (!ready) {
+        if (have)
+          this.records.setApprovalState(have.id, 'expired', 'orchestrator', {
+            reason: tr('요청에 다시 할 일이 생겼습니다.', 'The request has open work again.'),
+          });
+        continue;
+      }
+      // 승인되어 반영 중이면 기다린다(반영이 끝나면 integration이 생긴다)
+      const approvedOf = (id: string) =>
+        this.records
+          .approvals('approved')
+          .some((a) => a.kind === 'integrate_request' && (a.detail as { requestId?: string }).requestId === id);
+      if (approvedOf(req.id)) continue;
+      const paths = projectPaths(this.opts.dataDir, project.id);
+      const head = await this.withProjectLock(project.id, () => this.requestHead(project, paths, req.branch!));
+      // 잠금을 기다리는 사이 승인·반영이 끝났을 수 있다: 다시 읽는다(낡은 상태로 승인 요청을 또 만들지 않게).
+      if (this.records.request(req.id)?.integration || approvedOf(req.id)) continue;
+      if (have && head && sha256(this.requestSubject(req.id, head)) === have.subjectHash) continue;
+      if (have)
+        this.records.setApprovalState(have.id, 'expired', 'orchestrator', {
+          reason: tr('요청 결과물이 바뀌었습니다.', "The request's result changed."),
+        });
+      if (!head || !head.changedPaths.length) {
+        // 파일을 바꾼 업무가 하나도 들어오지 않았다(모두 취소 등): 반영할 것이 없다.
+        this.records.saveRequest({
+          ...this.records.request(req.id)!,
+          integration: { at: new Date().toISOString(), result: { kind: 'empty' } },
+        });
+        continue;
+      }
+      const checks = tickets.flatMap((t) => this.requestChecks(t.id).map((x) => ({ ticketId: t.id, id: x.id, text: x.text })));
+      const last = (req.acceptanceRounds ?? []).at(-1);
+      const done = tickets.filter((t) => t.status === 'done').length;
+      const a = this.records.createApproval({
+        kind: 'integrate_request',
+        ticketId: null,
+        subject: this.requestSubject(req.id, head),
+        summary: tr(
+          `요청 결과물: ${req.text.slice(0, 80)} — 업무 ${done}개, ${head.changedPaths.length}개 파일`,
+          `Request result: ${req.text.slice(0, 80)} — ${done} tickets, ${head.changedPaths.length} files`,
+        ),
+        detail: {
+          requestId: req.id,
+          projectId: project.id,
+          text: req.text.slice(0, 1000),
+          ...head,
+          mode: project.integrationMode,
+          tickets: tickets.map((t) => ({ id: t.id, title: t.title, status: t.status, belowRank: Boolean(t.reviewBelowRank) })),
+          checks,
+          acceptance: last
+            ? {
+                round: last.round,
+                passed: last.results.filter((r) => r.mark === '✅').length,
+                total: last.results.length,
+                left: last.results.filter((r) => r.mark !== '✅').map((r) => `${r.id} ${r.mark} ${r.why}`.slice(0, 300)),
+              }
+            : null,
+        },
+        requestedBy: 'orchestrator',
+      });
+      this.company.store.appendEvent('orchestrator', 'request.awaiting_approval', req.id, { approvalId: a.id, headSha: head.headSha });
+      this.changed('approval', a.id);
+      // 대표가 켠 "검수 통과하면 자동 반영": 대표 직접 확인·하위 직급 검수가 없을 때만
+      if (project.autoApprove && !checks.length && !tickets.some((t) => t.reviewBelowRank))
+        await this.decideRequest(a.id, 'approved', { auto: true }).catch(() => {});
+    }
+  }
+
+  /**
+   * 요청 전체 승인·반려. 확인 항목은 "업무ID:요구사항ID"로 받는다(체크 = 확인 기록, 나중에 = 반영 뒤 할 일).
+   * 반려하면 대표가 적은 이유로 고칠 업무를 같은 요청에 만든다: 끝나면 다시 승인을 받는다.
+   */
+  async decideRequest(
+    approvalId: string,
+    decision: 'approved' | 'rejected',
+    opts: {
+      mode?: Project['integrationMode'];
+      reason?: string;
+      attested?: string[];
+      deferred?: string[];
+      auto?: boolean;
+      by?: string;
+    } = {},
+  ): Promise<{ ok: true }> {
+    // 결정 중(요청 결과물 확인에 git을 기다림)에 또 누르면 거절한다: 두 번 승인·반영하지 않게.
+    if (this.requestDeciding.has(approvalId)) throw new DomainError(tr('이미 처리하고 있습니다.', 'Already being processed.'));
+    this.requestDeciding.add(approvalId);
+    try {
+      return await this.decideRequestCore(approvalId, decision, opts);
+    } finally {
+      this.requestDeciding.delete(approvalId);
+    }
+  }
+
+  private readonly requestDeciding = new Set<string>();
+
+  private async decideRequestCore(
+    approvalId: string,
+    decision: 'approved' | 'rejected',
+    opts: { mode?: Project['integrationMode']; reason?: string; attested?: string[]; deferred?: string[]; auto?: boolean; by?: string },
+  ): Promise<{ ok: true }> {
+    const a = this.records.approval(approvalId);
+    if (!a || a.kind !== 'integrate_request' || a.state !== 'pending')
+      throw new DomainError(tr('처리할 수 없는 승인입니다.', 'This approval cannot be processed.'));
+    const d = a.detail as { requestId: string; checks: { ticketId: string; id: string; text: string }[]; mode: Project['integrationMode'] };
+    const req = this.records.request(d.requestId);
+    if (!req?.branch) throw new DomainError(tr('요청을 찾을 수 없습니다.', 'Request not found.'));
+    const project = this.company.requireProject(req.projectId);
+    const tickets = req.ticketIds.map((id) => this.company.store.get<Ticket>('tickets', id)).filter((x): x is Ticket => Boolean(x));
+    if (decision === 'rejected') {
+      const reason = (opts.reason ?? '').trim();
+      if (!reason) throw new DomainError(tr('무엇을 고쳐야 하는지 적어 주세요.', 'Say what needs to change.'));
+      const fix = this.company.store.transact(() => {
+        this.records.setApprovalState(a.id, 'rejected', opts.by ?? 'ceo', { reason });
+        const fix = this.company.createTicket(
+          {
+            projectId: project.id,
+            type: 'impl',
+            title: tr(`[대표 반려] ${reason}`, `[CEO rejected] ${reason}`).slice(0, 200),
+            purpose: tr(
+              `대표가 요청 결과물 전체를 보고 고쳐 달라고 했습니다: ${reason}\n원래 요청: ${req.text.slice(0, 1000)}`,
+              `The CEO reviewed the whole result of the request and asked for a change: ${reason}\nOriginal request: ${req.text.slice(0, 1000)}`,
+            ),
+            requirements: [{ text: reason.slice(0, 1000), evidenceType: 'inspection' }],
+            doneCriteria: tr('대표가 짚은 문제가 고쳐지고 검수를 통과한다.', 'What the CEO pointed out is fixed and review passes.'),
+            writeScope: [...new Set(tickets.flatMap((t) => t.writeScope))],
+            difficulty: 'normal',
+            dependsOn: [],
+          },
+          CEO,
+        );
+        this.records.saveRequest({ ...this.records.request(req.id)!, ticketIds: [...req.ticketIds, fix.id] });
+        this.company.store.setSetting(`request_done:${req.id}`, '');
+        this.company.store.appendEvent('ceo', 'request.rejected', req.id, { reason, fix: fix.id });
+        return fix;
+      });
+      this.changed('ticket', fix.id);
+      this.changed('request', req.id);
+      return { ok: true };
+    }
+    const paths = projectPaths(this.opts.dataDir, project.id);
+    const head = await this.withProjectLock(project.id, () => this.requestHead(project, paths, req.branch!));
+    if (!head || sha256(this.requestSubject(req.id, head)) !== a.subjectHash) {
+      this.records.setApprovalState(a.id, 'expired', 'orchestrator', {
+        reason: tr('승인 대상이 바뀌었습니다.', 'Approval subject changed.'),
+      });
+      throw new DomainError(
+        tr(
+          '승인 요청 이후 요청 결과물이 바뀌어 승인이 무효가 되었습니다. 새 승인 요청을 확인하세요.',
+          "The request's result changed after the approval request. Check the new one.",
+        ),
+      );
+    }
+    const key = (c: { ticketId: string; id: string }) => `${c.ticketId}:${c.id}`;
+    const checked = d.checks.filter((c) => opts.attested?.includes(key(c)));
+    const deferred = d.checks.filter((c) => !opts.attested?.includes(key(c)) && (opts.auto || opts.deferred?.includes(key(c))));
+    if (checked.length + deferred.length < d.checks.length)
+      throw new DomainError(
+        tr(
+          `대표 직접 확인 항목을 확인하고 체크하거나 나중에로 미루세요: ${d.checks.map(key).join(', ')}`,
+          `Check the items that need your own confirmation, or defer them: ${d.checks.map(key).join(', ')}`,
+        ),
+      );
+    const mode = opts.mode ?? d.mode;
+    this.company.store.transact(() => {
+      for (const c of checked)
+        this.attest(
+          c.ticketId,
+          c.id,
+          tr('요청 결과물을 승인하면서 대표가 직접 확인했습니다.', "Confirmed by the CEO when approving the request's result."),
+          opts.by?.startsWith('delegate:') ? tr('전권 위임 확인', 'Delegated confirmation') : undefined,
+        );
+      // 반영 뒤에 확인할 것: 이제 대표 폴더에 들어가므로 "나중에 확인"으로 옮긴다.
+      for (const t of tickets) {
+        const later = deferred.filter((c) => c.ticketId === t.id);
+        if (later.length)
+          this.company.store.setSetting(
+            `later_checks:${t.id}`,
+            JSON.stringify([...this.laterChecks(t.id), ...later.map((c) => ({ id: c.id, text: c.text, at: new Date().toISOString() }))]),
+          );
+        this.company.store.setSetting(`request_checks:${t.id}`, '');
+      }
+      this.records.setApprovalState(a.id, 'approved', opts.by ?? (opts.auto ? 'auto' : 'ceo'), {
+        mode,
+        ...(opts.auto ? { auto: true } : {}),
+      });
+      this.company.store.appendEvent('ceo', 'request.approved', req.id, { approvalId: a.id, mode, headSha: head.headSha });
+    });
+    this.changed('approval', a.id);
+    this.track(`request-integrate:${req.id}`, this.integrateRequest(req.id, a.id, mode, head.headSha));
+    return { ok: true };
+  }
+
+  /** 승인된 요청 결과물을 원본에 넣는다: 따로 보관(ac/<요청 ID> 브랜치) 또는 기준 브랜치에 병합(합친 결과 재검증). */
+  private async integrateRequest(
+    requestId: string,
+    approvalId: string,
+    mode: Project['integrationMode'],
+    expectedHead: string,
+  ): Promise<void> {
+    const req = this.records.request(requestId)!;
+    const project = this.company.requireProject(req.projectId);
+    const paths = projectPaths(this.opts.dataDir, project.id);
+    await this.withProjectLock(project.id, async () => {
+      if (this.records.approval(approvalId)?.state !== 'approved') return;
+      const baseRef = `refs/heads/${project.baseBranch}`;
+      const mirrorBaseBefore =
+        (await git(['rev-parse', '--verify', '-q', baseRef], paths.mirror, { allowFail: true })).stdout.trim() || null;
+      const originBranchBefore =
+        (await git(['rev-parse', '--verify', '-q', `refs/heads/${req.branch}`], project.originPath, { allowFail: true })).stdout.trim() ||
+        null;
+      try {
+        const result =
+          mode === 'auto_after_approval'
+            ? await integrateWithMerge(
+                project.originPath,
+                paths,
+                req.id,
+                project.baseBranch,
+                expectedHead,
+                req.text.split('\n')[0]!.slice(0, 72),
+                this.mergeVerifier(req.id, project, paths, path.join(this.opts.dataDir, 'requests', req.id)),
+              )
+            : await integrateAsBranch(project.originPath, paths, req.id, expectedHead);
+        const baseNow = await headSha(paths.mirror, baseRef);
+        this.company.store.transact(() => {
+          this.records.recordRefMove(project.id, 'mirror', baseRef, mirrorBaseBefore, baseNow);
+          if (result.kind === 'merged')
+            this.records.recordRefMove(project.id, 'origin', `refs/heads/${result.baseBranch}`, result.previousBaseSha, result.mergeSha);
+          else this.records.recordRefMove(project.id, 'origin', `refs/heads/${result.branch}`, originBranchBefore, result.sha);
+          this.records.setApprovalState(approvalId, 'consumed', 'orchestrator', { result });
+          this.records.saveRequest({ ...this.records.request(req.id)!, integration: { at: new Date().toISOString(), result } });
+          this.company.store.setSetting(`mergeverify_base:${req.id}`, '');
+          this.company.store.appendEvent('orchestrator', 'request.integrated', req.id, result);
+        });
+        this.desk.notice(
+          result.kind === 'merged'
+            ? tr('요청 결과물을 내 폴더에 반영했습니다', "The request's result is in your folder")
+            : tr(`요청 결과물을 ${result.branch} 브랜치로 보관했습니다`, `The request's result is on branch ${result.branch}`),
+          `${req.text.slice(0, 120)}${result.kind === 'downgraded' ? `\n${result.reason}` : ''}`,
+          '/',
+        );
+      } catch (error) {
+        // 반영 실패: 승인을 무효로 하고 다음 tick에 새 승인 요청을 만든다(대표가 다시 시도할 수 있게).
+        this.company.store.transact(() => {
+          this.records.setApprovalState(approvalId, 'expired', 'orchestrator', { reason: String((error as Error).message ?? error) });
+          this.company.store.setSetting(`mergeverify_base:${req.id}`, '');
+        });
+        this.desk.notice(
+          tr('요청 결과물을 반영하지 못했습니다', "Could not merge the request's result"),
+          String((error as Error).message ?? error),
+          '/',
+        );
+      }
+    });
+    this.changed('request', requestId);
+  }
+
+  /**
+   * 요청의 업무: 요청 브랜치(미러 안)에 합친다. 원본 저장소는 건드리지 않는다(요청 전체를 대표가 승인할 때 한 번).
+   * 합친 결과로 검사를 다시 돌리고, 충돌하거나 실패하면 담당자에게 돌려보낸다(다음 작업 때 요청 브랜치를 합쳐 준다).
+   */
+  private async integrateIntoRequest(
+    t: Ticket,
+    project: Project,
+    sub: RunRecord,
+    approval: NonNullable<ReturnType<Records['approval']>>,
+    paths: ReturnType<typeof projectPaths>,
+    branch: string,
+  ): Promise<void> {
+    try {
+      const result = await mergeIntoMirrorBranch(
+        paths,
+        t.id,
+        branch,
+        sub.headSha!,
+        `${t.id}: ${t.title}`,
+        this.mergeVerifier(t.id, project, paths, sub.runDir),
+      );
+      this.company.store.transact(() => {
+        this.company.store.setSetting(`mergeverify_base:${t.id}`, '');
+        this.records.setApprovalState(approval.id, 'consumed', 'orchestrator', { result });
+        this.company.store.appendEvent('orchestrator', 'ticket.integration_result', t.id, { ...result, branch });
+        if (result.kind === 'merged') {
+          this.records.recordRefMove(project.id, 'mirror', `refs/heads/${branch}`, result.before, result.mergeSha);
+          this.apply(t.id, { type: 'integrated', commitSha: result.mergeSha });
+          return;
+        }
+        this.company.store.setSetting(`catch_up:${t.id}`, '1');
+        this.apply(t.id, {
+          type: 'merge_conflict',
+          reason: tr(
+            `요청 결과물에 합치려는데 같은 요청의 다른 업무가 먼저 들어와 맞지 않습니다(${result.reason}). 이번 작업을 시작할 때 요청 결과물을 업무 폴더에 합쳐 두었습니다: 충돌 표시(<<<<<<< ======= >>>>>>>)가 남은 파일을 정리해 양쪽 변경을 모두 살리고, 이미 들어온 것은 다시 만들지 마세요.`,
+            `Adding this to the request's result failed because another ticket of the same request got in first (${result.reason}). The request's result is merged into your folder at the start of this run: resolve the conflict markers (<<<<<<< ======= >>>>>>>) keeping both sides, and do not rebuild what is already there.`,
+          ),
+        });
+      });
+      if (result.kind === 'merged') await this.recheckWaiting(project, paths, t.id, result.mergeSha, branch).catch(() => {});
+    } catch (error) {
+      this.company.store.transact(() => {
+        this.company.store.setSetting(`mergeverify_base:${t.id}`, '');
+        this.apply(t.id, { type: 'integration_failed', reason: String((error as Error).message ?? error) });
+      });
+    }
+  }
+
   private async integrateLocked(
     t: Ticket,
     project: Project,
@@ -2939,6 +3397,8 @@ ${failure.detail.slice(0, 400)}`,
     // 잠금을 기다리는 동안 취소·보류되었거나 승인이 바뀌었으면 원본을 건드리지 않는다.
     const current = this.company.requireTicket(ticketId);
     if (current.status !== 'integrating' || current.hold || this.records.approval(approval.id)?.state !== 'approved') return;
+    const req = this.requestOf(t);
+    if (req) return this.integrateIntoRequest(t, project, sub, approval, paths, req.branch);
     const mirrorBaseBefore =
       (await git(['rev-parse', '--verify', '-q', `refs/heads/${project.baseBranch}`], paths.mirror, { allowFail: true })).stdout.trim() ||
       null;
@@ -2949,42 +3409,15 @@ ${failure.detail.slice(0, 400)}`,
     try {
       const result =
         mode === 'auto_after_approval'
-          ? await integrateWithMerge(project.originPath, paths, t.id, project.baseBranch, sub.headSha, t.title, async (mergeSha) => {
-              if (!project.verifyCommands.length) return { ok: true };
-              await this.stopLeftoverVerify(t.id);
-              const vwt = await ensureDetachedWorktree(paths, 'verify', t.id, mergeSha);
-              const base = await this.verifyBaseline(`mergeverify_base:${t.id}`, project, paths, false);
-              const fp = base.origin;
-              const originRefs = base.originRefs;
-              const mirrorRefs = base.refs;
-              const seq = base.seq;
-              let failed: string | null = null;
-              try {
-                const setup = dependencySetup(vwt, project.verifyCommands);
-                for (const [i, vc] of (setup ? [setup, ...project.verifyCommands] : project.verifyCommands).entries()) {
-                  const r = await this.runVerifyCommand(vc, vwt, path.join(sub.runDir, `merge-verify-${Date.now()}`, String(i)), t.id);
-                  if (!r.passed) {
-                    failed = `${vc.label}: ${r.summary.slice(-300)}`;
-                    break;
-                  }
-                }
-              } finally {
-                const touched =
-                  (await originFingerprint(project.originPath)) !== fp ||
-                  this.unexplained(project, 'origin', originRefs, await snapshotRefs(project.originPath), seq).length > 0 ||
-                  this.unexplained(project, 'mirror', mirrorRefs, await snapshotRefs(paths.mirror), seq).length > 0;
-                // 정책 위반은 일반 테스트 실패와 다르다: 브랜치 반영으로 강등하지 않고 반영 자체를 멈춘다.
-                if (touched)
-                  throw new Error(
-                    tr(
-                      '병합 재검증 명령이 원본 저장소나 미러를 변경했습니다. 반영을 중단했습니다.',
-                      'Merge re-verification changed the original repository or mirror. Integration stopped.',
-                    ),
-                  );
-              }
-              if (failed) return { ok: false, reason: failed };
-              return { ok: true };
-            })
+          ? await integrateWithMerge(
+              project.originPath,
+              paths,
+              t.id,
+              project.baseBranch,
+              sub.headSha,
+              t.title,
+              this.mergeVerifier(t.id, project, paths, sub.runDir),
+            )
           : await integrateAsBranch(project.originPath, paths, t.id, sub.headSha);
       const baseRef = `refs/heads/${project.baseBranch}`;
       const baseNow = await headSha(paths.mirror, baseRef);
@@ -3014,7 +3447,8 @@ ${failure.detail.slice(0, 400)}`,
         }
         this.apply(ticketId, { type: 'integrated', commitSha: commit });
       });
-      if (result.kind === 'merged') await this.recheckWaiting(project, paths, ticketId, result.mergeSha).catch(() => {});
+      if (result.kind === 'merged')
+        await this.recheckWaiting(project, paths, ticketId, result.mergeSha, project.baseBranch).catch(() => {});
       // 그 밖의 강등(예: 내 폴더에 커밋하지 않은 변경)은 완료로 두되 대표에게 알린다(조용히 따로 보관되지 않게).
       if (result.kind === 'downgraded' && !result.sendBack)
         this.desk.notice(
@@ -3036,9 +3470,16 @@ ${failure.detail.slice(0, 400)}`,
    * (실제로 합치지 않고 git merge-tree로 계산만). 충돌이 예상되면 대표가 확인하기 전에 담당자에게 돌려보내고,
    * 다음 작업 때 최신 기준을 업무 폴더에 합쳐 준다. 대표 요청(2026-10-01): Gas Town의 병합 대기열(Refinery)처럼.
    */
-  private async recheckWaiting(project: Project, paths: ReturnType<typeof projectPaths>, mergedId: string, base: string): Promise<void> {
+  private async recheckWaiting(
+    project: Project,
+    paths: ReturnType<typeof projectPaths>,
+    mergedId: string,
+    base: string,
+    branch: string,
+  ): Promise<void> {
     for (const t of this.company.tickets()) {
       if (t.id === mergedId || t.projectId !== project.id || !['in_review', 'awaiting_approval'].includes(t.status) || t.hold) continue;
+      if (this.baseBranchOf(t, project) !== branch) continue; // 다른 브랜치에 합쳐질 업무(요청 브랜치 ↔ 기준 브랜치)
       const head = this.records.latestSubmission(t)?.headSha;
       if (!head) continue;
       const r = await git(['merge-tree', '--write-tree', '--name-only', '--no-messages', base, head], paths.mirror, { allowFail: true });
@@ -3635,7 +4076,14 @@ ${failure.detail.slice(0, 400)}`,
           ),
         );
       }
-      this.records.saveRequest({ ...this.records.request(requestId)!, status: 'accepted', ticketIds: created.map((t) => t.id) });
+      // 파일을 바꾸는 업무가 있으면 요청 하나 = 결과물 하나: 업무들이 요청 브랜치에 쌓이고 대표는 마지막에 한 번 승인한다.
+      const makes = created.some((t) => t.type === 'impl' || t.type === 'doc');
+      this.records.saveRequest({
+        ...this.records.request(requestId)!,
+        status: 'accepted',
+        ticketIds: created.map((t) => t.id),
+        ...(makes ? { branch: ticketBranch(req.id) } : {}),
+      });
       this.company.store.appendEvent('ceo', 'request.accepted', req.id, { tickets: created.map((t) => t.id) });
     });
     this.changed('request', requestId);

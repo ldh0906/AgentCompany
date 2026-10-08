@@ -28,6 +28,8 @@ export interface DelegationHost extends OrchHost {
     decision: 'approved' | 'rejected',
     opts: { reason?: string; attested?: string[]; deferred?: string[]; by?: string; attestNote?: string },
   ): Ticket;
+  /** 요청 전체 반영 승인(확인 항목은 "업무ID:요구사항ID") */
+  decideRequest(approvalId: string, decision: 'approved' | 'rejected', opts: { deferred?: string[]; by?: string }): Promise<unknown>;
   scopeRequestOf(ticketId: string): { paths: string[]; reason: string } | null;
   /** 화면 점검·확인용 실행 기록과 QA 의견(없으면 null) */
   qaCheck(ticketId: string): { sha: string; state: string; opinion: string | null; qaState: string | null; at: string } | null;
@@ -114,6 +116,7 @@ export class Delegation {
       else if (t.hold.reason === 'needs_permission' && t.status === 'verifying') this.tryDo(() => this.decideScopeViolation(t));
     }
     for (const a of this.h.records.approvals('pending').filter((x) => x.kind === 'integrate')) this.tryDo(() => this.decideApproval(a));
+    for (const a of this.h.records.approvals('pending').filter((x) => x.kind === 'integrate_request')) this.approveRequest(a, d);
     for (const p of this.h.company.projects().filter((x) => !x.removedAt && this.h.profileProposal(x.id)))
       this.tryDo(() => {
         this.h.resolveProfileProposal(p.id, true);
@@ -257,6 +260,27 @@ export class Delegation {
         t.id,
       );
     }
+  }
+
+  /**
+   * 요청 전체 반영: 업무마다 검수와 인수 시험을 거쳤으니 승인한다. 대표 직접 확인 항목은 대신 체크하지 않고
+   * 반영 뒤 "나중에 확인"으로 넘긴다(위임받은 직원이 보거나 들을 수 없는 것).
+   */
+  private approveRequest(a: Approval, d: Employee): void {
+    const detail = a.detail as { requestId: string; checks?: { ticketId: string; id: string }[] };
+    const deferred = (detail.checks ?? []).map((c) => `${c.ticketId}:${c.id}`);
+    void this.h
+      .decideRequest(a.id, 'approved', { deferred, by: `delegate:${d.id}` })
+      .then(() =>
+        this.log(
+          detail.requestId,
+          tr(
+            `요청 결과물을 승인했습니다${deferred.length ? ` (대표 직접 확인 ${deferred.length}개는 반영 뒤 "나중에 확인"으로)` : ''}.`,
+            `Approved the request's result${deferred.length ? ` (${deferred.length} CEO checks moved to "check later")` : ''}.`,
+          ),
+        ),
+      )
+      .catch(() => {});
   }
 
   /** 반영 승인: 대표 직접 확인 항목은 QA 의견으로 판단한다. */

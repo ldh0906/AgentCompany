@@ -433,6 +433,15 @@ export class Api {
             deferred: strList(b, 'deferred'),
           });
         }
+        if (a.kind === 'integrate_request') {
+          const mode = b.mode === undefined ? undefined : oneOf(b, 'mode', ['manual', 'auto_after_approval'] as const);
+          return this.orch.decideRequest(id!, decision, {
+            ...(mode ? { mode } : {}),
+            reason: str(b, 'reason', { optional: true, max: 4000 }),
+            attested: strList(b, 'attested'),
+            deferred: strList(b, 'deferred'),
+          });
+        }
         throw new ApiError(
           400,
           tr('이 승인 종류는 아직 대시보드에서 처리할 수 없습니다.', 'This approval type is not yet supported in the dashboard.'),

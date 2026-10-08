@@ -262,6 +262,7 @@ export interface Run {
 export type ApprovalKind =
   | 'tool_permission' // 실행 중 권한 요청 (GUI 승인)
   | 'integrate' // 반영 (manual: 브랜치만 / auto: 병합까지)
+  | 'integrate_request' // 요청 전체를 한 결과물로 반영(요청 브랜치 → 원본)
   | 'scope_violation' // 범위 밖 수정 발견
   | 'access_escalation' // full-auto 등급 등 권한 확대
   | 'cleanup'; // 작업공간·브랜치 정리

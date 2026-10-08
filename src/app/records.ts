@@ -92,6 +92,13 @@ export interface CeoRequest {
   debateId?: string | null;
   /** 실패한 요청을 다시 보낸 것이면 원래 요청 ID(자동 재시도는 한 번만). */
   retriedFrom?: string;
+  /**
+   * 요청 브랜치(미러 안에만 있다, ac/<요청 ID>): 요청의 업무는 여기서 출발하고 검수를 통과하면 여기에 합쳐진다.
+   * 원본 저장소에는 대표가 요청 전체를 한 번 승인할 때 들어간다. 없으면 옛 방식(업무마다 대표 승인).
+   */
+  branch?: string | null;
+  /** 요청 전체를 원본에 반영한 결과(반영했으면 다시 승인을 만들지 않는다). */
+  integration?: { at: string; result: unknown } | null;
   error: string | null;
   ticketIds: string[];
   createdAt: string;

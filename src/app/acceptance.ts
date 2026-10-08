@@ -18,8 +18,8 @@ export const MAX_FIX_ROUNDS = 2;
 
 export interface AcceptanceHost extends OrchHost {
   nameOf(id: string): string;
-  /** 반영된 결과의 읽기 전용 사본 */
-  snapshotDir(projectId: string, key: string): Promise<string>;
+  /** 반영된 결과의 읽기 전용 사본(요청 브랜치가 있는 요청이면 요청 결과물) */
+  snapshotDir(projectId: string, key: string, requestId?: string): Promise<string>;
   /** 프로젝트 검사 명령을 사본에서 다시 돌린다(통합 시험) */
   integrationChecks(project: Project, dir: string, key: string): Promise<string[]>;
   /** 화면 결과물: 반영된 결과를 띄워 찍은 사진(outDir에 저장). 화면이 아니거나 못 찍으면 null */
@@ -27,6 +27,7 @@ export interface AcceptanceHost extends OrchHost {
     project: Project,
     scenarios: ScreenScenario[],
     outDir: string,
+    requestId?: string,
   ): Promise<{ shots: { file: string; label: string }[]; errors: string[]; text: string } | null>;
 }
 
@@ -97,11 +98,11 @@ export class Acceptance {
       'event',
     );
     const key = `acc-${req.id}-${round}`;
-    const dir = await this.h.snapshotDir(project.id, key);
+    const dir = await this.h.snapshotDir(project.id, key, req.id);
     const checks = await this.h.integrationChecks(project, dir, key).catch((e: unknown) => [String((e as Error)?.message ?? e)]);
     // 화면 결과물이면 반영된 결과를 띄워, 업무들이 남긴 점검 순서대로 사진을 찍어 함께 보게 한다.
     const screens = await this.h
-      .acceptanceScreens(project, this.scenariosOf(tickets), path.join(dir, '.acceptance-shots'))
+      .acceptanceScreens(project, this.scenariosOf(tickets), path.join(dir, '.acceptance-shots'), req.id)
       .catch(() => null);
     if (screens)
       this.h.chat.post(

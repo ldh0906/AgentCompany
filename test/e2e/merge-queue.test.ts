@@ -50,12 +50,9 @@ test('먼저 반영된 업무와 충돌할 업무는 대표가 확인하기 전�
   const base = (await git(['rev-parse', 'HEAD'], wt)).stdout.trim();
   await git(['worktree', 'remove', '--force', wt], paths.mirror);
 
-  await (env.orch as unknown as { recheckWaiting: (p: unknown, pp: unknown, id: string, base: string) => Promise<void> }).recheckWaiting(
-    env.company.requireProject(env.projectId),
-    paths,
-    'T-99',
-    base,
-  );
+  await (
+    env.orch as unknown as { recheckWaiting: (p: unknown, pp: unknown, id: string, base: string, branch: string) => Promise<void> }
+  ).recheckWaiting(env.company.requireProject(env.projectId), paths, 'T-99', base, 'main');
 
   const back = env.company.requireTicket(tk.id);
   assert.equal(back.status, 'changes_requested', '대표 확인 전에 돌려보낸다');

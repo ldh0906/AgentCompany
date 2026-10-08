@@ -250,7 +250,8 @@ function Shell() {
             if (!state?.delegation?.on) {
               const d = state?.debates?.filter((x) => x.phase === 'decide').length ?? 0;
               const pending =
-                (state?.approvals.filter((a) => a.state === 'pending' && a.kind === 'integrate').length ?? 0) +
+                (state?.approvals.filter((a) => a.state === 'pending' && (a.kind === 'integrate' || a.kind === 'integrate_request'))
+                  .length ?? 0) +
                 (state?.requests.filter((r) => r.status === 'drafted').length ?? 0) +
                 d;
               // 대신 승인까지 하는 강한 모드라 켤 때는 늘 묻는다(실측 2026-10-02 QA: 대기 결정이 없으면 한 번 클릭으로 바로 켜졌다).
