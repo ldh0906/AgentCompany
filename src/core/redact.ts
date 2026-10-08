@@ -20,8 +20,10 @@ const PATTERNS: RegExp[] = [
 const NAMED =
   /(?<![A-Za-z0-9])((?:_?[A-Za-z0-9]+_)*_?(?:api[_-]?key|secret(?:[_-]?key)?|access[_-]?token|auth[_-]?token|token|password|passwd|client[_-]?secret)\b["']?\s*[:=]\s*["']?)(?=[^\s"',;]*[A-Za-z])[^\s"',;]{8,}/gi;
 const BEARER = /\b(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}/g;
-// Authorization 헤더 값(Basic·Token 등 방식 무관), URL에 넣은 비밀번호(postgres://user:비밀번호@host)
-const AUTH_HEADER = /\b(Authorization["']?\s*[:=]\s*["']?(?:(?:Basic|Bearer|Token|Digest)\s+)?)[A-Za-z0-9._~+/=-]{8,}/gi;
+// Authorization 헤더 값: 방식 이름(Basic·ApiKey·Negotiate 등 아무거나)은 두고 자격 증명만. 문장("Authorization: successful")은
+// 두도록, 자격 증명은 숫자·기호가 섞였거나 16자 이상일 때만(QA 2026-10-08). URL에 넣은 비밀번호(postgres://user:비밀번호@host)
+const AUTH_HEADER =
+  /\b(Authorization["']?\s*[:=]\s*["']?(?:[A-Za-z][A-Za-z0-9-]*\s+)?)(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-]|[A-Za-z0-9._~+/=-]{16,})[A-Za-z0-9._~+/=-]{8,}/gi;
 const URL_PASSWORD = /(\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@"']+:)[^\s@/"']+(@)/gi;
 
 /** 문자열에서 비밀값을 가린다. known: 정확히 아는 비밀값(이 데몬의 접속 토큰 등) */

@@ -32,6 +32,12 @@ test('Node 프로젝트에서 흔한 형태(QA): .npmrc 토큰, Basic 인증, UR
   assert.equal(redact('echo npm_abcdefghijklmnopqrstuvwxyz0123'), `echo ${REDACTED}`);
   assert.equal(redact('Authorization: Basic dXNlcjpwYXNzd29yZA=='), `Authorization: Basic ${REDACTED}`);
   assert.equal(redact('"authorization": "token ghx1234567890abcdef"'), `"authorization": "token ${REDACTED}"`);
+  // 방식 이름은 아무거나: 이름은 두고 자격 증명만(QA 확인 회차)
+  assert.equal(redact('Authorization: ApiKey supersecretvalue'), `Authorization: ApiKey ${REDACTED}`);
+  assert.equal(redact('Authorization: Negotiate abcdefghijklmnop'), `Authorization: Negotiate ${REDACTED}`);
+  assert.equal(redact('Authorization: k3y-abcdef12'), `Authorization: ${REDACTED}`);
+  for (const s of ['Authorization: successful', 'Authorization: successful for the admin user', 'Authorization: Bearer token'])
+    assert.equal(redact(s), s, s);
   assert.equal(
     redact('DATABASE_URL=postgres://app:pa55w0rd@db.local:5432/main'),
     `DATABASE_URL=postgres://app:${REDACTED}@db.local:5432/main`,

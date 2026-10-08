@@ -29,7 +29,7 @@ test('실제 실행 파일로 확인: 빠진 옵션을 찾고, 도움말을 못 
   const node = { file: process.execPath, argsPrefix: [] };
   const help = (text: string) => ['-e', `process.stdout.write(${JSON.stringify(text)})`];
   const ok = await probeCli(
-    { helpChecks: [{ args: help('  --model <m>\n  --resume'), tokens: ['--model', '--resume', '--effort'] }] },
+    { helpChecks: [{ args: help('Usage: x [options]\n  --model <m>\n  --resume'), tokens: ['--model', '--resume', '--effort'] }] },
     node,
     process.env,
     'k',
@@ -53,6 +53,15 @@ test('도움말이라는 근거가 없으면 막지 않는다: 안내만 찍고 
   );
   assert.deepEqual(notice.missing, []);
   assert.match(notice.error ?? '', /no help text/);
+  // 실패 종료한 오류 출력에 옵션 이름이 섞여 있어도 도움말이 아니다(QA 확인 회차)
+  const failed = await probeCli(
+    { helpChecks: [{ args: ['-e', 'console.error("Error: unknown option --model. Usage: x"); process.exit(2)'], tokens }] },
+    node,
+    process.env,
+    'k',
+  );
+  assert.deepEqual(failed.missing, []);
+  assert.match(failed.error ?? '', /exit 2/);
   // 하나만 확인하는 하위 명령도, 도움말 모양이면 빠진 것으로 본다(Codex app-server)
   const codex = await probeCli(
     { helpChecks: [{ args: ['-e', 'console.log("Usage: codex [OPTIONS]\\nCommands:\\n  exec")'], tokens: ['app-server'] }] },

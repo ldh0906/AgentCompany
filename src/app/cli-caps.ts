@@ -34,7 +34,9 @@ export function helpHas(help: string, token: string): boolean {
 
 /**
  * 실행 파일의 버전과 도움말에 없는 옵션. 도움말이라는 근거가 없으면 error만 남기고 막지 않는다:
- * 시간 초과로 끊겼거나, 확인할 낱말도 도움말 표시(usage·options·commands)도 없을 때(업데이트 안내만 찍고 끝난 경우 등, QA 2026-10-08).
+ * 정상 종료(0)하고 도움말 표시(usage·options·commands)가 있을 때만 도움말로 본다. 시간 초과, 실패 종료
+ * ("Error: unknown option --model"처럼 옵션 이름이 섞인 오류 포함), 안내만 찍고 끝난 출력은 근거가 아니다(QA 2026-10-08).
+ * 실측: Claude 2.1.292·Codex 0.159·agy 1.2.14 모두 --help가 0으로 끝나고 "Usage"를 보인다.
  */
 export async function probeCli(
   adapter: Pick<CliAdapter, 'helpChecks'>,
@@ -51,13 +53,11 @@ export async function probeCli(
   };
   for (const check of adapter.helpChecks ?? []) {
     const h = await run(launch.file, [...launch.argsPrefix, ...check.args], env);
-    const missing = check.tokens.filter((t) => !helpHas(h.out, t));
-    const looksLikeHelp = missing.length < check.tokens.length || /\b(usage|options|commands)\b/i.test(h.out);
-    if (h.killed || !looksLikeHelp) {
+    if (h.killed || h.code !== 0 || !/\b(usage|options|commands)\b/i.test(h.out)) {
       caps.error = `${check.args.join(' ')}: ${h.killed ? 'timed out' : `exit ${h.code}`}, no help text`;
       continue;
     }
-    caps.missing.push(...missing);
+    caps.missing.push(...check.tokens.filter((t) => !helpHas(h.out, t)));
   }
   return caps;
 }
