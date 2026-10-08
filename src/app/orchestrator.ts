@@ -226,7 +226,11 @@ export class Orchestrator {
       // 위임 중이면 위임받은 직원이 결정하므로 대표 할 일로 올리지 않는다.
       // 위임 중이면 위임받은 직원이 추천안으로 결정한다. 추천이 없으면(요약 실패 등) 위임자도 못 하므로 대표에게 보인다.
       debatesToDecide: () =>
-        this.debates.list(20).filter((d) => d.phase === 'decide' && (!this.delegation.on || d.recommendation === null)),
+        // 결정 대기를 먼저 고르고 개수를 자른다(끝난 최신 토론에 밀려 미결정 토론이 숨지 않게)
+        this.debates
+          .list(500)
+          .filter((d) => d.phase === 'decide' && (!this.delegation.on || d.recommendation === null))
+          .slice(0, 20),
     });
     this.playtests = new Playtests(host);
     this.screens = new ScreenQa({

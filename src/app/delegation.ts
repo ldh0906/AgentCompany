@@ -49,6 +49,8 @@ interface PendingDecision {
 }
 
 const MAX_BUDGET_RAISES = 2;
+/** 위임 질문이 실패했을 때 같은 보류에 다시 묻는 최대 횟수 */
+const MAX_DELEGATE_RETRIES = 2;
 /** 대표 직접 확인 항목: QA 의견을 이만큼 기다려도 없으면 대표 "나중에 확인"으로 넘기고 승인한다. */
 const QA_WAIT_MS = 15 * 60_000;
 
@@ -239,7 +241,12 @@ export class Delegation {
     const p = this.pending.get(run.nonce);
     if (!p) return;
     this.pending.delete(run.nonce);
-    if (this.h.company.store.getSetting(`delegate_q:${p.ticketId}`) === p.since)
+    // 같은 보류에 두 번까지만 다시 묻는다: 계속 실패하는 원인(실행 파일 없음 등)이면 매 주기 실행이 쌓이지 않게
+    // "물어봄" 표시를 남겨 두고 대표 할 일로 둔다(QA: 실패마다 표시를 지워 1.5초마다 다시 실행했다).
+    const key = `delegate_tries:${p.ticketId}:${p.since}`;
+    const tries = Number(this.h.company.store.getSetting(key) || 0) + 1;
+    this.h.company.store.setSetting(key, String(tries));
+    if (tries <= MAX_DELEGATE_RETRIES && this.h.company.store.getSetting(`delegate_q:${p.ticketId}`) === p.since)
       this.h.company.store.setSetting(`delegate_q:${p.ticketId}`, '');
   }
 

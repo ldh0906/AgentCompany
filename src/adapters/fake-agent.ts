@@ -2,7 +2,7 @@
 // 성격(FAKE_BEHAVIOR): diligent(성실) | lazy(첫 회차에 일 안 하고 완료 주장) | rogue(범위 밖 수정) | slow(느림) | tamper(git ref 조작)
 //   stubborn(2회차부터 고치지 않고 반박) | picky(검수: 1회차만 반려) | harsh(검수: 항상 반려)
 //   contract-breaker(공유 계약 파일을 고침) | portcheck(받은 PORT·AC_DB_NAME을 src/ports.txt에)
-//   asker(현재 결정도 대표 메모도 없으면 대표 결정을 요청)
+//   asker(현재 결정도 대표 메모도 없으면 대표 결정을 요청) | mute(대화에 아무 답도 내지 못함)
 //   tooluser(회사 도구 MCP를 실제로 불러 쓴다: 업무판·후속 제안·동료 질문·범위 요청)
 // stdin으로 프롬프트를 받고, Claude의 stream-json과 비슷한 JSONL을 출력한다.
 
@@ -562,7 +562,9 @@ async function main(): Promise<void> {
     kind === 'work'
       ? await work(h, prompt)
       : kind === 'chat'
-        ? chat(h, prompt)
+        ? behavior === 'mute'
+          ? '' // 대화에 아무 답도 내지 못한다(실패한 대화 실행 시험)
+          : chat(h, prompt)
         : kind === 'drafts'
           ? drafts(h, prompt)
           : kind === 'claims'

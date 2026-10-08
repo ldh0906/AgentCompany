@@ -177,3 +177,23 @@ test('위임 중이어도 추천이 없는 결정 대기 토론(요약 실패 �
   );
   assert.ok(!titles.some((x) => x.includes('추천 있는 토론')), '추천이 있으면 위임자가 결정한다');
 });
+
+test('전권 위임: 위임 질문이 계속 실패하면 두 번까지만 다시 묻고 멈춘다(매 주기 실행이 쌓이지 않게)', { timeout: 240_000 }, async (t) => {
+  const env = await setup(t, { implementer: 'asker' });
+  const lead = env.company.hireEmployee({ name: '팀장', roles: ['planner'], cli: 'fake', model: 'mute', rank: 'lead' });
+  env.orch.delegation.set(true);
+  const tk = newImplTicket(env);
+  await driveUntil(env, tk.id, (x) => x.hold?.reason === 'needs_decision', 150_000);
+  const asks = () => env.orch.records.recentRuns(200).filter((r) => r.employeeId === lead.id && r.kind === 'chat').length;
+  const deadline = Date.now() + 60_000;
+  while (asks() < 3 && Date.now() < deadline) {
+    await env.orch.tick();
+    await env.orch.idle();
+  }
+  for (let i = 0; i < 10; i++) {
+    await env.orch.tick();
+    await env.orch.idle();
+  }
+  assert.equal(asks(), 3, '처음 1번 + 다시 2번');
+  assert.equal(env.company.requireTicket(tk.id).hold?.reason, 'needs_decision', '대표 할 일로 남는다');
+});
