@@ -129,6 +129,26 @@ export const claudeAdapter: CliAdapter = {
   },
 
   classifyFailure: classifyCommon,
+  // 실측(2.1.292 --help): 모두 보인다. --permission-prompt-tool은 예전 버전에서 도움말에 없던 숨김 옵션이라 넣지 않는다.
+  helpChecks: [
+    {
+      args: ['--help'],
+      tokens: [
+        '-p',
+        '--output-format',
+        '--verbose',
+        '--setting-sources',
+        '--strict-mcp-config',
+        '--mcp-config',
+        '--allowedTools',
+        '--disallowedTools',
+        '--permission-mode',
+        '--model',
+        '--effort',
+        '--resume',
+      ],
+    },
+  ],
   loginStatusArgs: ['auth', 'status', '--json'],
   loginArgs: ['auth', 'login'],
   loginInstructions(profileDir) {

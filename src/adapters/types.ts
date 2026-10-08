@@ -101,6 +101,11 @@ export interface CliAdapter {
   loginArgs: string[] | null;
   /** 대표가 직접 실행할 로그인 안내. */
   loginInstructions(profileDir: string | null): string;
+  /**
+   * 설치된 실행 파일이 우리가 넘기는 옵션을 지원하는지 확인할 도움말 명령과 거기 있어야 할 낱말(cli-caps.ts).
+   * 숨김 옵션처럼 도움말에 없을 수 있는 것은 넣지 않는다(근거 없이 막지 않게).
+   */
+  helpChecks?: { args: string[]; tokens: string[] }[];
 }
 
 export function obj(v: unknown): Record<string, unknown> | null {

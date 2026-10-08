@@ -13,7 +13,7 @@ export interface CeoDeskHost extends Pick<OrchHost, 'company' | 'records' | 'pau
   /** 요청 하나의 업무가 모두 끝났을 때(게임이면 고급 QA 자동 실행) */
   onRequestDone(req: CeoRequest, tickets: Ticket[]): void;
   /** 출력이 오래 없는 실행(멈췄을 수 있음) */
-  stalled(): { runId: string; ticketId: string; employeeId: string; quietMs: number }[];
+  stalled(): { runId: string; ticketId: string; employeeId: string; quietMs: number; state: string; detail: string }[];
   /** 결정을 기다리는 토론 */
   debatesToDecide(): { id: string; topic: string; channelId: string }[];
 }
@@ -129,19 +129,26 @@ export class CeoDesk {
             action: { kind: 'later-ok', requirementId: x.id },
           });
     }
-    for (const s of this.h.stalled())
+    for (const s of this.h.stalled()) {
+      const who = this.h.company.employees().find((e) => e.id === s.employeeId)?.name ?? '';
+      const min = Math.round(s.quietMs / 60_000);
+      // 무엇에 걸렸는지 보이게: 끝나지 않는 명령·사라진 프로세스·그냥 조용함(run-state.ts)
+      const [ko, en] =
+        s.state === 'running_command'
+          ? [`명령이 ${min}분째 안 끝남: ${s.detail.slice(0, 80)}`, `Command running ${min} min: ${s.detail.slice(0, 80)}`]
+          : s.state === 'unknown'
+            ? [`실행 프로세스가 보이지 않음 (${min}분째 신호 없음)`, `Run process is gone (silent ${min} min)`]
+            : [`${min}분째 아무 신호 없음 — 멈췄을 수 있습니다`, `silent for ${min} minutes — may be stuck`];
       out.push({
         key: `stall:${s.runId}`,
         kind: 'stalled',
-        title: tr(
-          `${s.ticketId} ${this.h.company.employees().find((e) => e.id === s.employeeId)?.name ?? ''}: ${Math.round(s.quietMs / 60_000)}분째 아무 신호 없음 — 멈췄을 수 있습니다`,
-          `${s.ticketId}: silent for ${Math.round(s.quietMs / 60_000)} minutes — may be stuck`,
-        ),
+        title: tr(`${s.ticketId} ${who}: ${ko}`, `${s.ticketId}: ${en}`),
         link: `/live/${s.runId}`,
         ticketId: s.ticketId.startsWith('T-') ? s.ticketId : null,
-        label: this.h.company.employees().find((e) => e.id === s.employeeId)?.name ?? '',
-        reason: tr(`${Math.round(s.quietMs / 60_000)}분째 신호 없음 · 멈췄을 수 있음`, `Silent ${Math.round(s.quietMs / 60_000)} min`),
+        label: who,
+        reason: tr(ko, en),
       });
+    }
     if (this.h.paused() && (this.h.company.store.getSetting('paused_reason') ?? '').startsWith('daily:'))
       out.push({
         key: 'paused:daily',

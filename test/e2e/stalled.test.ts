@@ -2,7 +2,7 @@
 // 실측(첫 사용, 2026-10-01): 직원이 띄운 시험 스크립트가 끝나지 않아 업무가 10분 넘게 멈췄는데 대표에게 알릴 길이 없었다.
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { ticketChannelId } from '../../src/app/chat.ts';
 import { Orchestrator } from '../../src/app/orchestrator.ts';
@@ -44,6 +44,34 @@ test('조용한 실행은 할 일에 뜨고, 끊으면 다시 시켜 끝까지 �
     env.orch.desk.notices().some((n) => /아무 신호가 없습니다/.test(n.title)),
     '알림도 한 번',
   );
+  assert.equal(env.orch.stalledRuns()[0]!.state, 'quiet');
+
+  // 무엇에 걸렸는지 나눈다(run-state.ts): 끝나지 않은 명령이 로그에 있으면 그 명령을 보여 준다
+  const recheck = () => {
+    (env.orch as unknown as { lastStallCheck: number }).lastStallCheck = 0;
+    return (env.orch as unknown as { checkStalled(): Promise<void> }).checkStalled();
+  };
+  appendFileSync(
+    path.join(run.runDir, 'stdout.log'),
+    `${JSON.stringify({ type: 'item.started', item: { id: 'c1', type: 'command_execution', command: 'npm run dev' } })}\n`,
+  );
+  await recheck();
+  assert.equal(env.orch.runStates()[run.id]?.kind, 'running_command');
+  assert.ok(env.orch.desk.ceoTodos().some((x) => x.kind === 'stalled' && /npm run dev/.test(x.title)));
+  // 대표 허락을 기다리는 실행은 멈춘 것이 아니다: 할 일에서 빠지고 무엇을 기다리는지 보인다
+  const perm = env.orch.records.createApproval({
+    kind: 'tool_permission',
+    ticketId: tk.id,
+    subject: `${run.id}|req-1|{}`,
+    summary: `${tk.id}: permission requested for command`,
+    detail: { requestId: 'req-1', runId: run.id, approvalDir: run.runDir, tool: 'command', input: {} },
+    requestedBy: run.employeeId,
+  });
+  await recheck();
+  assert.equal(env.orch.runStates()[run.id]?.kind, 'waiting_ceo');
+  assert.equal(env.orch.stalledRuns().length, 0);
+  env.orch.records.setApprovalState(perm.id, 'rejected', 'ceo');
+  await recheck();
   mock.timers.reset();
 
   process.env.FAKE_DELAY_MS = '300'; // 다시 시킨 실행은 정상

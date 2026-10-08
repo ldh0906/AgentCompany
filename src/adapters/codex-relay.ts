@@ -122,12 +122,19 @@ async function main(): Promise<void> {
     if (m.method === 'thread/tokenUsage/updated' && m.params?.threadId === threadId && m.params?.tokenUsage?.total) {
       usageTotal = m.params.tokenUsage.total;
     }
+    // 명령 시작: 끝나지 않는 명령에 걸린 것을 "그냥 조용함"과 구분한다(run-state.ts, 완료 줄의 같은 id로 닫힌다)
+    if (m.method === 'item/started' && m.params?.item?.type === 'commandExecution')
+      out({
+        type: 'item.started',
+        item: { id: String(m.params.item.id ?? ''), type: 'command_execution', command: m.params.item.command },
+      });
     if (m.method === 'item/completed' && m.params?.item?.type === 'agentMessage') {
       out({ type: 'item.completed', item: { type: 'agent_message', text: m.params.item.text } });
     } else if (m.method === 'item/completed' && m.params?.item?.type === 'commandExecution') {
       out({
         type: 'item.completed',
         item: {
+          id: String(m.params.item.id ?? ''),
           type: 'command_execution',
           command: m.params.item.command,
           exit_code: m.params.item.exitCode ?? null,

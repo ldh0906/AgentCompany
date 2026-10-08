@@ -109,6 +109,8 @@ export const codexAdapter: CliAdapter = {
   },
 
   classifyFailure: classifyCommon,
+  // 모든 실행이 app-server 중계기로 간다(실측 0.159 --help: "app-server [experimental]")
+  helpChecks: [{ args: ['--help'], tokens: ['app-server'] }],
   loginStatusArgs: ['login', 'status'],
   loginArgs: ['login'],
   loginInstructions(profileDir) {

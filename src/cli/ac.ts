@@ -11,7 +11,7 @@ import type { DoctorReport } from '../app/doctor.ts';
 import { Client, ensureDaemon } from './client.ts';
 import { builtInTeams, exportTeam, loadTeam, resolveSeats } from './teams.ts';
 import { c, table } from './term.ts';
-import { nameOf, openTickets, projectFor, projectOfItem, statusLabel, teamRows, type CliState } from './view.ts';
+import { nameOf, openTickets, projectFor, projectOfItem, recoveryLines, statusLabel, teamRows, type CliState } from './view.ts';
 
 export const AC_COMMANDS = ['up', 'ask', 'ps', 'approve', 'reject', 'down', 'open', 'team'] as const;
 
@@ -244,6 +244,11 @@ async function ps(dataDir: string): Promise<void> {
       ]),
     );
   else say(c.dim('진행 중인 업무가 없습니다.'));
+  const recovered = recoveryLines(s);
+  if (recovered.length) {
+    say();
+    for (const line of recovered) say(c.dim(line));
+  }
   const todos = s.ceoTodos.length;
   say();
   say(todos ? c.yellow(`⚑ 대표 차례 ${todos}개 — aco approve 또는 aco`) : c.dim('대표가 할 일은 없습니다.'));

@@ -2,6 +2,7 @@
 import type { Approval, DomainEvent, Employee, Project, Ticket } from '../core/types.ts';
 import type { CeoTodo } from '../app/notify.ts';
 import type { CeoRequest } from '../app/records.ts';
+import type { RecoveryReport } from '../app/recovery.ts';
 import { c } from './term.ts';
 
 /** API의 GET state 중 CLI가 쓰는 부분 */
@@ -17,6 +18,26 @@ export interface CliState {
   paused: boolean;
   delegation: { on: boolean };
   employeeBudgets?: Record<string, { used: number; limit: number }>;
+  runStates?: Record<string, { kind: string; quietMs: number; detail: string }>;
+  recovery?: RecoveryReport | null;
+}
+
+/** 실행 상태(run-state.ts) 중 "일하는 중"이 아닌 것: 무엇을 기다리는지·어디에 걸렸는지 */
+export function runStateNote(st: { kind: string; quietMs: number; detail: string } | undefined): string {
+  if (!st || st.kind === 'working') return '';
+  const min = Math.round(st.quietMs / 60_000);
+  switch (st.kind) {
+    case 'waiting_ceo':
+      return '⏳ 대표 허락 기다림';
+    case 'waiting_colleague':
+      return `⏳ ${st.detail}의 답 기다림`;
+    case 'running_command':
+      return `⚠ 명령이 ${min}분째 안 끝남: ${st.detail.slice(0, 60)}`;
+    case 'unknown':
+      return '⚠ 실행 프로세스가 보이지 않음';
+    default:
+      return `⚠ ${min}분째 신호 없음`;
+  }
 }
 
 const CLI_LABEL: Record<string, string> = { claude: 'Claude', codex: 'Codex', agy: 'Antigravity', fake: 'Fake' };
@@ -79,10 +100,11 @@ export function teamRows(s: CliState, projectId?: string | null): TeamRow[] {
       const t = run ? s.tickets.find((x) => x.id === run.ticketId) : null;
       const owner = run ? projectOfItem(s, { ticketId: run.ticketId }) : null;
       const elsewhere = run && projectId !== undefined && owner !== null && owner !== projectId;
+      const note = run ? runStateNote(s.runStates?.[run.id]) : '';
       const doing = elsewhere
         ? '다른 프로젝트 작업 중'
         : run
-          ? `${RUN_LABEL[run.kind] ?? run.kind} ${t ? `${t.id} ${t.title}` : run.ticketId.startsWith('Q-') ? '요청 초안' : ''}`.trim()
+          ? `${RUN_LABEL[run.kind] ?? run.kind} ${t ? `${t.id} ${t.title}` : run.ticketId.startsWith('Q-') ? '요청 초안' : ''}${note ? ` · ${note}` : ''}`.trim()
           : (s.employeeBudgets?.[e.id]?.used ?? 0) >= (s.employeeBudgets?.[e.id]?.limit ?? Infinity)
             ? '멈춤 — 이번 달 예산 소진'
             : '쉬는 중';
@@ -95,6 +117,36 @@ export function teamRows(s: CliState, projectId?: string | null): TeamRow[] {
         doing,
       };
     });
+}
+
+/**
+ * 마지막 재시작 복구 요약(이어받을 것이 없었으면 빈 배열). 첫 줄은 요약, 다음 줄들은 이어받지 못한 실행과 끊긴 반영.
+ * OpenRig 비교(2026-10-08): 재시작 뒤 무엇을 이어받았고 무엇이 불확실한지 대표가 볼 수 있어야 한다.
+ */
+export function recoveryLines(s: Pick<CliState, 'recovery' | 'employees'>): string[] {
+  const r = s.recovery;
+  if (!r) return [];
+  const runs = r.runs ?? [];
+  const ints = r.integrations ?? [];
+  if (!runs.length && !ints.length && !r.toolCalls && r.chainOk) return [];
+  const count = (a: string) => runs.filter((x) => x.action === a).length;
+  const at = r.at ? new Date(r.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  const head = [
+    `마지막 재시작${at ? `(${at})` : ''}:`,
+    `이어받음 ${count('reattached')}`,
+    `결과 수거 ${count('collected')}`,
+    count('not_started') ? `시작 못 함 ${count('not_started')}` : '',
+    ints.length ? `끊긴 반영 ${ints.length}` : '',
+    r.toolCalls ? `끊긴 도구 요청 ${r.toolCalls}` : '',
+    r.chainOk ? '' : '⚠ 감사 로그 이상',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const lines = [head];
+  for (const x of runs.filter((x) => x.action !== 'reattached'))
+    lines.push(`  ${x.ticketId} ${nameOf(s, x.employeeId)}(${RUN_LABEL[x.kind] ?? x.kind}) → ${x.status}: ${x.reason}`);
+  for (const x of ints) lines.push(`  ${x.requestId} 반영 ${x.action === 'resume' ? '이어서 진행' : '승인이 없어 버림'}`);
+  return lines;
 }
 
 /** 끝나지 않은 업무 */

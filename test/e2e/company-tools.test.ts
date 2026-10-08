@@ -47,6 +47,7 @@ test('직원이 실행 중에 회사 도구로 업무판·후속 제안·동료 
   // 답을 받은 대기 기록은 지워지고, 끝난 실행의 기록도 남지 않는다(QA 3차)
   await env.orch.tick();
   assert.deepEqual(env.store.settingKeys('tool_pending:'), []);
+  assert.deepEqual(env.store.settingKeys('tool_call:'), []);
 });
 
 test('도구로 한 범위 요청이 시험용 파일이 아니면 기존 흐름대로 대표에게 올라간다', { timeout: 180_000 }, async (t) => {

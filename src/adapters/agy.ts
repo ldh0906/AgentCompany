@@ -115,6 +115,13 @@ export const agyAdapter: CliAdapter = {
   },
 
   classifyFailure: classifyCommon,
+  // 실측(1.2.14 --help)
+  helpChecks: [
+    {
+      args: ['--help'],
+      tokens: ['--output-format', '--sandbox', '--dangerously-skip-permissions', '--model', '--conversation', '--print'],
+    },
+  ],
   loginStatusArgs: null,
   loginArgs: [],
   loginInstructions() {

@@ -96,6 +96,26 @@ export function Live({ runId }: { runId: string | null }) {
   const Card = ({ r }: { r: RunSummary }) => {
     const info = last[r.id];
     const stalled = r.status === 'running' && info?.at && Date.now() - Date.parse(info.at) > STALL_MS;
+    // 서버가 판정한 상태(1분마다): 무엇을 기다리는지·어떤 명령에 걸렸는지
+    const st = r.status === 'running' ? state.runStates?.[r.id] : undefined;
+    const stNote =
+      st?.kind === 'waiting_ceo'
+        ? ko
+          ? '⏳ 대표 허락 기다림 · '
+          : '⏳ Waiting for your permission · '
+        : st?.kind === 'waiting_colleague'
+          ? ko
+            ? `⏳ ${st.detail}의 답 기다림 · `
+            : `⏳ Waiting for ${st.detail} · `
+          : st?.kind === 'running_command'
+            ? ko
+              ? `⚠ 명령이 ${Math.round(st.quietMs / 60000)}분째 안 끝남: ${st.detail.slice(0, 80)} · `
+              : `⚠ Command running ${Math.round(st.quietMs / 60000)} min: ${st.detail.slice(0, 80)} · `
+            : st?.kind === 'unknown'
+              ? ko
+                ? '⚠ 실행 프로세스가 보이지 않음 · '
+                : '⚠ Run process is gone · '
+              : null;
     const place = runPlace(r, ko);
     return (
       <button
@@ -117,16 +137,18 @@ export function Live({ runId }: { runId: string | null }) {
           {r.status !== 'running' && ` · ${r.status}`}
         </div>
         {r.status === 'running' && (
-          <div className={`live-line ${stalled ? 'stalled' : ''}`}>
-            {stalled
-              ? ko
-                ? `⚠ ${Math.round((Date.now() - Date.parse(info!.at!)) / 60000)}분째 아무 신호 없음 (큰 파일을 한 번에 쓰면 그럴 수 있어요) · `
-                : '⚠ quiet · '
-              : info?.busy
+          <div className={`live-line ${stalled || st?.kind === 'running_command' || st?.kind === 'unknown' ? 'stalled' : ''}`}>
+            {stNote
+              ? stNote
+              : stalled
                 ? ko
-                  ? `${({ writing: '✍ 파일 작성 중', thinking: '💭 생각 중', saying: '💬 보고 쓰는 중' } as Record<string, string>)[info.busy] ?? '…'} · `
-                  : `${info.busy}… · `
-                : ''}
+                  ? `⚠ ${Math.round((Date.now() - Date.parse(info!.at!)) / 60000)}분째 아무 신호 없음 (큰 파일을 한 번에 쓰면 그럴 수 있어요) · `
+                  : '⚠ quiet · '
+                : info?.busy
+                  ? ko
+                    ? `${({ writing: '✍ 파일 작성 중', thinking: '💭 생각 중', saying: '💬 보고 쓰는 중' } as Record<string, string>)[info.busy] ?? '…'} · `
+                    : `${info.busy}… · `
+                  : ''}
             {info?.line ?? (ko ? '시작하는 중…' : 'Starting…')}
           </div>
         )}

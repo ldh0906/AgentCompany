@@ -8,6 +8,7 @@ import path from 'node:path';
 import { ADAPTERS } from '../adapters/index.ts';
 import type { CliKind } from '../core/types.ts';
 import { locateExecutable } from '../runner/locate.ts';
+import { probeCli } from './cli-caps.ts';
 
 export interface CliCheck {
   kind: string;
@@ -19,6 +20,8 @@ export interface CliCheck {
   loginDetail: string;
   loginHelp: string;
   notes: string[];
+  /** 도움말에 없는, Agent Company가 쓰는 옵션(cli-caps.ts). 확인하지 못했으면 없음 */
+  missingFlags?: string[];
 }
 
 export interface DoctorReport {
@@ -106,8 +109,9 @@ export async function doctor(dataDir: string, useAppProfiles = true): Promise<Do
       notes: a.capabilities.notes,
     };
     if (located?.launch) {
-      const v = await run(located.launch.file, [...located.launch.argsPrefix, '--version'], env);
-      check.version = v.code === 0 ? v.out.split('\n')[0]!.slice(0, 120) : null;
+      const caps = await probeCli(a, located.launch, env, '');
+      check.version = caps.version;
+      if (!caps.error) check.missingFlags = caps.missing;
       if (a.loginStatusArgs) {
         const s = await run(located.launch.file, [...located.launch.argsPrefix, ...a.loginStatusArgs], env);
         const text = s.out.slice(0, 400);

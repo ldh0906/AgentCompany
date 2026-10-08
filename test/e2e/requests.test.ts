@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { gitOut, git } from '../../src/workspace/git.ts';
 import { Orchestrator } from '../../src/app/orchestrator.ts';
+import { projectPaths } from '../../src/workspace/workspace.ts';
 import { driveUntil, setup, statusIs } from './helpers.ts';
 
 test(
@@ -242,16 +243,38 @@ test('요청 승인 직후 데몬이 꺼져 반영 기록이 없으면, 다시 �
     await new Promise((r) => setTimeout(r, 50));
   }
   const a = pendingRequest()!;
-  // 승인은 저장됐지만 반영을 시작하기 전에 꺼진 상태(반영 중인 작업 없음): 데몬을 멈추고 같은 DB로 새로 켠다
+  // 승인은 저장됐지만 반영을 끝내기 전에 꺼진 상태: 데몬을 멈추고 같은 DB로 새로 켠다
   env.orch.records.setApprovalState(a.id, 'approved', 'ceo', { mode: 'manual' });
   await env.orch.stop();
   await env.orch.idle();
+  // 반영 의도를 적고 원본 브랜치까지 옮긴 뒤 DB 기록 전에 꺼졌다(Git ref와 DB 사이의 크래시 경계, OpenRig 비교 2026-10-08)
+  const head = (a.detail as { headSha: string }).headSha;
+  const branchRef = `refs/heads/ac/${req.id}`;
+  env.store.setSetting(
+    `integration_intent:${req.id}`,
+    JSON.stringify({
+      approvalId: a.id,
+      mode: 'manual',
+      at: new Date().toISOString(),
+      mirrorBaseBefore: null,
+      originBaseBefore: null,
+      originBranchBefore: null,
+    }),
+  );
+  await git(['fetch', '-q', projectPaths(env.dataDir, env.projectId).mirror, head], env.origin);
+  await git(['update-ref', branchRef, head], env.origin);
+  const windowSeq = env.orch.records.currentMoveSeq();
   const again = new Orchestrator(env.company, { dataDir: env.dataDir, language: 'ko', screenCheck: false });
   t.after(async () => {
     await again.stop();
     await again.idle();
   });
-  await again.recover();
+  const report = await again.recover();
+  assert.deepEqual(
+    report.integrations?.map((x) => [x.requestId, x.action]),
+    [[req.id, 'resume']],
+    '끊긴 반영이 복구 기록에 남는다',
+  );
   while (!again.records.request(req.id)!.integration) {
     if (Date.now() > deadline) throw new Error('이어서 반영하지 않음');
     await again.tick();
@@ -261,6 +284,9 @@ test('요청 승인 직후 데몬이 꺼져 반영 기록이 없으면, 다시 �
   assert.equal(again.records.approval(a.id)!.state, 'consumed');
   assert.match(await gitOut(['ls-tree', '-r', '--name-only', `ac/${req.id}`], env.origin), /T-1\.md/);
   assert.equal(again.records.approvals().filter((x) => x.kind === 'integrate_request').length, 1, '새 승인을 또 만들지 않는다');
+  // 이미 옮겨진 원본 브랜치도 처음 값(없음)에서부터의 이동으로 기록돼, 기록 없는 이동(변조)으로 보이지 않는다
+  assert.ok(again.records.explainedByMoves(env.projectId, 'origin', branchRef, undefined, head, windowSeq));
+  assert.equal(env.store.getSetting(`integration_intent:${req.id}`) ?? null, null, '반영이 끝나면 의도 기록을 지운다');
 });
 
 test('요청 승인 카드: 취소된 업무는 "끝나지 않은 업무"로, 인수 시험은 요청에 정한 수를 기준으로 센다', { timeout: 300_000 }, async (t) => {

@@ -7,6 +7,7 @@ import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { adapterFor } from '../adapters/index.ts';
+import type { CliAdapter } from '../adapters/types.ts';
 import { isTransient } from '../adapters/types.ts';
 import { buildChatPrompt, buildDraftPrompt, buildReviewPrompt, buildWorkPrompt } from '../agents/prompt.ts';
 import {
@@ -58,11 +59,16 @@ import { pickPanel, pickStaff } from '../core/staffing.ts';
 import { commandOf, judgeToolRequest } from '../core/guard.ts';
 import { readAllJsonl } from '../runner/jsonl.ts';
 import { activityFrom } from './activity.ts';
+import { classifyRun, openCall, STUCK_KINDS, type RunState } from './run-state.ts';
+import { CAPS_TTL_MS, lacksFor, probeCli, type CliCaps } from './cli-caps.ts';
+import type { RecoveredRun, RecoveryReport } from './recovery.ts';
+export type { RecoveredRun, RecoveryReport } from './recovery.ts';
 import { PROGRESS_MS, progressLine } from './progress.ts';
 import { locateExecutable } from '../runner/locate.ts';
 import { isolationEnv } from '../runner/ports.ts';
 import {
   abandonAndTerminate,
+  isAlive,
   isSameProcessAlive,
   killTree,
   readExitRecord,
@@ -131,14 +137,6 @@ export interface OrchestratorOptions {
   linkCheck?: (urls: string[]) => Promise<LinkResult[]>;
 }
 
-export interface RecoveryReport {
-  chainOk: boolean;
-  chainDetail: string;
-  reattached: string[];
-  ingestedAfterRestart: string[];
-  orphaned: string[];
-}
-
 const LOCK_HOLDING: TicketStatus[] = [
   'in_progress',
   'verifying',
@@ -156,6 +154,24 @@ interface AskPending {
   name: string;
   since: string;
 }
+
+/**
+ * 회사 도구 요청 하나의 처리 기록(데몬 DB, `tool_call:<run>:<req>`). 보낼 것을 먼저 적고 보낸다(outbox):
+ * 효과(질문 게시·답장 실행) 전에 'sending', 답을 기다리면 'waiting', 답이 정해지면 파일로 보내기 전에 'answered'.
+ * 그사이 데몬이 꺼지면 다음 주기에 기록을 보고 이어간다: 정해진 답은 다시 보내기만 하고, 'sending'은 실제로 일어난 일을 확인해
+ * 다시 하지 않는다(OpenRig 비교 2026-10-08: 질문 게시·답장 실행 뒤에야 대기를 적어, 그사이 꺼지면 같은 질문을 또 보낼 수 있었다).
+ */
+/** 요청 반영을 시작하기 전에 적어 두는 의도(`integration_intent:<요청>`): 움직이기 전의 ref 값. 반영이 끝나면(성공·실패) 지운다. */
+interface IntegrationIntent {
+  approvalId: string;
+  mode: Project['integrationMode'];
+  at: string;
+  mirrorBaseBefore: string | null;
+  originBaseBefore: string | null;
+  originBranchBefore: string | null;
+}
+
+type ToolCall = { state: 'sending'; at: string } | { state: 'waiting'; pending: AskPending } | { state: 'answered'; answer: ToolResponse };
 
 export class Orchestrator {
   readonly company: Company;
@@ -490,11 +506,26 @@ export class Orchestrator {
       reattached: [],
       ingestedAfterRestart: [],
       orphaned: [],
+      at: new Date().toISOString(),
+      runs: [],
+      integrations: [],
+      toolCalls: 0,
     };
+    const note = (run: RunRecord, action: RecoveredRun['action'], reason: string) =>
+      report.runs!.push({
+        runId: run.id,
+        ticketId: run.ticketId,
+        employeeId: run.employeeId,
+        kind: run.kind,
+        action,
+        reason,
+        status: this.records.run(run.id)?.status ?? run.status,
+      });
     for (const prepared of this.records.runsByStatus('prepared')) {
       const shim = await findShim(prepared.runDir);
       if (shim) {
         this.records.saveRun({ ...prepared, status: 'running', pid: shim.pid, processStartMs: shim.startedAtMs });
+        note(prepared, 'reattached', tr('준비 중이던 실행의 셔틀이 시작돼 있었음', 'the shim of a preparing run had started'));
         continue;
       }
       // 셔틀 기록이 없다: 포기 표시를 남기고 잠시 기다린 뒤 다시 본다(셔틀은 시작하자마자 표시를 확인하고 스스로 멈춘다).
@@ -503,6 +534,7 @@ export class Orchestrator {
       const late = await findShim(prepared.runDir);
       if (late && !(await readExitRecord(prepared.runDir))) {
         this.records.saveRun({ ...prepared, status: 'running', pid: late.pid, processStartMs: late.startedAtMs });
+        note(prepared, 'reattached', tr('셔틀이 늦게 시작됨(포기 표시 전)', 'the shim started late (before the abandon mark)'));
         continue;
       }
       // 실패로 확정하기 전에, 그사이 시작했다가 끝난(또는 그룹 정리 전에 죽은) 실행의 남은 프로세스를 정리한다.
@@ -512,6 +544,7 @@ export class Orchestrator {
         detail: tr('실행 준비 중 중단되어 프로세스가 시작되지 않았습니다.', 'Run preparation was interrupted; the process did not start.'),
       });
       report.orphaned.push(prepared.id);
+      note(prepared, 'not_started', tr('실행 준비 중 중단: 셔틀 기록 없음', 'interrupted while preparing: no shim record'));
     }
     for (const run of this.records.runsByStatus('running')) {
       const finished = await readExitRecord(run.runDir);
@@ -519,6 +552,11 @@ export class Orchestrator {
       if (alive) {
         // 셔틀이 살아 있다: 같은 실행에 재연결해 종료 기록(exit.json)을 기다린다.
         report.reattached.push(run.id);
+        note(
+          run,
+          'reattached',
+          tr(`같은 프로세스가 살아 있음(pid ${run.pid}, 시작 시각 일치)`, `same process alive (pid ${run.pid}, start time matches)`),
+        );
         this.track(
           run.id,
           waitForExit(run.runDir, run.pid).then((o) => this.completeRun(run.id, o)),
@@ -532,14 +570,84 @@ export class Orchestrator {
         const outcome = finished ? { exitCode: finished.exitCode, timedOut: finished.timedOut } : null;
         await this.completeRun(run.id, outcome);
         if (this.records.run(run.id)?.status === 'orphaned') report.orphaned.push(run.id);
+        note(
+          run,
+          'collected',
+          finished
+            ? finished.timedOut
+              ? tr('종료 기록 있음: 시간 초과', 'exit record: timed out')
+              : tr(`종료 기록 있음: 종료 코드 ${finished.exitCode}`, `exit record: exit code ${finished.exitCode}`)
+            : tr(
+                '종료 기록 없이 프로세스가 사라짐: 남은 프로세스를 정리하고 결과 수거',
+                'process gone without an exit record: cleaned up and collected',
+              ),
+        );
       }
     }
+    // 반영하다 끊긴 요청: 승인이 남아 있으면 다음 주기에 처음 ref 값으로 이어서 반영한다(integrateRequest)
+    for (const key of this.company.store.settingKeys('integration_intent:')) {
+      const intent = JSON.parse(this.company.store.getSetting(key) || 'null') as IntegrationIntent | null;
+      if (!intent) continue;
+      const live = this.records.approval(intent.approvalId)?.state === 'approved';
+      if (!live) this.company.store.deleteSetting(key);
+      report.integrations!.push({
+        requestId: key.slice('integration_intent:'.length),
+        approvalId: intent.approvalId,
+        action: live ? 'resume' : 'dropped',
+        since: intent.at,
+      });
+    }
+    report.toolCalls = this.company.store
+      .settingKeys('tool_call:')
+      .filter((k) => (JSON.parse(this.company.store.getSetting(k) || '{}') as Partial<ToolCall>).state === 'sending').length;
     // 남아 있는 검증 명령 추천을 지금 규칙으로 다시 계산한다(추천 규칙이 나아져도 옛 추천이 계속 떠 있지 않게).
     for (const p of this.company.projects())
       if (!p.removedAt && p.verifyCommands.length && this.verifySuggestions(p.id).length)
         await this.autoVerifyCommands(p.id).catch(() => {});
     this.company.store.appendEvent('orchestrator', 'orchestrator.recovered', 'system', report);
+    this.company.store.setSetting('last_recovery', JSON.stringify(report));
     return report;
+  }
+
+  /** CLI 종류별로 확인 중인 도움말 점검(동시에 여러 실행이 시작해도 한 번만 띄운다) */
+  private readonly capsProbes = new Map<string, Promise<CliCaps | null>>();
+
+  /**
+   * 설치된 실행 파일의 도움말 점검 결과(cli-caps.ts). 실행 파일이 바뀌었거나(경로·수정 시각·크기) 6시간이 지났으면 다시 확인한다.
+   * 확인할 것이 없거나 실행 파일을 못 찾으면 null(막지 않는다).
+   */
+  private async cliCaps(adapter: CliAdapter, env: NodeJS.ProcessEnv): Promise<CliCaps | null> {
+    if (!adapter.helpChecks?.length) return null;
+    const pending = this.capsProbes.get(adapter.kind);
+    if (pending) return pending;
+    const probe = (async () => {
+      const located = await locateExecutable(adapter.executable, env);
+      if (!located?.launch) return null;
+      // npm으로 설치한 CLI는 .cmd가 아니라 실제 스크립트가 업데이트로 바뀐다
+      const target = located.kind === 'node-script' ? (located.launch.argsPrefix.at(-1) ?? located.path) : located.path;
+      const st = await stat(target).catch(() => null);
+      const key = `${target}|${st?.mtimeMs ?? 0}|${st?.size ?? 0}`;
+      const settingKey = `cli_caps:${adapter.kind}`;
+      const saved = JSON.parse(this.company.store.getSetting(settingKey) || 'null') as CliCaps | null;
+      if (saved?.key === key && Date.now() - Date.parse(saved.checkedAt) < CAPS_TTL_MS) return saved;
+      const caps = await probeCli(adapter, located.launch, env, key);
+      this.company.store.setSetting(settingKey, JSON.stringify(caps));
+      if (caps.missing.length && caps.missing.join() !== saved?.missing.join())
+        this.company.store.appendEvent('system', 'cli.incompatible', adapter.kind, { version: caps.version, missing: caps.missing });
+      return caps;
+    })().finally(() => this.capsProbes.delete(adapter.kind));
+    this.capsProbes.set(adapter.kind, probe);
+    return probe;
+  }
+
+  /** 시스템 화면 "다시 점검": 다음 실행 때 도움말을 다시 확인한다 */
+  forgetCliCaps(): void {
+    for (const key of this.company.store.settingKeys('cli_caps:')) this.company.store.deleteSetting(key);
+  }
+
+  /** 마지막 재시작 복구 기록(대표가 무엇을 이어받고 무엇이 끊겼는지 본다) */
+  lastRecovery(): RecoveryReport | null {
+    return JSON.parse(this.company.store.getSetting('last_recovery') || 'null') as RecoveryReport | null;
   }
 
   /** 실행 종료 후 처리: 작업이면 오케스트레이터가 커밋하고 범위를 계산한 뒤 결과를 수거한다. */
@@ -1267,6 +1375,19 @@ export class Orchestrator {
       });
       return runId;
     }
+    // 설치된 CLI가 이번 실행에 넘기는 옵션을 지원하는지(업데이트로 옵션이 없어졌으면 띄우기 전에 이유와 함께 멈춘다)
+    const caps = await this.cliCaps(adapter, inv.env);
+    const lacking = caps ? lacksFor(caps, inv.args) : [];
+    if (lacking.length) {
+      await this.finishRun(run, {
+        failure: 'spawn_failed',
+        detail: tr(
+          `설치된 ${adapter.displayName}${caps?.version ? ` (${caps.version})` : ''}의 도움말에 Agent Company가 쓰는 ${lacking.join(', ')}이(가) 없습니다. CLI가 바뀐 것 같습니다: 다른 버전으로 바꾸거나 이 직원의 CLI를 바꾼 뒤 보류를 해제하세요(시스템 화면 "다시 점검"으로 다시 확인).`,
+          `The installed ${adapter.displayName}${caps?.version ? ` (${caps.version})` : ''} does not list ${lacking.join(', ')} in its help, which Agent Company passes. Switch to another CLI version or change this employee's CLI, then release the hold ("Re-check" on the System page checks again).`,
+        ),
+      });
+      return runId;
+    }
     try {
       const proc = await startProcess({
         file: located.launch.file,
@@ -1932,41 +2053,74 @@ export class Orchestrator {
 
   /** 이만큼 아무 출력이 없으면 멈췄을 수 있다고 대표에게 알린다(라이브 화면은 5분부터 ⚠). */
   static readonly STALL_MS = 10 * 60_000;
-  private stalled = new Map<string, number>();
+  /** 실행 중인 실행마다 마지막으로 판정한 상태(1분마다) */
+  private states = new Map<string, RunState>();
+  /** 그중 멈췄을 수 있는 실행(대표에게 알림) */
+  private stalled = new Map<string, RunState>();
   private lastStallCheck = 0;
 
   /**
-   * 1분마다: 실행 중인데 출력이 STALL_MS 넘게 없는 직원을 찾는다. 처음 찾으면 대표에게 알린다.
+   * 1분마다: 실행 중인 직원이 무엇을 하는지(무엇을 기다리는지) 판정한다(run-state.ts). 멈췄을 수 있는 상태를 처음 찾으면 대표에게 알린다.
    * 실측(첫 사용, 2026-10-01): 직원이 띄운 시험 스크립트가 끝나지 않아 실행이 10분 넘게 멈췄는데,
    * 대표에게 보이는 곳은 라이브 화면의 작은 ⚠뿐이었다(그대로 두면 30분 시간 제한까지 기다린다).
+   * 대표 허락이나 동료 답을 기다리는 실행은 멈춘 것이 아니다: 무엇을 기다리는지 보여 주고 알리지 않는다.
    */
   private async checkStalled(): Promise<void> {
     if (Date.now() - this.lastStallCheck < 60_000) return;
     this.lastStallCheck = Date.now();
-    const next = new Map<string, number>();
+    const states = new Map<string, RunState>();
+    const stalled = new Map<string, RunState>();
+    const permissions = this.records.approvals('pending').filter((a) => a.kind === 'tool_permission');
     for (const runId of this.liveRuns.keys()) {
       const run = this.records.run(runId);
       if (!run || run.status !== 'running') continue;
-      const out = await stat(path.join(run.runDir, 'stdout.log'))
+      const stdout = path.join(run.runDir, 'stdout.log');
+      const out = await stat(stdout)
         .then((s) => s.mtimeMs)
-        .catch(() => 0);
-      const quiet = Date.now() - Math.max(out, Date.parse(run.startedAt));
-      if (quiet < Orchestrator.STALL_MS) continue;
-      next.set(runId, quiet);
-      if (!this.stalled.has(runId))
-        this.desk.notice(
-          tr(
-            `${this.nameOf(run.employeeId)}이(가) ${Math.round(quiet / 60_000)}분째 아무 신호가 없습니다`,
-            `${this.nameOf(run.employeeId)} has been silent for ${Math.round(quiet / 60_000)} minutes`,
-          ),
-          tr(
-            `${run.ticketId}: 끝나지 않는 명령을 기다리고 있을 수 있습니다. 라이브 화면에서 "끊고 다시 시키기"를 누를 수 있습니다.`,
-            `${run.ticketId}: it may be waiting on a command that never ends. Use "Cut and restart" on the Live page.`,
-          ),
-          `/live/${run.id}`,
-        );
+        .catch(() => null);
+      const permission = permissions.find((a) => (a.detail as { runId?: string }).runId === run.id);
+      const colleague = this.company.store
+        .settingKeys(`tool_call:${run.id}:`)
+        .map((k) => JSON.parse(this.company.store.getSetting(k) ?? '{}') as ToolCall)
+        .flatMap((x) => (x.state === 'waiting' ? [x.pending.name] : []))[0];
+      const quiet = Date.now() - Math.max(out ?? 0, Date.parse(run.startedAt));
+      const state = classifyRun({
+        now: Date.now(),
+        startedAt: Date.parse(run.startedAt),
+        lastOutputAt: out,
+        alive: run.pid ? isAlive(run.pid) : null,
+        waitingCeo: permission ? permission.summary : null,
+        waitingColleague: colleague ?? null,
+        // 조용할 때만 로그 전체를 읽는다(끝나지 않은 명령 찾기)
+        openCall: quiet >= Orchestrator.STALL_MS ? openCall((await readAllJsonl(stdout).catch(() => null))?.events ?? []) : null,
+        quietLimitMs: Orchestrator.STALL_MS,
+      });
+      states.set(runId, state);
+      if (!STUCK_KINDS.includes(state.kind)) continue;
+      stalled.set(runId, state);
+      if (this.stalled.has(runId)) continue;
+      const who = this.nameOf(run.employeeId);
+      const min = Math.round(state.quietMs / 60_000);
+      this.desk.notice(
+        state.kind === 'running_command'
+          ? tr(`${who}의 명령이 ${min}분째 끝나지 않습니다`, `${who}'s command has not finished for ${min} minutes`)
+          : state.kind === 'unknown'
+            ? tr(`${who}의 실행 프로세스가 보이지 않습니다(${min}분째 신호 없음)`, `${who}'s run process is gone (silent ${min} min)`)
+            : tr(`${who}이(가) ${min}분째 아무 신호가 없습니다`, `${who} has been silent for ${min} minutes`),
+        state.kind === 'running_command'
+          ? tr(
+              `${run.ticketId}: ${state.detail} — 끝나지 않는 명령(서버·감시)일 수 있습니다. 라이브 화면에서 "끊고 다시 시키기"를 누를 수 있습니다.`,
+              `${run.ticketId}: ${state.detail} — it may never end (a server or watcher). Use "Cut and restart" on the Live page.`,
+            )
+          : tr(
+              `${run.ticketId}: 끝나지 않는 명령을 기다리고 있을 수 있습니다. 라이브 화면에서 "끊고 다시 시키기"를 누를 수 있습니다.`,
+              `${run.ticketId}: it may be waiting on a command that never ends. Use "Cut and restart" on the Live page.`,
+            ),
+        `/live/${run.id}`,
+      );
     }
-    this.stalled = next;
+    this.states = states;
+    this.stalled = stalled;
   }
 
   /** 작업 중간 보고(progress.ts): 작업 실행마다 PROGRESS_MS마다, 새로 한 일이 있을 때만 업무방에 올린다. */
@@ -1989,12 +2143,19 @@ export class Orchestrator {
     for (const id of [...this.progressSeen.keys()]) if (!this.liveRuns.has(id)) this.progressSeen.delete(id);
   }
 
-  /** 멈췄을 수 있는 실행: 실행 ID → 조용했던 시간(ms) */
-  stalledRuns(): { runId: string; ticketId: string; employeeId: string; quietMs: number }[] {
-    return [...this.stalled].flatMap(([runId, quietMs]) => {
+  /** 멈췄을 수 있는 실행: 조용했던 시간과 상태(끝나지 않은 명령·그냥 조용함·프로세스 없음) */
+  stalledRuns(): { runId: string; ticketId: string; employeeId: string; quietMs: number; state: RunState['kind']; detail: string }[] {
+    return [...this.stalled].flatMap(([runId, s]) => {
       const run = this.records.run(runId);
-      return run?.status === 'running' ? [{ runId, ticketId: run.ticketId, employeeId: run.employeeId, quietMs }] : [];
+      return run?.status === 'running'
+        ? [{ runId, ticketId: run.ticketId, employeeId: run.employeeId, quietMs: s.quietMs, state: s.kind, detail: s.detail }]
+        : [];
     });
+  }
+
+  /** 실행 중인 실행마다 지금 무엇을 하는지(1분마다 판정한 것) */
+  runStates(): Record<string, RunState> {
+    return Object.fromEntries([...this.states].filter(([id]) => this.records.run(id)?.status === 'running'));
   }
 
   /**
@@ -2010,7 +2171,7 @@ export class Orchestrator {
       .then((x) => (JSON.parse(x) as { cliPid?: number | null }).cliPid ?? null)
       .catch(() => null);
     if (!pid) throw new DomainError(tr('직원 프로세스를 찾지 못했습니다.', 'Employee process not found.'));
-    const quietMin = Math.round((this.stalled.get(runId) ?? 0) / 60_000);
+    const quietMin = Math.round((this.stalled.get(runId)?.quietMs ?? 0) / 60_000);
     this.company.store.appendEvent('ceo', 'run.restarted', run.ticketId, { runId, quietMin });
     if (run.kind === 'work' && this.chat.channel(ticketChannelId(run.ticketId)))
       this.chat.post(
@@ -3520,11 +3681,25 @@ ${failure.detail.slice(0, 400)}`,
     await this.withProjectLock(project.id, async () => {
       if (this.records.approval(approvalId)?.state !== 'approved') return;
       const baseRef = `refs/heads/${project.baseBranch}`;
-      const mirrorBaseBefore =
-        (await git(['rev-parse', '--verify', '-q', baseRef], paths.mirror, { allowFail: true })).stdout.trim() || null;
-      const originBranchBefore =
-        (await git(['rev-parse', '--verify', '-q', `refs/heads/${req.branch}`], project.originPath, { allowFail: true })).stdout.trim() ||
-        null;
+      const refOf = async (ref: string, repo: string) =>
+        (await git(['rev-parse', '--verify', '-q', ref], repo, { allowFail: true })).stdout.trim() || null;
+      // 반영 의도를 먼저 적는다(움직이기 전의 ref 값). 반영 도중 꺼졌다 켜지면 다시 읽은 값이 아니라 이 값으로 이동을 기록해,
+      // 이미 옮겨진 ref가 기록 없는 이동(변조)으로 보이지 않게 한다(OpenRig 비교 2026-10-08: Git ref와 DB 기록 사이의 크래시 경계).
+      const intentKey = `integration_intent:${req.id}`;
+      const saved = JSON.parse(this.company.store.getSetting(intentKey) || 'null') as IntegrationIntent | null;
+      const intent: IntegrationIntent =
+        saved?.approvalId === approvalId
+          ? saved
+          : {
+              approvalId,
+              mode,
+              at: new Date().toISOString(),
+              mirrorBaseBefore: await refOf(baseRef, paths.mirror),
+              originBaseBefore: await refOf(baseRef, project.originPath),
+              originBranchBefore: await refOf(`refs/heads/${req.branch}`, project.originPath),
+            };
+      if (saved !== intent) this.company.store.setSetting(intentKey, JSON.stringify(intent));
+      const { mirrorBaseBefore, originBranchBefore } = intent;
       try {
         const result =
           mode === 'auto_after_approval'
@@ -3541,12 +3716,20 @@ ${failure.detail.slice(0, 400)}`,
         const baseNow = await headSha(paths.mirror, baseRef);
         this.company.store.transact(() => {
           this.records.recordRefMove(project.id, 'mirror', baseRef, mirrorBaseBefore, baseNow);
+          // 이어서 반영했으면 처음 기준 값에서부터(그사이 옮겨진 것까지 이 반영의 이동이다)
           if (result.kind === 'merged')
-            this.records.recordRefMove(project.id, 'origin', `refs/heads/${result.baseBranch}`, result.previousBaseSha, result.mergeSha);
+            this.records.recordRefMove(
+              project.id,
+              'origin',
+              `refs/heads/${result.baseBranch}`,
+              saved ? intent.originBaseBefore : result.previousBaseSha,
+              result.mergeSha,
+            );
           else this.records.recordRefMove(project.id, 'origin', `refs/heads/${result.branch}`, originBranchBefore, result.sha);
           this.records.setApprovalState(approvalId, 'consumed', 'orchestrator', { result });
           this.records.saveRequest({ ...this.records.request(req.id)!, integration: { at: new Date().toISOString(), result } });
           this.company.store.setSetting(`mergeverify_base:${req.id}`, '');
+          this.company.store.deleteSetting(intentKey);
           this.company.store.appendEvent('orchestrator', 'request.integrated', req.id, result);
         });
         this.desk.notice(
@@ -3564,6 +3747,7 @@ ${failure.detail.slice(0, 400)}`,
           this.records.recordRefMove(project.id, 'mirror', baseRef, mirrorBaseBefore, baseNow);
           this.records.setApprovalState(approvalId, 'expired', 'orchestrator', { reason: String((error as Error).message ?? error) });
           this.company.store.setSetting(`mergeverify_base:${req.id}`, '');
+          this.company.store.deleteSetting(intentKey);
         });
         this.desk.notice(
           tr('요청 결과물을 반영하지 못했습니다', "Could not merge the request's result"),
@@ -3851,42 +4035,109 @@ ${failure.detail.slice(0, 400)}`,
    */
   private async pollCompanyTools(): Promise<void> {
     const running = this.records.runsByStatus('running');
-    // 답을 받기 전에 끝난 실행의 대기 기록은 지운다(쌓이지 않게)
+    // 끝난 실행의 처리 기록은 지운다(쌓이지 않게). tool_pending: 은 예전 버전의 대기 기록
     const live = new Set(running.map((r) => r.id));
-    for (const key of this.company.store.settingKeys('tool_pending:'))
-      if (!live.has(key.split(':')[1] ?? '')) this.company.store.deleteSetting(key);
+    for (const prefix of ['tool_call:', 'tool_pending:'])
+      for (const key of this.company.store.settingKeys(prefix))
+        if (!live.has(key.split(':')[1] ?? '')) this.company.store.deleteSetting(key);
     for (const run of running) {
       if (run.kind !== 'work' && run.kind !== 'review') continue;
       const dir = companyToolsDir(run.runDir);
       for (const { req } of await openToolRequests(dir)) {
+        // 처리 기록은 데몬 DB에만 있다(실행 폴더의 파일은 직원이 쓸 수 있어 믿지 않는다).
+        const key = `tool_call:${run.id}:${req.id}`;
         try {
           // nonce부터: 이 실행의 요청이 아니면 아무것도 하지 않는다.
           if (req.nonce !== run.nonce) {
             await this.answerTool(run, dir, req, { ok: false, text: 'This request does not belong to this run (wrong nonce).' });
             continue;
           }
-          // 답을 기다리는 중인 요청: 기록은 데몬 DB에만 있다(실행 폴더의 파일은 직원이 쓸 수 있어 믿지 않는다).
-          const waitKey = `tool_pending:${run.id}:${req.id}`;
-          const waiting = this.company.store.getSetting(waitKey);
-          if (waiting) {
-            const answer = this.askAnswer(JSON.parse(waiting) as AskPending);
-            if (answer) {
-              // 응답을 쓴 뒤에 지운다: 그사이 꺼져도 다음에 같은 답을 다시 쓸 뿐, 질문을 또 보내지 않는다.
-              await this.answerTool(run, dir, req, answer);
-              this.company.store.deleteSetting(waitKey);
+          let call = this.toolCall(run, req);
+          // 보내던 중에 꺼졌다: 실제로 일어난 일을 보고 이어간다(아무 일도 없었으면 null → 처음부터)
+          if (call?.state === 'sending') {
+            call = this.recoverToolCall(run, req, key, call.at);
+            if (call?.state === 'answered') {
+              await this.finishTool(run, dir, req, key, call.answer);
+              continue;
             }
+          }
+          if (call?.state === 'answered') {
+            // 답은 정해졌는데 보내기 전에 꺼졌다: 같은 답을 다시 보낸다(도구를 다시 실행하지 않는다)
+            await writeToolResponse(dir, req.id, call.answer);
             continue;
           }
+          if (call?.state === 'waiting') {
+            const answer = this.askAnswer(call.pending);
+            if (answer) await this.finishTool(run, dir, req, key, answer);
+            continue;
+          }
+          this.company.store.setSetting(key, JSON.stringify({ state: 'sending', at: new Date().toISOString() } satisfies ToolCall));
           const out = await this.companyTool(run, req);
           if ('pending' in out) {
-            this.company.store.setSetting(waitKey, JSON.stringify(out.pending));
+            this.company.store.setSetting(key, JSON.stringify({ state: 'waiting', pending: out.pending } satisfies ToolCall));
             this.logTool(run, req, { ok: true, text: `waiting for ${out.pending.name}` });
-          } else await this.answerTool(run, dir, req, out);
+          } else await this.finishTool(run, dir, req, key, out);
         } catch (error) {
-          await this.answerTool(run, dir, req, { ok: false, text: `Company tool failed: ${String(error).slice(0, 300)}` });
+          await this.finishTool(run, dir, req, key, { ok: false, text: `Company tool failed: ${String(error).slice(0, 300)}` });
         }
       }
     }
+  }
+
+  /** 이 요청의 처리 기록. 예전 버전의 대기 기록(tool_pending:, AskPending 그대로)도 '기다리는 중'으로 읽는다. */
+  private toolCall(run: RunRecord, req: ToolRequest): ToolCall | null {
+    const raw = this.company.store.getSetting(`tool_call:${run.id}:${req.id}`);
+    if (raw) return JSON.parse(raw) as ToolCall;
+    const legacy = this.company.store.getSetting(`tool_pending:${run.id}:${req.id}`);
+    return legacy ? { state: 'waiting', pending: JSON.parse(legacy) as AskPending } : null;
+  }
+
+  /** 답을 DB에 먼저 정해 두고 보낸다: 보내는 사이 꺼져도 다음 주기에 같은 답을 다시 보낼 뿐이다. */
+  private async finishTool(run: RunRecord, dir: string, req: ToolRequest, key: string, res: ToolResponse): Promise<void> {
+    this.company.store.setSetting(key, JSON.stringify({ state: 'answered', answer: res } satisfies ToolCall));
+    this.company.store.deleteSetting(`tool_pending:${run.id}:${req.id}`);
+    await this.answerTool(run, dir, req, res);
+  }
+
+  /**
+   * 'sending'에서 꺼진 요청을 이어간다. 효과가 있는 도구는 동료 질문뿐이다: 질문이 방에 올라갔으면 다시 올리지 않고,
+   * 답장 실행이 시작됐으면 그 답을 기다리고, 아니면 질문은 방에 남았다고 답한다. 올라가지 않았으면 아무 일도 없었으므로 처음부터 한다.
+   * 나머지 도구는 다시 해도 같은 결과다(업무판 읽기, 범위 요청은 이미 넓힌 경로를 다시 넓히지 않고, 후속 제안은 같은 제안을 거른다).
+   */
+  private recoverToolCall(run: RunRecord, req: ToolRequest, key: string, at: string): ToolCall | null {
+    let call: ToolCall | null = null;
+    if (req.tool === 'ask_colleague') {
+      const a = req.args ?? {};
+      const name = (typeof a.to === 'string' ? a.to.trim().slice(0, 60) : '').replace(/^@/, '');
+      const question = typeof a.question === 'string' ? a.question.trim().slice(0, 2000) : '';
+      const roomId = ticketChannelId(run.ticketId);
+      const to = this.company.activeEmployees().find((e) => e.name === name);
+      const asked = this.chat.channel(roomId)
+        ? this.chat.messages(roomId, 300).find((m) => m.author === run.employeeId && m.text === `@${name} ${question}` && m.createdAt >= at)
+        : undefined;
+      if (asked && to) {
+        const started = this.records
+          .runsForTicket(roomId)
+          .some((r) => r.kind === 'chat' && r.employeeId === to.id && r.startedAt >= asked.createdAt);
+        call = started
+          ? { state: 'waiting', pending: { roomId, to: to.id, name, since: asked.createdAt } }
+          : {
+              state: 'answered',
+              answer: {
+                ok: false,
+                text: `${name} was not asked: the system restarted. The question stays in the ticket room; continue without the answer.`,
+              },
+            };
+      }
+    }
+    this.company.store.appendEvent('system', 'tool.recovered', run.ticketId, {
+      runId: run.id,
+      tool: String(req.tool).slice(0, 40),
+      outcome: call?.state ?? 'retry',
+    });
+    if (call?.state === 'waiting') this.company.store.setSetting(key, JSON.stringify(call));
+    else this.company.store.deleteSetting(key);
+    return call;
   }
 
   private async answerTool(run: RunRecord, dir: string, req: ToolRequest, res: ToolResponse): Promise<void> {
@@ -4629,6 +4880,7 @@ ${failure.detail.slice(0, 400)}`,
     if (!pid) throw new DomainError(tr('직원 프로세스를 찾지 못했습니다.', 'Employee process not found.'));
     await killTree(pid);
     this.stalled.delete(run.id);
+    this.states.delete(run.id);
     this.changed('run', run.id);
   }
 

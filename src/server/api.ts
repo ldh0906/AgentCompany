@@ -16,6 +16,7 @@ import { debateRunTokens, requestTokens, ticketTokens } from '../app/cost.ts';
 import { createRepo, inspectRepo, listDirs, trackedDirs } from '../app/repo-inspect.ts';
 import { deliverableFiles, isRunnablePath } from '../app/deliverables.ts';
 import { builtInFormulas } from '../app/formulas.ts';
+import { redact, redactDeep } from '../core/redact.ts';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -592,6 +593,10 @@ export class Api {
       ceoTodos: this.orch.desk.ceoTodos(),
       // 출력이 오래 없는 실행(라이브 화면의 "끊고 다시 시키기")
       stalledRuns: this.orch.stalledRuns(),
+      // 실행 중인 직원이 지금 무엇을 하는지·무엇을 기다리는지(1분마다 판정)
+      runStates: this.orch.runStates(),
+      // 마지막 재시작 복구: 무엇을 이어받고 무엇이 끊겼는지
+      recovery: this.orch.lastRecovery(),
       // 고급 QA(직접 플레이) 기록: 업무별·요청별(Q:요청 ID)
       playtests: Object.fromEntries(
         [...this.company.tickets().map((t) => t.id), ...r.requests(30).map((q) => `Q:${q.id}`)]
@@ -687,13 +692,12 @@ export class Api {
     const raw = await readFile(path.join(run.runDir, `${stream}.log`), 'utf8').catch(() => '');
     // 직원이 읽은 화면 사진은 base64로 출력에 통째로 들어간다: 줄여야 사람이 읽을 수 있고, 뒤쪽 200KB가 사진으로 채워지지 않는다.
     // 실측(2026-10-02, 퀴즈 T-55): 원본 출력 창 맨 위가 알아볼 수 없는 base64 글자였다.
-    const text = shortenBase64(raw);
+    // 비밀값은 내보내기 전에 가린다(직원이 출력한 키가 화면·복사본으로 나가지 않게)
+    const text = redact(shortenBase64(raw), this.knownSecrets());
     return {
       text: text.slice(-200_000),
       truncated: text.length > 200_000,
-      report: run.report,
-      finalText: run.finalText,
-      reportError: run.reportError,
+      ...redactDeep({ report: run.report, finalText: run.finalText, reportError: run.reportError }, this.knownSecrets()),
     };
   }
 
@@ -711,10 +715,22 @@ export class Api {
     // 마지막 줄이 생성 중 신호면 지금 무엇을 하는지(생각·파일 작성·답 쓰기) 알려 준다.
     const lastEv = events.at(-1) as { type?: string; what?: string } | undefined;
     const busy = lastEv?.type === 'heartbeat' ? (lastEv.what ?? null) : null;
-    return { run: rest, items: items.slice(-400), total: items.length, lastOutputAt, busy };
+    return {
+      ...redactDeep({ run: rest, items: items.slice(-400) }, this.knownSecrets()),
+      total: items.length,
+      lastOutputAt,
+      busy,
+    };
+  }
+
+  /** 정확히 아는 비밀값: 이 데몬의 접속 토큰(로그에 찍히면 그대로 가린다) */
+  private knownSecrets(): string[] {
+    const token = this.company.store.getSetting('server_token');
+    return token ? [token] : [];
   }
 
   async doctor(refresh: boolean): Promise<DoctorReport> {
+    if (refresh) this.orch.forgetCliCaps();
     if (!refresh && this.doctorCache && Date.now() - this.doctorCache.at < 60_000) return this.doctorCache.report;
     const report = await doctor(this.dataDir);
     this.doctorCache = { at: Date.now(), report };

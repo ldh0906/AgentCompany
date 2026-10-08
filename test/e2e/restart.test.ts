@@ -42,6 +42,13 @@ test('데몬이 직원 실행 도중 강제 종료돼도, 새 데몬이 같은 �
   const report = await orch2.recover();
   assert.equal(report.chainOk, true);
   assert.deepEqual(report.reattached, [runId], '살아 있는 실행에 재연결');
+  // 복구 기록: 실행마다 판단 근거가 남고, 다음 시작까지 대표가 볼 수 있다
+  assert.equal(report.runs?.[0]?.action, 'reattached');
+  assert.match(report.runs![0]!.reason, /같은 프로세스가 살아 있음/);
+  assert.deepEqual(
+    orch2.lastRecovery()?.runs?.map((r) => r.runId),
+    [runId],
+  );
 
   const env2 = { ...env, store: store2, company: company2, orch: orch2 };
   const t2 = await driveUntil(env2, ticket.id, (x) => x.status === 'awaiting_approval' || x.hold !== null, 120_000);
@@ -74,6 +81,9 @@ test('데몬이 꺼져 있는 동안 직원 실행이 끝났어도, 재시작 �
   const report = await orch2.recover();
   assert.equal(report.ingestedAfterRestart.length, 1);
   assert.equal(report.orphaned.length, 0);
+  assert.equal(report.runs?.[0]?.action, 'collected');
+  assert.match(report.runs![0]!.reason, /종료 기록 있음: 종료 코드 0/);
+  assert.equal(report.runs![0]!.status, 'succeeded', '처리한 뒤의 상태');
   const env2 = { ...env, store: store2, company: orch2.company, orch: orch2 };
   const done = await driveUntil(env2, ticket.id, statusIs('awaiting_approval'), 120_000);
   assert.equal(done.status, 'awaiting_approval');

@@ -17,6 +17,7 @@ interface Doctor {
     login: string;
     loginDetail: string;
     loginHelp: string;
+    missingFlags?: string[];
   }[];
   checkedAt: string;
 }
@@ -106,6 +107,57 @@ export function System() {
           {ko ? '감사 로그' : 'Audit log'}: {(recovered.payload as { chainDetail: string }).chainDetail}
         </div>
       )}
+      {/* 마지막 재시작 복구: 실행마다 무엇을 근거로 어떻게 처리했는지, 끊긴 반영·도구 요청 */}
+      {(state?.recovery?.runs?.length || state?.recovery?.integrations?.length || state?.recovery?.toolCalls) && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2>
+            {ko ? '마지막 재시작 복구' : 'Last restart recovery'}
+            {state.recovery!.at && <span className="sub"> · {new Date(state.recovery!.at).toLocaleString()}</span>}
+          </h2>
+          <div className="list">
+            {(state.recovery!.runs ?? []).map((r) => (
+              <div className="item" key={r.runId}>
+                <div className="spread">
+                  <span className="title">
+                    {r.ticketId} · {state.employees.find((e) => e.id === r.employeeId)?.name ?? r.employeeId}
+                  </span>
+                  <span className={`chip ${r.action === 'reattached' ? 'ok' : r.action === 'not_started' ? 'bad' : ''}`}>
+                    {r.action === 'reattached'
+                      ? ko
+                        ? '이어받음'
+                        : 'Reattached'
+                      : r.action === 'collected'
+                        ? ko
+                          ? `결과 수거 → ${r.status}`
+                          : `Collected → ${r.status}`
+                        : ko
+                          ? '시작 못 함'
+                          : 'Not started'}
+                  </span>
+                </div>
+                <div className="meta">{r.reason}</div>
+              </div>
+            ))}
+            {(state.recovery!.integrations ?? []).map((x) => (
+              <div className="item" key={x.requestId}>
+                <div className="spread">
+                  <span className="title">{x.requestId}</span>
+                  <span className={`chip ${x.action === 'resume' ? 'warn' : ''}`}>
+                    {x.action === 'resume' ? (ko ? '반영 이어서 진행' : 'Resuming merge') : ko ? '승인 없어 버림' : 'Dropped'}
+                  </span>
+                </div>
+              </div>
+            ))}
+            {!!state.recovery!.toolCalls && (
+              <div className="item">
+                {ko
+                  ? `처리하다 끊긴 직원 도구 요청 ${state.recovery!.toolCalls}건: 실제로 일어난 일을 확인해 이어갑니다`
+                  : `${state.recovery!.toolCalls} interrupted tool requests: resumed from what actually happened`}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="grid cols-2">
         <div className="card">
@@ -131,6 +183,14 @@ export function System() {
                   <div className="meta mono">
                     {c.version} {c.path}
                   </div>
+                  {/* 업데이트로 우리가 쓰는 옵션이 없어졌으면: 이 CLI 직원의 실행은 띄우기 전에 멈춘다 */}
+                  {!!c.missingFlags?.length && (
+                    <div className="banner bad" style={{ marginTop: 8 }}>
+                      {ko
+                        ? `이 버전의 도움말에 Agent Company가 쓰는 ${c.missingFlags.join(', ')}이(가) 없습니다. 이 CLI 직원의 실행은 시작하기 전에 멈춥니다.`
+                        : `This version's help does not list ${c.missingFlags.join(', ')}, which Agent Company uses. Runs on this CLI stop before starting.`}
+                    </div>
+                  )}
                   {c.found && c.login !== 'ok' && (
                     <>
                       <button

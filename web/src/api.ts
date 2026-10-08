@@ -3,6 +3,8 @@ import type { Approval, Claim, Decision, DomainEvent, Employee, Evidence, Projec
 export type { Approval, Claim, Decision, DomainEvent, Employee, Evidence, Project, ProjectProfile, Ticket };
 import type { UsageSummary } from '../../src/core/types.ts';
 export type { UsageSummary };
+import type { RunStateKind } from '../../src/app/run-state.ts';
+import type { RecoveryReport } from '../../src/app/recovery.ts';
 
 export interface RunSummary {
   id: string;
@@ -124,7 +126,9 @@ export interface State {
   /** 지금 대표가 할 일 */
   ceoTodos?: CeoTodo[];
   /** 출력이 오래 없는 실행(멈췄을 수 있음) */
-  stalledRuns?: { runId: string; ticketId: string; employeeId: string; quietMs: number }[];
+  stalledRuns?: { runId: string; ticketId: string; employeeId: string; quietMs: number; state?: string; detail?: string }[];
+  runStates?: Record<string, { kind: RunStateKind; quietMs: number; detail: string }>;
+  recovery?: RecoveryReport | null;
   /** 최근 알림(QA 자동 반려, 요청 완료 등) */
   notices?: { id: string; at: string; title: string; body: string; link: string }[];
   /** 윈도우 토스트 알림 켬 */
