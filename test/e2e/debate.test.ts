@@ -142,3 +142,39 @@ test('업그레이드: 예전 버전이 색인에서 뺀 진행 중 토론도 �
   assert.deepEqual(advanced, ['D-lost']);
   assert.deepEqual(JSON.parse(env.store.getSetting('debate_index') ?? '[]'), ['D-lost'], '끝난 토론은 되살리지 않는다');
 });
+
+test('대표 결정을 기다리는 토론이 50개 넘게 쌓여도, 진행 중인 토론은 잇고 그 답도 연결된다', async (t) => {
+  const env = await setup(t);
+  const ids = Array.from({ length: 55 }, (_, i) => `D-wait-${i}`);
+  for (const id of ids)
+    env.store.setSetting(
+      `debate:${id}`,
+      JSON.stringify({ id, channelId: `g:${id}`, phase: 'decide', recommendation: null, runs: {}, topic: id }),
+    );
+  env.store.setSetting(
+    'debate:D-live',
+    JSON.stringify({
+      id: 'D-live',
+      channelId: 'g:live',
+      phase: 'rebuttal',
+      runs: { E1: 'R-live' },
+      nonces: { 'nonce-live': 'E1' },
+      topic: 'live',
+      participants: ['E1'],
+      moderator: 'E1',
+      expected: 1,
+      positions: {},
+      rebuttals: {},
+      options: [],
+      summary: null,
+    }),
+  );
+  env.store.setSetting('debate_index', JSON.stringify([...ids, 'D-live']));
+  const advanced: string[] = [];
+  (env.orch.debates as unknown as { advance: (id: string) => Promise<void> }).advance = async (id) => void advanced.push(id);
+  await env.orch.debates.sweep();
+  assert.deepEqual(advanced, ['D-live']);
+  // 답 연결: 뒤쪽 토론의 실행 답도 그 토론에 연결된다(찾으면 true)
+  const run = { id: 'R-live', nonce: 'nonce-live', employeeId: 'E1', kind: 'chat', ticketId: 'g:live' } as never;
+  assert.equal(env.orch.debates.onChatReply(run, '반박입니다', null), true);
+});

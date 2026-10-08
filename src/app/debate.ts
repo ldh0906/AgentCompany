@@ -266,7 +266,8 @@ export class Debates {
 
   /** 토론 실행이 끝났을 때(답 또는 실패). 처리했으면 true. */
   onChatReply(run: RunRecord, reply: string | null, finalText: string | null): boolean {
-    const found = this.list(50).find(
+    // 진행 중인 토론 전체에서 찾는다(색인 앞쪽 몇 개만 보면 뒤로 밀린 토론의 답이 연결되지 않는다, QA)
+    const found = this.list(Number.MAX_SAFE_INTEGER).find(
       (x) => (x.nonces?.[run.nonce] || Object.values(x.runs).includes(run.id)) && ['opening', 'rebuttal', 'summary'].includes(x.phase),
     );
     if (!found) return false;
@@ -370,9 +371,8 @@ export class Debates {
   async sweep(): Promise<void> {
     this.restoreOpen();
     // 끝나지 않은 토론을 먼저 고른다(끝난 최신 토론에 밀려 오래된 토론이 다시 이어지지 않는 일이 없게, QA)
-    for (const d of this.list(500)
-      .filter((x) => x.phase !== 'done')
-      .slice(0, 50)) {
+    // 진행 중인 단계(입장·반박·정리)는 개수 제한 없이 모두 잇는다: 대표 결정을 기다리는 토론이 쌓여도 밀리지 않게(QA)
+    for (const d of this.list(Number.MAX_SAFE_INTEGER).filter((x) => x.phase !== 'done')) {
       if (['opening', 'rebuttal', 'summary'].includes(d.phase)) await this.advance(d.id);
       else if (d.phase === 'decide' && this.h.delegationOn() && d.recommendation !== null) {
         const del = this.h.delegate();
