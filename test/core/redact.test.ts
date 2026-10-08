@@ -26,6 +26,21 @@ test('이름이 비밀값인 설정은 값만, Bearer는 토큰만 가린다', (
   assert.equal(redact('Authorization: Bearer abcdefghijklmnop123456'), `Authorization: Bearer ${REDACTED}`);
 });
 
+test('Node 프로젝트에서 흔한 형태(QA): .npmrc 토큰, Basic 인증, URL 속 비밀번호', () => {
+  assert.equal(redact('//registry.npmjs.org/:_authToken=npm_abcdefghijklmnopqrstuv'), `//registry.npmjs.org/:_authToken=${REDACTED}`);
+  assert.equal(redact('_authToken=${NPM_TOKEN}x1'), `_authToken=${REDACTED}`);
+  assert.equal(redact('echo npm_abcdefghijklmnopqrstuvwxyz0123'), `echo ${REDACTED}`);
+  assert.equal(redact('Authorization: Basic dXNlcjpwYXNzd29yZA=='), `Authorization: Basic ${REDACTED}`);
+  assert.equal(redact('"authorization": "token ghx1234567890abcdef"'), `"authorization": "token ${REDACTED}"`);
+  assert.equal(
+    redact('DATABASE_URL=postgres://app:pa55w0rd@db.local:5432/main'),
+    `DATABASE_URL=postgres://app:${REDACTED}@db.local:5432/main`,
+  );
+  // 비밀번호 없는 URL·포트는 그대로
+  for (const s of ['http://localhost:4777/api', 'git@github.com:ldh0906/AgentCompany.git', 'https://user@host/x'])
+    assert.equal(redact(s), s, s);
+});
+
 test('일반 값은 그대로: git SHA, 토큰 수, 짧은 값, 설명 문장', () => {
   const keep = [
     'commit 96da30026b65a40a748d44483ce1dd87f52c2ccf',

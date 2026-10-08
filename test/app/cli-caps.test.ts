@@ -41,3 +41,24 @@ test('실제 실행 파일로 확인: 빠진 옵션을 찾고, 도움말을 못 
   assert.deepEqual(silent.missing, []);
   assert.match(silent.error ?? '', /exit 3/);
 });
+
+test('도움말이라는 근거가 없으면 막지 않는다: 안내만 찍고 끝나거나 멈춰 끊긴 경우(QA)', async () => {
+  const node = { file: process.execPath, argsPrefix: [] };
+  const tokens = ['--model', '--resume'];
+  const notice = await probeCli(
+    { helpChecks: [{ args: ['-e', 'console.log("A new version is available")'], tokens }] },
+    node,
+    process.env,
+    'k',
+  );
+  assert.deepEqual(notice.missing, []);
+  assert.match(notice.error ?? '', /no help text/);
+  // 하나만 확인하는 하위 명령도, 도움말 모양이면 빠진 것으로 본다(Codex app-server)
+  const codex = await probeCli(
+    { helpChecks: [{ args: ['-e', 'console.log("Usage: codex [OPTIONS]\\nCommands:\\n  exec")'], tokens: ['app-server'] }] },
+    node,
+    process.env,
+    'k',
+  );
+  assert.deepEqual(codex.missing, ['app-server']);
+});

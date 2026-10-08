@@ -137,7 +137,16 @@ export function Live({ runId }: { runId: string | null }) {
           {r.status !== 'running' && ` · ${r.status}`}
         </div>
         {r.status === 'running' && (
-          <div className={`live-line ${stalled || st?.kind === 'running_command' || st?.kind === 'unknown' ? 'stalled' : ''}`}>
+          <div
+            className={`live-line ${
+              // 무엇을 기다리는 중(대표 허락·동료 답)이면 멈춘 것이 아니다: 경고색을 쓰지 않는다
+              st?.kind === 'waiting_ceo' || st?.kind === 'waiting_colleague'
+                ? ''
+                : stalled || st?.kind === 'running_command' || st?.kind === 'unknown'
+                  ? 'stalled'
+                  : ''
+            }`}
+          >
             {stNote
               ? stNote
               : stalled

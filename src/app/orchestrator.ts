@@ -57,7 +57,7 @@ import {
 } from '../core/types.ts';
 import { pickPanel, pickStaff } from '../core/staffing.ts';
 import { commandOf, judgeToolRequest } from '../core/guard.ts';
-import { readAllJsonl } from '../runner/jsonl.ts';
+import { readAllJsonl, readJsonlFrom } from '../runner/jsonl.ts';
 import { activityFrom } from './activity.ts';
 import { classifyRun, openCall, STUCK_KINDS, type RunState } from './run-state.ts';
 import { CAPS_TTL_MS, lacksFor, probeCli, type CliCaps } from './cli-caps.ts';
@@ -2075,14 +2075,19 @@ export class Orchestrator {
       const run = this.records.run(runId);
       if (!run || run.status !== 'running') continue;
       const stdout = path.join(run.runDir, 'stdout.log');
-      const out = await stat(stdout)
-        .then((s) => s.mtimeMs)
-        .catch(() => null);
+      const st = await stat(stdout).catch(() => null);
+      const out = st?.mtimeMs ?? null;
       const permission = permissions.find((a) => (a.detail as { runId?: string }).runId === run.id);
-      const colleague = this.company.store
-        .settingKeys(`tool_call:${run.id}:`)
-        .map((k) => JSON.parse(this.company.store.getSetting(k) ?? '{}') as ToolCall)
-        .flatMap((x) => (x.state === 'waiting' ? [x.pending.name] : []))[0];
+      // 동료 답 대기: 지금 기록과 예전 버전의 대기 기록(tool_pending:, AskPending 그대로)
+      const colleague = [
+        ...this.company.store
+          .settingKeys(`tool_call:${run.id}:`)
+          .map((k) => JSON.parse(this.company.store.getSetting(k) ?? '{}') as ToolCall)
+          .flatMap((x) => (x.state === 'waiting' ? [x.pending.name] : [])),
+        ...this.company.store
+          .settingKeys(`tool_pending:${run.id}:`)
+          .map((k) => (JSON.parse(this.company.store.getSetting(k) ?? '{}') as Partial<AskPending>).name ?? ''),
+      ].find(Boolean);
       const quiet = Date.now() - Math.max(out ?? 0, Date.parse(run.startedAt));
       const state = classifyRun({
         now: Date.now(),
@@ -2091,8 +2096,11 @@ export class Orchestrator {
         alive: run.pid ? isAlive(run.pid) : null,
         waitingCeo: permission ? permission.summary : null,
         waitingColleague: colleague ?? null,
-        // 조용할 때만 로그 전체를 읽는다(끝나지 않은 명령 찾기)
-        openCall: quiet >= Orchestrator.STALL_MS ? openCall((await readAllJsonl(stdout).catch(() => null))?.events ?? []) : null,
+        // 끝나지 않은 명령 찾기: 조용할 때만, 로그 끝부분(256KB)만 읽는다(큰 로그를 매분 통째로 읽지 않게, QA)
+        openCall:
+          quiet >= Orchestrator.STALL_MS && st
+            ? openCall((await readJsonlFrom(stdout, Math.max(0, st.size - 256 * 1024)).catch(() => null))?.events ?? [])
+            : null,
         quietLimitMs: Orchestrator.STALL_MS,
       });
       states.set(runId, state);
@@ -3701,6 +3709,32 @@ ${failure.detail.slice(0, 400)}`,
       if (saved !== intent) this.company.store.setSetting(intentKey, JSON.stringify(intent));
       const { mirrorBaseBefore, originBranchBefore } = intent;
       try {
+        // 이어서 반영할 때: 그사이 원본 ref가 이 반영이 만들 수 있는 값(처음 값 또는 이 반영의 결과)이 아니면 다른 누군가가 바꾼 것이다.
+        // 덮어쓰거나 그 변경까지 이 반영의 이동으로 기록하지 않고 멈춘다: 승인은 만료되고 새 승인으로 다시 한다(QA 2026-10-08).
+        if (saved) {
+          const branchNow = await refOf(`refs/heads/${req.branch}`, project.originPath);
+          if (branchNow !== originBranchBefore && branchNow !== expectedHead)
+            throw new Error(
+              tr(
+                `반영 도중 다시 켜졌는데 그사이 원본의 ${req.branch} 브랜치가 바뀌어 이어서 반영하지 않았습니다. 다시 승인해 주세요.`,
+                `Restarted mid-merge and ${req.branch} in your repository changed meanwhile, so the merge was not resumed. Approve again.`,
+              ),
+            );
+          const baseNow = await refOf(baseRef, project.originPath);
+          if (mode === 'auto_after_approval' && baseNow !== intent.originBaseBefore) {
+            // 이 반영이 이미 옮겼다면 기준 브랜치는 (처음 값, 승인된 결과)를 부모로 둔 병합 커밋이다
+            const parents = baseNow
+              ? (await git(['rev-list', '--parents', '-n', '1', baseNow], project.originPath)).stdout.trim().split(' ').slice(1)
+              : [];
+            if (parents.length !== 2 || parents[0] !== intent.originBaseBefore || parents[1] !== expectedHead)
+              throw new Error(
+                tr(
+                  `반영 도중 다시 켜졌는데 그사이 원본의 ${project.baseBranch} 브랜치가 바뀌어 이어서 반영하지 않았습니다. 다시 승인해 주세요.`,
+                  `Restarted mid-merge and ${project.baseBranch} in your repository changed meanwhile, so the merge was not resumed. Approve again.`,
+                ),
+              );
+          }
+        }
         const result =
           mode === 'auto_after_approval'
             ? await integrateWithMerge(

@@ -17,11 +17,11 @@ export interface CliCaps {
 
 export const CAPS_TTL_MS = 6 * 3600_000;
 
-function run(file: string, args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number; out: string }> {
+function run(file: string, args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number; out: string; killed: boolean }> {
   return new Promise((resolve) => {
     execFile(file, args, { env, windowsHide: true, timeout: 20_000, encoding: 'utf8', maxBuffer: 4 << 20 }, (error, stdout, stderr) => {
       const code = error ? (typeof (error as { code?: unknown }).code === 'number' ? Number((error as { code?: unknown }).code) : 1) : 0;
-      resolve({ code, out: `${stdout}\n${stderr}` });
+      resolve({ code, out: `${stdout}\n${stderr}`, killed: Boolean((error as { killed?: boolean } | null)?.killed) });
     });
   });
 }
@@ -32,7 +32,10 @@ export function helpHas(help: string, token: string): boolean {
   return new RegExp(`(^|[\\s,\\[(|])${esc}(?=[\\s,=\\])|<]|$)`, 'm').test(help);
 }
 
-/** 실행 파일의 버전과 도움말에 없는 옵션. 도움말 명령이 출력 없이 실패하면 error만 남긴다. */
+/**
+ * 실행 파일의 버전과 도움말에 없는 옵션. 도움말이라는 근거가 없으면 error만 남기고 막지 않는다:
+ * 시간 초과로 끊겼거나, 확인할 낱말도 도움말 표시(usage·options·commands)도 없을 때(업데이트 안내만 찍고 끝난 경우 등, QA 2026-10-08).
+ */
 export async function probeCli(
   adapter: Pick<CliAdapter, 'helpChecks'>,
   launch: { file: string; argsPrefix: string[] },
@@ -48,11 +51,13 @@ export async function probeCli(
   };
   for (const check of adapter.helpChecks ?? []) {
     const h = await run(launch.file, [...launch.argsPrefix, ...check.args], env);
-    if (!h.out.trim()) {
-      caps.error = `${[...check.args].join(' ')}: exit ${h.code}`;
+    const missing = check.tokens.filter((t) => !helpHas(h.out, t));
+    const looksLikeHelp = missing.length < check.tokens.length || /\b(usage|options|commands)\b/i.test(h.out);
+    if (h.killed || !looksLikeHelp) {
+      caps.error = `${check.args.join(' ')}: ${h.killed ? 'timed out' : `exit ${h.code}`}, no help text`;
       continue;
     }
-    caps.missing.push(...check.tokens.filter((t) => !helpHas(h.out, t)));
+    caps.missing.push(...missing);
   }
   return caps;
 }
