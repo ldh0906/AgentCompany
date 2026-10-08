@@ -92,7 +92,12 @@ test('aco up --fake → aco ask --yes → aco approve: 요청 결과물이 원�
       );
     await new Promise((r) => setTimeout(r, 200));
   }
-  await ac('approve');
+  // 프로젝트가 아닌 폴더에서는 승인하지 않는다(다른 저장소에 반영되지 않게)
+  process.exitCode = 0;
+  await runAc('approve', [], dataDir);
+  assert.equal(process.exitCode, 1);
+  assert.ok(logs.length && orch.records.approvals('pending').some((a) => a.kind === 'integrate_request'));
+  await ac('approve', '--path', origin);
   while (!orch.records.request(req.id)!.integration) {
     if (Date.now() > deadline) throw new Error('반영 시간 초과');
     await new Promise((r) => setTimeout(r, 200));

@@ -154,6 +154,15 @@ export const hhmm = (iso: string) => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
+/** 승인·대표 할 일이 속한 프로젝트 ID(알 수 없으면 null: 회사 전체 일) */
+export function projectOfItem(s: Pick<CliState, 'tickets' | 'requests'>, x: { ticketId?: string | null; detail?: unknown }): string | null {
+  const d = (x.detail ?? {}) as { projectId?: unknown };
+  if (typeof d.projectId === 'string') return d.projectId;
+  const id = x.ticketId;
+  if (!id) return null;
+  return s.tickets.find((t) => t.id === id)?.projectId ?? s.requests.find((r) => r.id === id)?.projectId ?? null;
+}
+
 /**
  * 프로젝트: 지금 폴더와 같은 저장소만. 하나뿐이라고 다른 폴더의 프로젝트로 보내지 않는다
  * (다른 저장소에서 친 요청이 엉뚱한 프로젝트로 가고, 그 폴더의 신뢰 확인도 건너뛰게 된다).

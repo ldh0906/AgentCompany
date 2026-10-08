@@ -4,7 +4,7 @@ import type { CeoTodo } from '../app/notify.ts';
 import { Client, ensureDaemon } from './client.ts';
 import { openUrl, pendingOf } from './ac.ts';
 import { c, fit, pad, width } from './term.ts';
-import { feed, hhmm, projectFor, statusLabel, teamRows, type CliState } from './view.ts';
+import { feed, hhmm, projectFor, projectOfItem, statusLabel, teamRows, type CliState } from './view.ts';
 
 /** 대표 차례 한 줄: 여기서 바로 할 수 있는 것(act)과 웹에서 할 것 */
 export interface TodoItem {
@@ -22,6 +22,8 @@ export interface TodoItem {
 export interface Model {
   s: CliState | null;
   project: string | null;
+  /** 지금 폴더의 프로젝트: 대표 차례는 이 프로젝트의 것만(없으면 회사 전체 알림만) */
+  projectId?: string | null;
   sel: number;
   mode: 'normal' | 'input' | 'reason' | 'confirm-checks';
   input: string;
@@ -32,9 +34,10 @@ export interface Model {
   target?: { approvalId: string; label: string; checks: string[]; warn: string[]; request: boolean } | null;
 }
 
-export function todoItems(s: CliState): TodoItem[] {
+export function todoItems(s: CliState, projectId: string | null): TodoItem[] {
   const out: TodoItem[] = [];
-  for (const p of pendingOf(s)) {
+  // 다른 프로젝트의 승인·초안은 여기서 처리하지 않는다(그 폴더에서 열거나 aco approve --all)
+  for (const p of projectId ? pendingOf(s, projectId) : []) {
     if (p.kind === 'draft') {
       const r = p.request!;
       out.push({
@@ -96,7 +99,9 @@ export function todoItems(s: CliState): TodoItem[] {
     });
   }
   // 그 밖의 대표 차례(멈춘 업무 등): 허락·재개·다시 검사는 여기서, 나머지는 웹에서
-  for (const t of s.ceoTodos.filter((x: CeoTodo) => x.kind !== 'approval' && x.kind !== 'draft')) {
+  for (const t of s.ceoTodos.filter(
+    (x: CeoTodo) => x.kind !== 'approval' && x.kind !== 'draft' && (!x.ticketId || projectOfItem(s, x) === projectId),
+  )) {
     const tid = t.ticketId ?? '';
     const act: TodoItem['act'] =
       t.action?.kind === 'allow' && tid
@@ -129,7 +134,7 @@ export function render(m: Model, W: number, H: number): string[] {
   const right = `${s?.delegation.on ? c.magenta('위임 ') : ''}${status} `;
   lines.push(c.inverse(pad(title, W - width(right))) + right);
 
-  const todos = s ? todoItems(s) : [];
+  const todos = s ? todoItems(s, m.projectId ?? null) : [];
   const sel = Math.min(m.sel, Math.max(0, todos.length - 1));
   const todoRows = Math.min(Math.max(todos.length, 1), 5);
   const bottom = 1 /* 구분 */ + 1 /* 제목 */ + todoRows + 1 /* 구분 */ + 1 /* 입력 */ + 1; /* 도움말 */
@@ -264,7 +269,9 @@ export async function runTui(
   const refresh = async () => {
     try {
       m.s = await client.get<CliState>('state');
-      m.project = projectFor(m.s, cwd)?.name ?? null;
+      const p = projectFor(m.s, cwd);
+      m.project = p?.name ?? null;
+      m.projectId = p?.id ?? null;
       m.error = m.error.startsWith('연결') ? '' : m.error;
     } catch (e) {
       m.error = `연결 끊김: ${(e as Error).message}`;
@@ -280,7 +287,7 @@ export async function runTui(
     }
     await refresh();
   };
-  const current = () => (m.s ? todoItems(m.s)[m.sel] : undefined);
+  const current = () => (m.s ? todoItems(m.s, m.projectId ?? null)[m.sel] : undefined);
   /** 붙잡아 둔 승인이 아직 기다리는 중인지(아니면 취소) */
   const takeTarget = () => {
     const t = m.target ?? null;
@@ -353,7 +360,7 @@ export async function runTui(
       m.target = null;
       return draw();
     }
-    const n = m.s ? todoItems(m.s).length : 0;
+    const n = m.s ? todoItems(m.s, m.projectId ?? null).length : 0;
     switch (key) {
       case 'q':
       case 'ㅂ':

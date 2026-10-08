@@ -11,7 +11,7 @@ import type { DoctorReport } from '../app/doctor.ts';
 import { Client, ensureDaemon } from './client.ts';
 import { builtInTeams, exportTeam, loadTeam, resolveSeats } from './teams.ts';
 import { c, table } from './term.ts';
-import { nameOf, openTickets, projectFor, statusLabel, teamRows, type CliState } from './view.ts';
+import { nameOf, openTickets, projectFor, projectOfItem, statusLabel, teamRows, type CliState } from './view.ts';
 
 export const AC_COMMANDS = ['up', 'ask', 'ps', 'approve', 'reject', 'down', 'open', 'team'] as const;
 
@@ -259,22 +259,40 @@ interface Pending {
   request?: CeoRequest;
 }
 
-/** 대표가 바로 결정할 수 있는 것: 승인 요청과 확정할 초안 */
-export function pendingOf(s: CliState): Pending[] {
+/**
+ * 대표가 바로 결정할 수 있는 것: 승인 요청과 확정할 초안. 기본은 한 프로젝트의 것만(지금 폴더),
+ * 'all'이면 회사 전체(항목마다 프로젝트 이름을 붙인다). QA 4차: A 폴더에서 친 승인이 B 저장소에 반영될 수 있었다.
+ */
+export function pendingOf(s: CliState, scope: string | 'all'): Pending[] {
   const order = (a: Approval) => (a.kind === 'integrate_request' ? 0 : a.kind === 'integrate' ? 1 : 2);
+  const mine = (projectId: string | null) => scope === 'all' || (projectId !== null && projectId === scope);
+  const tag = (projectId: string | null) => (scope === 'all' ? `[${s.projects.find((p) => p.id === projectId)?.name ?? '회사'}] ` : '');
   return [
     ...[...s.approvals]
+      .filter((a) => mine(projectOfItem(s, a)))
       .sort((a, b) => order(a) - order(b))
-      .map((a): Pending => ({ kind: 'approval', id: a.id, label: a.summary, approval: a })),
+      .map((a): Pending => ({ kind: 'approval', id: a.id, label: `${tag(projectOfItem(s, a))}${a.summary}`, approval: a })),
     ...s.requests
-      .filter((r) => r.status === 'drafted')
-      .map((r): Pending => ({ kind: 'draft', id: r.id, label: `초안 확정: ${r.text.split('\n')[0]!.slice(0, 80)}`, request: r })),
+      .filter((r) => r.status === 'drafted' && mine(r.projectId))
+      .map((r): Pending => ({
+        kind: 'draft',
+        id: r.id,
+        label: `${tag(r.projectId)}초안 확정: ${r.text.split('\n')[0]!.slice(0, 80)}`,
+        request: r,
+      })),
   ];
 }
 
-async function pick(client: Client, which: string | undefined): Promise<{ s: CliState; p: Pending } | null> {
+async function pick(
+  client: Client,
+  which: string | undefined,
+  opts: { all?: boolean; path?: string },
+): Promise<{ s: CliState; p: Pending } | null> {
   const s = await client.get<CliState>('state');
-  const list = pendingOf(s);
+  const project = projectFor(s, opts.path ?? process.cwd());
+  if (!opts.all && !project) fail('이 폴더의 프로젝트가 없습니다. 프로젝트 폴더에서 실행하거나, 회사 전체를 보려면 --all을 붙이세요.');
+  if (project && !opts.all) say(c.dim(`프로젝트: ${project.name} (${project.originPath})`));
+  const list = pendingOf(s, opts.all ? 'all' : project!.id);
   if (!list.length) {
     say(c.dim('대표가 결정할 것이 없습니다.'));
     return null;
@@ -293,9 +311,13 @@ async function pick(client: Client, which: string | undefined): Promise<{ s: Cli
 }
 
 async function approve(argv: string[], dataDir: string): Promise<void> {
-  const { positionals, values } = parseArgs({ args: argv, allowPositionals: true, options: { branch: { type: 'boolean' } } });
+  const { positionals, values } = parseArgs({
+    args: argv,
+    allowPositionals: true,
+    options: { branch: { type: 'boolean' }, all: { type: 'boolean' }, path: { type: 'string' } },
+  });
   const client = await connect(dataDir);
-  const got = await pick(client, positionals[0]);
+  const got = await pick(client, positionals[0], values);
   if (!got) return;
   const { s, p } = got;
   if (p.kind === 'draft') {
@@ -340,9 +362,13 @@ async function approve(argv: string[], dataDir: string): Promise<void> {
 }
 
 async function reject(argv: string[], dataDir: string): Promise<void> {
-  const { positionals } = parseArgs({ args: argv, allowPositionals: true });
+  const { positionals, values } = parseArgs({
+    args: argv,
+    allowPositionals: true,
+    options: { all: { type: 'boolean' }, path: { type: 'string' } },
+  });
   const client = await connect(dataDir);
-  const got = await pick(client, positionals[0]);
+  const got = await pick(client, positionals[0], values);
   if (!got) return;
   const { p } = got;
   if (p.kind === 'draft') {

@@ -20,6 +20,7 @@ const approval = (id: string, label: string, over: Record<string, unknown> = {})
     changedPaths: ['a'],
     tickets: [],
     checks: [{ ticketId: 'T-1', id: 'R1', text: '본다' }],
+    projectId: 'P-1',
     ...over,
   },
   state: 'pending',
@@ -27,9 +28,10 @@ const approval = (id: string, label: string, over: Record<string, unknown> = {})
 });
 
 async function harness(t: { after: (fn: () => void | Promise<void>) => void }) {
+  const dataDir = mkdtempSync(join(tmpdir(), 'ac-tui-'));
   const state = {
     employees: [],
-    projects: [],
+    projects: [{ id: 'P-1', name: '여기', originPath: dataDir }],
     tickets: [],
     approvals: [approval('A-1', '첫 번째 요청')] as unknown[],
     runs: [],
@@ -47,7 +49,6 @@ async function harness(t: { after: (fn: () => void | Promise<void>) => void }) {
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const port = (server.address() as { port: number }).port;
-  const dataDir = mkdtempSync(join(tmpdir(), 'ac-tui-'));
   writeFileSync(join(dataDir, 'daemon.lock'), JSON.stringify({ pid: process.pid, url: `http://127.0.0.1:${port}/#token=t` }));
   const stdin = Object.assign(new EventEmitter(), {
     isTTY: true,

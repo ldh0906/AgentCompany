@@ -15,6 +15,7 @@ const state = {
   tickets: [
     {
       id: 'T-1',
+      projectId: 'P-1',
       title: '아주 긴 한글 제목이 들어간 업무로 폭을 넘깁니다 아주 길게 길게 길게',
       status: 'in_progress',
       hold: null,
@@ -22,6 +23,7 @@ const state = {
     },
     {
       id: 'T-2',
+      projectId: 'P-1',
       title: '버튼',
       status: 'verifying',
       hold: { reason: 'needs_permission', resumeTo: 'verifying', since: now, note: '계약:src/contract/types.ts' },
@@ -36,6 +38,7 @@ const state = {
       summary: '요청 결과물: 가계부 — 업무 2개, 5개 파일',
       detail: {
         requestId: 'Q-1',
+        projectId: 'P-1',
         text: '가계부 만들어줘',
         changedPaths: ['a', 'b'],
         tickets: [{ id: 'T-1', title: 'x' }],
@@ -68,6 +71,7 @@ const state = {
 const model = (over: Partial<Model> = {}): Model => ({
   s: state,
   project: '가계부',
+  projectId: 'P-1',
   sel: 0,
   mode: 'normal',
   input: '',
@@ -107,11 +111,34 @@ test('TUI: 여러 크기에서 모든 줄이 정확히 화면 폭이고, 화면 
 });
 
 test('대표 차례: 요청 결과물은 승인(직접 확인 항목 포함), 계약 수정 보류는 허락/되돌리기', () => {
-  const [a, b] = todoItems(state);
+  const [a, b] = todoItems(state, 'P-1');
   assert.equal(a!.act.kind, 'approval');
   assert.ok(a!.act.kind === 'approval' && a!.act.request && a!.act.checks[0] === 'T-1:R2');
   assert.ok(a!.act.kind === 'approval' && a!.act.text.some((x) => x.includes('인수 시험 2/3')));
   assert.deepEqual(b!.act, { kind: 'scope', ticketId: 'T-2' });
   const detail = render(model({ detail: true }), 100, 30).join('\n');
   assert.match(detail, /직접 확인: T-1 화면이 보인다/);
+});
+
+test('대표 차례는 지금 폴더의 프로젝트 것만: 다른 프로젝트의 승인은 보이지 않고, 프로젝트가 아닌 폴더에서는 승인할 것이 없다', () => {
+  const other = {
+    ...state,
+    approvals: [
+      ...state.approvals,
+      {
+        ...state.approvals[0]!,
+        id: 'A-9',
+        summary: '다른 저장소',
+        detail: { ...(state.approvals[0]!.detail as object), projectId: 'P-2' },
+      },
+    ],
+  } as CliState;
+  assert.deepEqual(
+    todoItems(other, 'P-1').flatMap((x) => (x.act.kind === 'approval' ? [x.act.id] : [])),
+    ['A-1'],
+  );
+  assert.deepEqual(
+    todoItems(other, null).filter((x) => x.act.kind === 'approval'),
+    [],
+  );
 });
