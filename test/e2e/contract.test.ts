@@ -21,6 +21,9 @@ test(
     const [contract, doc] = env.orch.acceptRequest(req.id, drafts);
     assert.equal(env.orch.records.request(req.id)!.contractTicketId, contract!.id);
     assert.ok(doc!.dependsOn.includes(contract!.id), '다른 업무는 계약 업무를 기다린다');
+    // 계약 업무는 나눌 수 없다(나눈 조각이 만든 파일은 고정 대상에서 빠지므로)
+    assert.equal(env.orch.canSplit(contract!), false);
+    assert.equal(env.orch.canSplit(doc!), true);
 
     // 계약 업무 자신은 계약 파일을 자유롭게 만든다(계약 블록 없음)
     await driveUntil(env, contract!.id, statusIs('done'), 150_000);

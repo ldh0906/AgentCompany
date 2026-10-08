@@ -90,6 +90,9 @@ test('TUI: 여러 크기에서 모든 줄이 정확히 화면 폭이고, 화면 
     [80, 24],
     [120, 40],
     [60, 18],
+    [59, 18],
+    [30, 12],
+    [20, 8],
   ] as const) {
     for (const m of [model(), model({ detail: true }), model({ mode: 'input', input: '로그인 화면 만들어줘' }), model({ sel: 1 })]) {
       const lines = render(m, w, h);

@@ -67,7 +67,12 @@ test('aco up --fake → aco ask --yes → aco approve: 요청 결과물이 원�
   await ac('up', 'workshop', '--path', origin);
   assert.equal(company.employees().length, 2);
 
-  await ac('ask', '--yes', '파티 해산 기능');
+  // 이 폴더(테스트 실행 폴더)는 프로젝트가 아니다: 하나뿐인 프로젝트로 조용히 보내지 않는다
+  process.exitCode = 0;
+  await runAc('ask', ['--yes', '엉뚱한 폴더에서 보낸 요청'], dataDir);
+  assert.equal(process.exitCode, 1);
+  assert.equal(orch.records.requests().length, 0);
+  await ac('ask', '--yes', '--path', origin, '파티 해산 기능');
   const req = orch.records.requests()[0]!;
   assert.equal(req.status, 'accepted');
   assert.ok(

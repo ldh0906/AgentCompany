@@ -28,6 +28,8 @@ export interface Model {
   detail: boolean;
   msg: string;
   error: string;
+  /** 확인·사유 입력 중인 승인: 누른 순간의 항목을 붙잡아 둔다(그사이 목록이 바뀌어도 다른 승인에 적용하지 않게). */
+  target?: { approvalId: string; label: string; checks: string[]; request: boolean } | null;
 }
 
 export function todoItems(s: CliState): TodoItem[] {
@@ -76,6 +78,7 @@ export function todoItems(s: CliState): TodoItem[] {
               String(d.text ?? ''),
               `업무: ${((d.tickets as { id: string; title: string }[]) ?? []).map((t) => `${t.id} ${t.title}`).join(' · ')}`,
               `바뀐 파일 ${((d.changedPaths as string[]) ?? []).length}개`,
+              ...((d.notDone as string[] | undefined) ?? []).map((x) => `⚠ 끝나지 않은 업무(결과물에 없음): ${x}`),
               ...(acc ? [`인수 시험 ${acc.passed}/${acc.total} 통과${acc.left.length ? ` — 남은 것: ${acc.left.join(' / ')}` : ''}`] : []),
               ...((d.checks as { ticketId: string; text: string }[]) ?? []).map((x) => `👀 직접 확인: ${x.ticketId} ${x.text}`),
             ]
@@ -122,8 +125,10 @@ export function render(m: Model, W: number, H: number): string[] {
   const todoRows = Math.min(Math.max(todos.length, 1), 5);
   const bottom = 1 /* 구분 */ + 1 /* 제목 */ + todoRows + 1 /* 구분 */ + 1 /* 입력 */ + 1; /* 도움말 */
   const bodyH = Math.max(3, H - 1 - bottom);
-  const leftW = Math.min(36, Math.max(24, Math.floor(W * 0.32)));
-  const rightW = W - leftW - 3;
+  // 좁은 창(60칸 미만)에서는 팀 칸을 접고 진행만 보인다(줄이 넘쳐 화면이 깨지지 않게)
+  const twoCols = W >= 60;
+  const leftW = twoCols ? Math.min(36, Math.max(24, Math.floor(W * 0.32))) : 0;
+  const rightW = twoCols ? W - leftW - 3 : W;
 
   // 왼쪽: 팀
   const team = s ? teamRows(s) : [];
@@ -158,7 +163,8 @@ export function render(m: Model, W: number, H: number): string[] {
     for (const x of f) right2.push(`${c.gray(hhmm(x.at))} ${x.text}`);
   }
   const rightShown = m.detail ? right2.slice(0, bodyH) : [right2[0]!, ...right2.slice(1).slice(-(bodyH - 1))];
-  for (let i = 0; i < bodyH; i++) lines.push(`${pad(left[i] ?? '', leftW)} ${c.gray('│')} ${pad(rightShown[i] ?? '', rightW)}`);
+  for (let i = 0; i < bodyH; i++)
+    lines.push(twoCols ? `${pad(left[i] ?? '', leftW)} ${c.gray('│')} ${pad(rightShown[i] ?? '', rightW)}` : pad(rightShown[i] ?? '', W));
 
   // 대표 차례
   lines.push(c.gray('─'.repeat(W)));
@@ -179,9 +185,10 @@ export function render(m: Model, W: number, H: number): string[] {
 
   // 입력 줄
   if (m.mode === 'input') lines.push(pad(`${c.cyan('리드에게 >')} ${m.input}${c.inverse(' ')}`, W));
-  else if (m.mode === 'reason') lines.push(pad(`${c.yellow('무엇을 고쳐야 하나요? >')} ${m.input}${c.inverse(' ')}`, W));
+  else if (m.mode === 'reason')
+    lines.push(pad(`${c.yellow(`반려(${m.target?.label ?? ''}) — 무엇을 고쳐야 하나요? >`)} ${m.input}${c.inverse(' ')}`, W));
   else if (m.mode === 'confirm-checks')
-    lines.push(pad(c.yellow('직접 확인할 항목이 있습니다: [y] 모두 확인했음  [l] 나중에 확인  [Esc] 취소'), W));
+    lines.push(pad(c.yellow(`승인(${m.target?.label ?? ''}) — 직접 확인: [y] 모두 확인했음  [l] 나중에 확인  [Esc] 취소`), W));
   else lines.push(pad(m.error ? c.red(`✖ ${m.error}`) : m.msg ? c.green(m.msg) : c.dim('[i] 리드에게 말하기'), W));
   lines.push(pad(c.dim(' ↑↓ 고르기 · i 말하기 · a 승인 · r 반려 · Enter 자세히 · o 웹 · q 종료'), W));
   return lines.slice(0, H);
@@ -204,15 +211,29 @@ export function wrap(text: string, w: number): string[] {
   return out;
 }
 
-export async function runTui(dataDir: string, daemonArgs: string[] = []): Promise<void> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+/** TUI가 쓰는 입출력(테스트는 가짜를 넘긴다) */
+export interface TuiIo {
+  stdin: Pick<NodeJS.ReadStream, 'isTTY' | 'setRawMode' | 'setEncoding' | 'pause' | 'on'>;
+  stdout: Pick<NodeJS.WriteStream, 'isTTY' | 'columns' | 'rows' | 'write' | 'on'>;
+  /** 새로 고침 간격(ms) */
+  refreshMs?: number;
+  cwd?: string;
+}
+
+export async function runTui(
+  dataDir: string,
+  daemonArgs: string[] = [],
+  io: TuiIo = { stdin: process.stdin, stdout: process.stdout },
+): Promise<void> {
+  const cwd = io.cwd ?? process.cwd();
+  if (!io.stdin.isTTY || !io.stdout.isTTY) {
     console.log('터미널 화면은 대화형 터미널에서만 열립니다. `aco ps`를 쓰세요.');
     return;
   }
   const { daemon } = await ensureDaemon(dataDir, daemonArgs);
   const client = new Client(daemon);
   const m: Model = { s: null, project: null, sel: 0, mode: 'normal', input: '', detail: false, msg: '', error: '' };
-  const out = process.stdout;
+  const out = io.stdout;
   const draw = () => {
     const rows = render(m, out.columns || 100, out.rows || 30);
     out.write(`\x1b[H${rows.join('\r\n')}\x1b[J`);
@@ -225,7 +246,7 @@ export async function runTui(dataDir: string, daemonArgs: string[] = []): Promis
   const refresh = async () => {
     try {
       m.s = await client.get<CliState>('state');
-      m.project = projectFor(m.s, process.cwd())?.name ?? null;
+      m.project = projectFor(m.s, cwd)?.name ?? null;
       m.error = m.error.startsWith('연결') ? '' : m.error;
     } catch (e) {
       m.error = `연결 끊김: ${(e as Error).message}`;
@@ -242,28 +263,39 @@ export async function runTui(dataDir: string, daemonArgs: string[] = []): Promis
     await refresh();
   };
   const current = () => (m.s ? todoItems(m.s)[m.sel] : undefined);
+  /** 붙잡아 둔 승인이 아직 기다리는 중인지(아니면 취소) */
+  const takeTarget = () => {
+    const t = m.target ?? null;
+    m.target = null;
+    if (!t || !m.s?.approvals.some((a) => a.id === t.approvalId)) {
+      flash('그사이 목록이 바뀌어 취소했습니다. 다시 골라 주세요.', true);
+      return null;
+    }
+    return t;
+  };
 
   out.write('\x1b[?1049h\x1b[?25l');
-  process.stdin.setRawMode(true);
-  process.stdin.setEncoding('utf8');
-  const timer = setInterval(() => void refresh(), 1500);
+  io.stdin.setRawMode(true);
+  io.stdin.setEncoding('utf8');
+  const timer = setInterval(() => void refresh(), io.refreshMs ?? 1500);
   let quit: () => void = () => {};
   const done = new Promise<void>((r) => (quit = r));
   const cleanup = () => {
     clearInterval(timer);
-    process.stdin.setRawMode(false);
-    process.stdin.pause();
+    io.stdin.setRawMode(false);
+    io.stdin.pause();
     out.write('\x1b[?25h\x1b[?1049l');
   };
   out.on('resize', draw);
 
-  process.stdin.on('data', (key: string) => {
+  io.stdin.on('data', (key: string) => {
     const item = current();
     if (key === '\x03') return quit();
     if (m.mode === 'input' || m.mode === 'reason') {
       if (key === '\x1b') {
         m.mode = 'normal';
         m.input = '';
+        m.target = null;
       } else if (key === '\r' || key === '\n') {
         const text = m.input.trim();
         const mode = m.mode;
@@ -271,17 +303,18 @@ export async function runTui(dataDir: string, daemonArgs: string[] = []): Promis
         m.input = '';
         if (!text) return draw();
         if (mode === 'input') {
-          const project = m.s ? projectFor(m.s, process.cwd()) : null;
+          const project = m.s ? projectFor(m.s, cwd) : null;
           if (!project) return flash('이 폴더의 프로젝트가 없습니다. `aco up` 먼저.', true);
           void act(
             () => client.post('requests', { projectId: project.id, text }),
             '리드에게 보냈습니다. 초안이 나오면 대표 차례에 뜹니다.',
           );
-        } else if (item?.act.kind === 'approval') {
-          const id = item.act.id;
+        } else {
+          const t = takeTarget();
+          if (!t) return;
           void act(
-            () => client.post(`approvals/${id}/decide`, { decision: 'rejected', reason: text }),
-            item.act.request ? '반려했습니다. 고칠 업무를 만들었습니다.' : '반려했습니다.',
+            () => client.post(`approvals/${t.approvalId}/decide`, { decision: 'rejected', reason: text }),
+            t.request ? '반려했습니다. 고칠 업무를 만들었습니다.' : '반려했습니다.',
           );
         }
         return;
@@ -290,12 +323,15 @@ export async function runTui(dataDir: string, daemonArgs: string[] = []): Promis
       return draw();
     }
     if (m.mode === 'confirm-checks') {
-      if (item?.act.kind === 'approval' && (key === 'y' || key === 'l' || key === 'ㅇ')) {
-        const a = item.act;
-        const all = key === 'l' ? { deferred: a.checks } : { attested: a.checks };
-        void act(() => client.post(`approvals/${a.id}/decide`, { decision: 'approved', ...all }), '승인했습니다.');
-      }
       m.mode = 'normal';
+      if (key === 'y' || key === 'l' || key === 'ㅛ' || key === 'ㅣ') {
+        const t = takeTarget();
+        if (!t) return;
+        const all = key === 'l' || key === 'ㅣ' ? { deferred: t.checks } : { attested: t.checks };
+        void act(() => client.post(`approvals/${t.approvalId}/decide`, { decision: 'approved', ...all }), '승인했습니다.');
+        return;
+      }
+      m.target = null;
       return draw();
     }
     const n = m.s ? todoItems(m.s).length : 0;
@@ -334,6 +370,7 @@ export async function runTui(dataDir: string, daemonArgs: string[] = []): Promis
         if (item.act.kind === 'approval') {
           const a = item.act;
           if (a.checks.length) {
+            m.target = { approvalId: a.id, label: item.label, checks: a.checks, request: a.request };
             m.mode = 'confirm-checks';
             return draw();
           }
@@ -360,6 +397,7 @@ export async function runTui(dataDir: string, daemonArgs: string[] = []): Promis
       case 'ㄱ':
         if (!item) return;
         if (item.act.kind === 'approval') {
+          m.target = { approvalId: item.act.id, label: item.label, checks: item.act.checks, request: item.act.request };
           m.mode = 'reason';
           return draw();
         }

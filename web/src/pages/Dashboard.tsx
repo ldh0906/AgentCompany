@@ -208,6 +208,7 @@ interface RequestApprovalDetail {
   changedPaths: string[];
   mode: 'manual' | 'auto_after_approval';
   tickets: { id: string; title: string; status: string; belowRank: boolean }[];
+  notDone?: string[];
   checks: { ticketId: string; id: string; text: string }[];
   acceptance: { round: number; passed: number; total: number; left: string[] } | null;
 }
@@ -294,6 +295,12 @@ function RequestApprovalItem({ a }: { a: Approval }) {
             </span>
           ))}
         </div>
+        {(d.notDone?.length ?? 0) > 0 && (
+          <div className="banner warn" style={{ margin: '8px 0 0' }}>
+            {ko ? '끝나지 않은 업무가 있어 그 몫은 결과물에 없습니다: ' : 'Some tickets did not finish; their part is not in the result: '}
+            {d.notDone!.join(' · ')}
+          </div>
+        )}
         {d.acceptance && (
           <div className={`banner ${d.acceptance.left.length ? 'warn' : 'info'}`} style={{ margin: '8px 0 0' }}>
             {ko

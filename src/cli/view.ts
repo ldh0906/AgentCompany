@@ -154,8 +154,11 @@ export const hhmm = (iso: string) => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
-/** 프로젝트: 지금 폴더와 같은 저장소, 없으면 하나뿐인 것 */
+/**
+ * 프로젝트: 지금 폴더와 같은 저장소만. 하나뿐이라고 다른 폴더의 프로젝트로 보내지 않는다
+ * (다른 저장소에서 친 요청이 엉뚱한 프로젝트로 가고, 그 폴더의 신뢰 확인도 건너뛰게 된다).
+ */
 export function projectFor(s: Pick<CliState, 'projects'>, cwd: string): Project | null {
   const norm = (x: string) => x.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
-  return s.projects.find((p) => norm(p.originPath) === norm(cwd)) ?? (s.projects.length === 1 ? s.projects[0]! : null);
+  return s.projects.find((p) => norm(p.originPath) === norm(cwd)) ?? null;
 }

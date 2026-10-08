@@ -137,12 +137,16 @@ function sameDir(a: string, b: string): boolean {
 // ---------------- ask ----------------
 
 async function askLead(argv: string[], dataDir: string): Promise<void> {
-  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: { yes: { type: 'boolean', short: 'y' } } });
+  const { values, positionals } = parseArgs({
+    args: argv,
+    allowPositionals: true,
+    options: { yes: { type: 'boolean', short: 'y' }, path: { type: 'string' } },
+  });
   const text = positionals.join(' ').trim() || (process.stdin.isTTY ? await ask('무엇을 만들까요? ') : '');
   if (!text) fail('요청 내용을 적어 주세요: aco ask "로그인 화면 만들어줘"');
   const client = await connect(dataDir);
   const state = await client.get<CliState>('state');
-  const project = projectFor(state, process.cwd()) ?? fail('이 폴더의 프로젝트가 없습니다. 먼저 `aco up`을 실행하세요.');
+  const project = projectFor(state, values.path ?? process.cwd()) ?? fail('이 폴더의 프로젝트가 없습니다. 먼저 `aco up`을 실행하세요.');
   const req = await client.post<CeoRequest>('requests', { projectId: project.id, text });
   const lead = state.employees.find((e) => e.id === req.employeeId);
   say(`${c.dim('→')} ${lead?.name ?? '리드'}에게 보냈습니다. 업무로 나누는 중…`);
@@ -318,6 +322,8 @@ async function approve(argv: string[], dataDir: string): Promise<void> {
   if (a.kind === 'integrate_request') {
     const acc = d.acceptance as { passed: number; total: number; left: string[] } | null;
     say(c.dim(`  바뀐 파일 ${(d.changedPaths as string[]).length}개`));
+    const notDone = (d.notDone as string[] | undefined) ?? [];
+    if (notDone.length) say(c.yellow(`  ⚠ 끝나지 않은 업무(결과물에 없음): ${notDone.join(' · ')}`));
     if (acc) say(`  인수 시험 ${acc.passed}/${acc.total} 통과${acc.left.length ? c.yellow(` — 남은 것: ${acc.left.join(' / ')}`) : ''}`);
   }
   const attested: string[] = [];

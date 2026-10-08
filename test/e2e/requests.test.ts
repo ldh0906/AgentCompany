@@ -82,7 +82,13 @@ test('요청 결과물 반려 → 대표가 적은 이유로 고칠 업무 → �
   const waitFor = async (ok: () => boolean) => {
     const deadline = Date.now() + 240_000;
     while (!ok()) {
-      if (Date.now() > deadline) throw new Error('시간 초과');
+      if (Date.now() > deadline)
+        throw new Error(
+          `시간 초과: ${env.company
+            .tickets()
+            .map((x) => `${x.id} ${x.status} ${x.hold ? `${x.hold.reason}: ${x.hold.note.slice(0, 120)}` : ''}`)
+            .join(' | ')} / 인수 ${JSON.stringify(env.orch.records.request(req.id)?.acceptanceRounds?.map((r) => r.state))}`,
+        );
       await env.orch.tick();
       await new Promise((r) => setTimeout(r, 50));
     }
@@ -193,7 +199,13 @@ test(
     const pendingRequest = () => env.orch.records.approvals('pending').find((a) => a.kind === 'integrate_request');
     const deadline = Date.now() + 240_000;
     while (!pendingRequest()) {
-      if (Date.now() > deadline) throw new Error('시간 초과');
+      if (Date.now() > deadline)
+        throw new Error(
+          `시간 초과: ${env.company
+            .tickets()
+            .map((x) => `${x.id} ${x.status} ${x.hold ? `${x.hold.reason}: ${x.hold.note.slice(0, 120)}` : ''}`)
+            .join(' | ')} / 인수 ${JSON.stringify(env.orch.records.request(req.id)?.acceptanceRounds?.map((r) => r.state))}`,
+        );
       await env.orch.tick();
       await new Promise((r) => setTimeout(r, 50));
     }
@@ -208,3 +220,61 @@ test(
     assert.match(files, /docs\/agent-company-demo\/T-2\.md/);
   },
 );
+
+test('요청 승인 직후 데몬이 꺼져 반영 기록이 없으면, 다시 켰을 때 그 승인으로 이어서 반영한다', { timeout: 300_000 }, async (t) => {
+  const env = await setup(t);
+  env.company.hireEmployee({ name: '비서실장', roles: ['chief-of-staff'], cli: 'fake', model: 'diligent' });
+  const req = await env.orch.submitRequest(env.projectId, '파티 해산 기능');
+  await env.orch.idle();
+  env.orch.acceptRequest(req.id);
+  const pendingRequest = () => env.orch.records.approvals('pending').find((a) => a.kind === 'integrate_request');
+  const deadline = Date.now() + 240_000;
+  while (!pendingRequest()) {
+    if (Date.now() > deadline)
+      throw new Error(
+        `시간 초과: ${env.company
+          .tickets()
+          .map((x) => `${x.id} ${x.status} ${x.hold ? `${x.hold.reason}: ${x.hold.note.slice(0, 120)}` : ''}`)
+          .join(' | ')} / 인수 ${JSON.stringify(env.orch.records.request(req.id)?.acceptanceRounds?.map((r) => r.state))}`,
+      );
+    await env.orch.tick();
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  const a = pendingRequest()!;
+  // 승인은 저장됐지만 반영을 시작하기 전에 꺼진 상태(반영 중인 작업 없음)
+  env.orch.records.setApprovalState(a.id, 'approved', 'ceo', { mode: 'manual' });
+  while (!env.orch.records.request(req.id)!.integration) {
+    if (Date.now() > deadline) throw new Error('이어서 반영하지 않음');
+    await env.orch.tick();
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  assert.equal(env.orch.records.approval(a.id)!.state, 'consumed');
+  assert.match(await gitOut(['ls-tree', '-r', '--name-only', `ac/${req.id}`], env.origin), /T-1\.md/);
+  assert.equal(env.orch.records.approvals().filter((x) => x.kind === 'integrate_request').length, 1, '새 승인을 또 만들지 않는다');
+});
+
+test('요청 승인 카드: 취소된 업무는 "끝나지 않은 업무"로, 인수 시험은 요청에 정한 수를 기준으로 센다', { timeout: 300_000 }, async (t) => {
+  const env = await setup(t);
+  env.company.hireEmployee({ name: '비서실장', roles: ['chief-of-staff'], cli: 'fake', model: 'diligent' });
+  const req = await env.orch.submitRequest(env.projectId, '파티 해산 기능');
+  await env.orch.idle();
+  const [, doc] = env.orch.acceptRequest(req.id);
+  env.orch.cancel(doc!.id, '이번에는 문서 생략');
+  const pendingRequest = () => env.orch.records.approvals('pending').find((a) => a.kind === 'integrate_request');
+  const deadline = Date.now() + 240_000;
+  while (!pendingRequest()) {
+    if (Date.now() > deadline)
+      throw new Error(
+        `시간 초과: ${env.company
+          .tickets()
+          .map((x) => `${x.id} ${x.status} ${x.hold ? `${x.hold.reason}: ${x.hold.note.slice(0, 120)}` : ''}`)
+          .join(' | ')} / 인수 ${JSON.stringify(env.orch.records.request(req.id)?.acceptanceRounds?.map((r) => r.state))}`,
+      );
+    await env.orch.tick();
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  const d = pendingRequest()!.detail as { notDone: string[]; acceptance: { total: number } | null };
+  assert.equal(d.notDone.length, 1);
+  assert.match(d.notDone[0]!, new RegExp(`${doc!.id} .*cancelled`));
+  if (d.acceptance) assert.equal(d.acceptance.total, env.orch.records.request(req.id)!.acceptance!.length);
+});

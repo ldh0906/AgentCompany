@@ -2045,6 +2045,8 @@ export class Orchestrator {
 
   /** 이 업무를 나눌 수 있는가: 나눈 조각이 아니고, 아직 한 번도 나누지 않은 업무만. */
   canSplit(t: Ticket): boolean {
+    // 공유 계약 업무는 나누지 않는다: 고정할 파일은 계약 업무 자신의 제출물로 정해진다(조각이 만든 파일이 빠지면 고정되지 않는다).
+    if (this.records.requestOfTicket(t)?.contractTicketId === t.id) return false;
     return !this.company.store.getSetting(`split_parent:${t.id}`) && !this.company.store.getSetting(`split_note:${t.id}`);
   }
 
@@ -3108,6 +3110,10 @@ ${failure.detail.slice(0, 400)}`,
     };
   }
 
+  private async mirrorRef(paths: ReturnType<typeof projectPaths>, ref: string): Promise<string | null> {
+    return (await git(['rev-parse', '--verify', '-q', ref], paths.mirror, { allowFail: true })).stdout.trim() || null;
+  }
+
   // ======================= 요청 단위 결과물 =======================
   // 요청 하나 = 결과물 하나: 업무들은 요청 브랜치(미러)에 쌓이고, 모두 끝나면(인수 시험까지) 대표가 요청 전체를 한 번 승인한다.
 
@@ -3126,6 +3132,28 @@ ${failure.detail.slice(0, 400)}`,
 
   private requestSubject(requestId: string, h: { baseSha: string; headSha: string; changedPaths: string[] }): string {
     return [requestId, h.baseSha, h.headSha, sha256(h.changedPaths.join('\n'))].join('|');
+  }
+
+  /**
+   * 요청 승인 카드의 인수 시험 요약: 요청에 정한 시험 수를 기준으로 센다. 결과가 빠진 시험과 실패한 실행도 남은 것으로 보인다
+   * (빈 결과가 "0/0 통과"처럼 보이지 않게).
+   */
+  private acceptanceSummary(
+    req: CeoRequest,
+    last: NonNullable<CeoRequest['acceptanceRounds']>[number],
+  ): { round: number; passed: number; total: number; left: string[] } {
+    const defined = (req.acceptance ?? []).map((a) => a.id);
+    const ids = defined.length ? defined : last.results.map((r) => r.id);
+    const byId = new Map(last.results.map((r) => [r.id, r] as const));
+    const left = [
+      ...(last.state === 'failed' ? [tr('인수 시험 실행이 실패했습니다(결과 없음).', 'The acceptance run failed (no result).')] : []),
+      ...ids.flatMap((id) => {
+        const r = byId.get(id);
+        if (!r) return last.state === 'failed' ? [] : [tr(`${id} ❓ 결과 없음`, `${id} ❓ no result`)];
+        return r.mark === '✅' ? [] : [`${id} ${r.mark} ${r.why}`.slice(0, 300)];
+      }),
+    ];
+    return { round: last.round, passed: ids.filter((id) => byId.get(id)?.mark === '✅').length, total: ids.length, left };
   }
 
   /** 요청 승인 카드로 미뤄 둔 대표 직접 확인(업무별) */
@@ -3161,8 +3189,14 @@ ${failure.detail.slice(0, 400)}`,
       const approvedOf = (id: string) =>
         this.records
           .approvals('approved')
-          .some((a) => a.kind === 'integrate_request' && (a.detail as { requestId?: string }).requestId === id);
-      if (approvedOf(req.id)) continue;
+          .find((a) => a.kind === 'integrate_request' && (a.detail as { requestId?: string }).requestId === id);
+      // 승인되어 반영 중이면 기다린다. 승인만 남고 반영 중인 작업이 없으면(반영 도중 데몬이 재시작됨) 이어서 반영한다.
+      const approved = approvedOf(req.id);
+      if (approved) {
+        const d = approved.detail as { mode: Project['integrationMode']; headSha: string };
+        this.startRequestIntegration(req.id, approved.id, d.mode, d.headSha);
+        continue;
+      }
       const paths = projectPaths(this.opts.dataDir, project.id);
       const head = await this.withProjectLock(project.id, () => this.requestHead(project, paths, req.branch!));
       // 잠금을 기다리는 사이 승인·반영이 끝났을 수 있다: 다시 읽는다(낡은 상태로 승인 요청을 또 만들지 않게).
@@ -3198,15 +3232,10 @@ ${failure.detail.slice(0, 400)}`,
           ...head,
           mode: project.integrationMode,
           tickets: tickets.map((t) => ({ id: t.id, title: t.title, status: t.status, belowRank: Boolean(t.reviewBelowRank) })),
+          // 완료되지 않은 업무(취소·실패): 그 몫은 결과물에 없다. 카드에 크게 알린다.
+          notDone: tickets.filter((t) => t.status !== 'done').map((t) => `${t.id} ${t.title} (${t.status})`),
           checks,
-          acceptance: last
-            ? {
-                round: last.round,
-                passed: last.results.filter((r) => r.mark === '✅').length,
-                total: last.results.length,
-                left: last.results.filter((r) => r.mark !== '✅').map((r) => `${r.id} ${r.mark} ${r.why}`.slice(0, 300)),
-              }
-            : null,
+          acceptance: last ? this.acceptanceSummary(req, last) : null,
         },
         requestedBy: 'orchestrator',
       });
@@ -3339,8 +3368,20 @@ ${failure.detail.slice(0, 400)}`,
       this.company.store.appendEvent('ceo', 'request.approved', req.id, { approvalId: a.id, mode, headSha: head.headSha });
     });
     this.changed('approval', a.id);
-    this.track(`request-integrate:${req.id}`, this.integrateRequest(req.id, a.id, mode, head.headSha));
+    this.startRequestIntegration(req.id, a.id, mode, head.headSha);
     return { ok: true };
+  }
+
+  /** 반영 중인 요청(이 데몬에서). 다시 켜지면 비어 있어 승인된 요청을 이어서 반영한다. */
+  private readonly requestIntegrating = new Set<string>();
+
+  private startRequestIntegration(requestId: string, approvalId: string, mode: Project['integrationMode'], head: string): void {
+    if (this.requestIntegrating.has(requestId)) return;
+    this.requestIntegrating.add(requestId);
+    this.track(
+      `request-integrate:${requestId}`,
+      this.integrateRequest(requestId, approvalId, mode, head).finally(() => this.requestIntegrating.delete(requestId)),
+    );
   }
 
   /** 승인된 요청 결과물을 원본에 넣는다: 따로 보관(ac/<요청 ID> 브랜치) 또는 기준 브랜치에 병합(합친 결과 재검증). */
@@ -3394,7 +3435,10 @@ ${failure.detail.slice(0, 400)}`,
         );
       } catch (error) {
         // 반영 실패: 승인을 무효로 하고 다음 tick에 새 승인 요청을 만든다(대표가 다시 시도할 수 있게).
+        // 실패 전에 원본을 맞추며 미러 기준 브랜치가 움직였을 수 있다: 기록해 두어야 변조로 보이지 않는다.
+        const baseNow = await this.mirrorRef(paths, baseRef);
         this.company.store.transact(() => {
+          this.records.recordRefMove(project.id, 'mirror', baseRef, mirrorBaseBefore, baseNow);
           this.records.setApprovalState(approvalId, 'expired', 'orchestrator', { reason: String((error as Error).message ?? error) });
           this.company.store.setSetting(`mergeverify_base:${req.id}`, '');
         });
@@ -3530,7 +3574,10 @@ ${failure.detail.slice(0, 400)}`,
         );
       await this.autoVerifyCommands(project.id).catch(() => {});
     } catch (error) {
+      // 실패 전에 원본을 맞추며 미러 기준 브랜치가 움직였을 수 있다: 기록해 두어야 다른 업무에 변조로 보이지 않는다.
+      const baseNow = await this.mirrorRef(paths, `refs/heads/${project.baseBranch}`);
       this.company.store.transact(() => {
+        this.records.recordRefMove(project.id, 'mirror', `refs/heads/${project.baseBranch}`, mirrorBaseBefore, baseNow);
         this.company.store.setSetting(`mergeverify_base:${ticketId}`, '');
         this.apply(ticketId, { type: 'integration_failed', reason: String((error as Error).message ?? error) });
       });
