@@ -827,7 +827,9 @@ export class Orchestrator {
     const go = async () => {
       const nonce = randomBytes(6).toString('hex');
       const feedback = this.lastFeedback(next);
+      const resumeFrom = this.resumeSource(next, employee, wt.path);
       const prompt = buildWorkPrompt({
+        resumedRound: resumeFrom?.round ?? null,
         employee,
         owner: next.ownerId ? this.company.employees().find((e) => e.id === next.ownerId) : null,
         project,
@@ -864,6 +866,7 @@ export class Orchestrator {
         originRefsBefore,
         moveSeqBefore,
         web: next.type === 'research',
+        resumeFrom,
       });
     };
     // 작업공간에 의존성을 미리 깐다(실측: 직원이 "vitest 미설치로 테스트 실행 불가"). 설치는 몇 분 걸릴 수 있어
@@ -877,6 +880,21 @@ export class Orchestrator {
         this.company.store.appendEvent('orchestrator', 'ticket.setup_failed', t.id, { output: inst.output.slice(-500) });
       await go();
     });
+  }
+
+  /**
+   * 수정 회차: 같은 직원이 같은 업무 폴더에서 지난 회차 대화를 이어간다(무엇을 시도했고 왜 반려됐는지 기억한다).
+   * 담당·CLI·폴더가 바뀌었거나, 지난번 이어가기가 보고 없이 끝났으면(세션 유실 등) 새로 시작한다.
+   */
+  private resumeSource(t: Ticket, employee: Employee, cwd: string): RunRecord | null {
+    if (!adapterFor(employee.cli).capabilities.resume) return null;
+    const last = this.records
+      .runsForTicket(t.id)
+      .filter((r) => r.kind === 'work')
+      .at(-1);
+    if (!last?.cliSessionId || last.employeeId !== employee.id || last.cli !== employee.cli || last.worktreePath !== cwd) return null;
+    if (last.resumedFrom && !last.report) return null;
+    return last;
   }
 
   private lastFeedback(t: Ticket): string | null {
@@ -947,6 +965,8 @@ export class Orchestrator {
     claimIds?: string[];
     /** 웹 검색·읽기 허용(조사 업무와 그 검수). 실측(2026-10-01): 웹 도구가 늘 막혀 조사 업무가 출처를 찾을 수 없었다. */
     web?: boolean;
+    /** 이 실행의 대화를 이어간다(같은 직원·같은 폴더의 지난 회차). */
+    resumeFrom?: RunRecord | null;
   }): Promise<string> {
     const adapter = adapterFor(p.employee.cli);
     const runId = newId('R');
@@ -954,6 +974,7 @@ export class Orchestrator {
     const approvalDir = adapter.capabilities.permissionRelay ? path.join(runDir, 'approvals') : null;
     const inv = adapter.buildInvocation({
       prompt: p.prompt,
+      ...(p.resumeFrom?.cliSessionId ? { resumeSessionId: p.resumeFrom.cliSessionId } : {}),
       cwd: p.cwd,
       model: p.employee.model,
       effort: p.employee.effort ?? null,
@@ -1003,6 +1024,7 @@ export class Orchestrator {
       postProcessed: false,
       phase: p.phase ?? null,
       claimIds: p.claimIds ?? [],
+      resumedFrom: p.resumeFrom?.id ?? null,
       report: null,
       reportError: null,
       finalText: null,

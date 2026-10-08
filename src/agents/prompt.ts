@@ -86,6 +86,8 @@ export interface WorkPromptInput {
   delegated?: boolean;
   /** 이 업무가 이어받는 앞 업무에서 검수자가 짚은 작은 실수(업무 ID: 내용) */
   knownIssues?: string[];
+  /** 이 실행이 이어가는 지난 회차(대화 이어가기). 없으면 새 대화. */
+  resumedRound?: number | null;
 }
 
 /**
@@ -139,11 +141,16 @@ export function buildWorkPrompt(i: WorkPromptInput): string {
 You are "${i.employee.name}", the ${roles} at an AI company run by a human CEO.
 You are working on ticket ${i.ticket.id} (round ${i.ticket.round}) in a dedicated git worktree (your current directory).
 ${
-  i.owner && i.owner.id !== i.employee.id
-    ? `This ticket was assigned to you by "${i.owner.name}" (${i.owner.rank ?? 'senior'}), who owns the result and will read your report.
+  i.resumedRound
+    ? `This continues your conversation from round ${i.resumedRound}: use what you learned there, but follow this message where it differs. Earlier nonces are void; report with the nonce below.
 `
     : ''
-}
+}${
+    i.owner && i.owner.id !== i.employee.id
+      ? `This ticket was assigned to you by "${i.owner.name}" (${i.owner.rank ?? 'senior'}), who owns the result and will read your report.
+`
+      : ''
+  }
 ## Hard rules (enforced by the system after you finish)
 - Only modify files matching these globs: ${i.ticket.writeScope.map((g) => `\`${g}\``).join(', ') || '(none: read-only task)'}.
   Changes outside this scope are detected automatically and your whole submission is quarantined.

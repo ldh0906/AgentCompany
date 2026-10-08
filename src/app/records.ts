@@ -43,6 +43,8 @@ export interface RunRecord extends Run {
   /** 검토형 업무의 단계와 이번 실행이 다루는 주장. */
   phase?: DeliberationPhase | null;
   claimIds?: string[];
+  /** 이전 회차 대화를 이어간 실행이면 그 실행 ID. 이어가기가 실패하면 다음번엔 새로 시작한다. */
+  resumedFrom?: string | null;
   report: AgentReport | null;
   reportError: string | null;
   finalText: string | null;

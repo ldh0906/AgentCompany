@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { gitOut, git } from '../../src/workspace/git.ts';
 import { driveUntil, newImplTicket, setup, statusIs } from './helpers.ts';
 
@@ -47,6 +49,12 @@ test('게으른 직원: 변경 없이 "완료" 주장 → 시스템 검증에서
   assert.equal(waiting.round, 2);
   const rejected = env.store.events(ticket.id).find((e) => e.type === 'ticket.changes_requested');
   assert.match(String((rejected?.payload as { reason: string }).reason), /변경된 파일이 없습니다/);
+  // 2회차는 같은 직원이 1회차 대화를 이어간다(맥락 유지)
+  const [r1, r2] = env.orch.records.runsForTicket(ticket.id).filter((r) => r.kind === 'work');
+  assert.ok(r1?.cliSessionId);
+  assert.equal(r2?.resumedFrom, r1!.id);
+  assert.equal(r2?.cliSessionId, r1!.cliSessionId);
+  assert.match(await readFile(path.join(r2!.runDir, 'prompt.md'), 'utf8'), /continues your conversation from round 1/);
 });
 
 test('범위 밖 수정(보호 경로 README.md) → 결과 격리, 대표 권한 승인 보류', { timeout: 120_000 }, async (t) => {
