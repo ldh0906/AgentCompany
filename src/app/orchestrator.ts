@@ -60,6 +60,7 @@ import { readAllJsonl } from '../runner/jsonl.ts';
 import { activityFrom } from './activity.ts';
 import { PROGRESS_MS, progressLine } from './progress.ts';
 import { locateExecutable } from '../runner/locate.ts';
+import { isolationEnv } from '../runner/ports.ts';
 import {
   abandonAndTerminate,
   isSameProcessAlive,
@@ -1154,7 +1155,8 @@ export class Orchestrator {
         file: located.launch.file,
         args: [...located.launch.argsPrefix, ...inv.args],
         cwd: p.cwd,
-        env: inv.env,
+        // 실행마다 비어 있는 포트·고유 DB 이름(직원이 띄우는 서버·테스트가 다른 실행과 부딪히지 않게)
+        env: { ...inv.env, ...(await isolationEnv(runId)) },
         stdinText: inv.stdinText,
         runDir,
         timeoutMs: p.ticket.budget.runTimeoutMs,
@@ -2710,7 +2712,7 @@ ${failure.detail.slice(0, 400)}`,
       file: located.launch.file,
       args: [...located.launch.argsPrefix, ...rest],
       cwd,
-      env: { ...process.env, CI: '1' },
+      env: { ...process.env, CI: '1', ...(await isolationEnv(path.basename(runDir))) },
       stdinText: null,
       runDir,
       timeoutMs: vc.timeoutMs ?? 15 * 60_000,

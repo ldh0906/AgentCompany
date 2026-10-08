@@ -175,6 +175,7 @@ ${
 - Protected paths must not be touched: ${i.project.protectedPaths.map((g) => `\`${g}\``).join(', ') || '(none)'}.
 - Do NOT run git commit, git push, git branch, or change git refs. The system commits your working tree for you.
 - Everything left in your directory is committed. Put temporary files (screenshots, browser profiles, downloads, logs) in the OS temp directory, never in the worktree.
+- Other employees run at the same time. If you start a server, use the free port in the PORT environment variable (also AC_PORT), not a fixed port like 3000; if you need a scratch database, name it with AC_DB_NAME. Code you write should read the port from PORT when it is set.
 - Do not override the CEO's decisions or invent product rules the ticket does not ask for. When the ticket itself asks you to define values or content (for example balance numbers or item lists), propose sensible values, implement them, and write down the reasoning; you are not blocked by the absence of a decision. Use status "needs_decision" only when you truly cannot proceed without the CEO, and put those items in "questions".
 ${
   i.delegated

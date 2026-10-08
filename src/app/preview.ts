@@ -10,6 +10,7 @@ import { createServer, type Server } from 'node:http';
 import path from 'node:path';
 import { tr } from '../core/i18n.ts';
 import { locateExecutable } from '../runner/locate.ts';
+import { isolationEnv } from '../runner/ports.ts';
 import { dependencySetup } from './verify-setup.ts';
 
 export interface PreviewInfo {
@@ -157,7 +158,8 @@ export class PreviewManager {
     if (!located?.launch) return fail(tr(`${how.argv[0]}을(를) 찾지 못했습니다.`, `${how.argv[0]} not found.`));
     const child = spawn(located.launch.file, [...located.launch.argsPrefix, ...how.argv.slice(1)], {
       cwd: p.dir,
-      env: { ...process.env, BROWSER: 'none', FORCE_COLOR: '0', NO_COLOR: '1' },
+      // 미리보기끼리·검사와 포트가 부딪히지 않게 비어 있는 포트를 준다(PORT를 읽는 개발 서버. vite는 스스로 다음 포트로 간다)
+      env: { ...process.env, BROWSER: 'none', FORCE_COLOR: '0', NO_COLOR: '1', ...(await isolationEnv(`preview_${key}`)) },
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
