@@ -144,9 +144,19 @@ export function describe(s: CliState, e: DomainEvent): string | null {
   }
 }
 
-export function feed(s: CliState, limit: number): { at: string; text: string }[] {
+/**
+ * 진행 기록. projectId를 주면 그 프로젝트의 업무·요청 기록과 회사 전체 기록(직원 합류 등)만 보인다
+ * (다른 저장소의 업무가 섞여 "엉뚱한 프로젝트에 들어간" 것처럼 보이지 않게).
+ */
+export function feed(s: CliState, limit: number, projectId?: string | null): { at: string; text: string }[] {
+  const mine = (e: DomainEvent) => {
+    if (projectId === undefined) return true;
+    const owner = projectOfItem(s, { ticketId: e.entityId });
+    return owner === null ? !/^(T|Q)-/.test(e.entityId) : owner === projectId;
+  };
   return [...s.events]
     .sort((a, b) => a.seq - b.seq)
+    .filter(mine)
     .map((e) => ({ at: e.ts, text: describe(s, e) }))
     .filter((x): x is { at: string; text: string } => Boolean(x.text))
     .slice(-limit);

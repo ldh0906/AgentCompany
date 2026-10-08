@@ -154,7 +154,10 @@ export function render(m: Model, W: number, H: number): string[] {
     left.push(`${r.busy ? c.green('●') : c.gray('○')} ${r.name} ${c.dim(r.cli)}`);
     left.push(`  ${r.busy ? c.cyan(r.doing) : c.dim(r.doing)}`);
   }
-  const open = s ? s.tickets.filter((t) => !['done', 'cancelled', 'failed'].includes(t.status)) : [];
+  // 업무는 지금 폴더의 프로젝트 것만. 다른 프로젝트에서 도는 일은 개수만 알린다(QA 뒤 사용자 보고: "pubg로 들어가졌다")
+  const unfinished = s ? s.tickets.filter((t) => !['done', 'cancelled', 'failed'].includes(t.status)) : [];
+  const open = unfinished.filter((t) => t.projectId === (m.projectId ?? null));
+  const elsewhere = unfinished.length - open.length;
   if (open.length) {
     left.push('', c.bold('업무'));
     for (const t of open) {
@@ -163,6 +166,7 @@ export function render(m: Model, W: number, H: number): string[] {
       left.push(`${t.hold && !waiting ? c.yellow('!') : ' '}${t.id} ${c.dim(st)} ${t.title}`);
     }
   }
+  if (elsewhere) left.push('', c.dim(`다른 프로젝트에서 ${elsewhere}개 진행 중`));
 
   // 오른쪽: 진행(또는 고른 항목 자세히)
   const right2: string[] = [];
@@ -174,7 +178,7 @@ export function render(m: Model, W: number, H: number): string[] {
   } else {
     right2.push(c.bold('진행'));
     if (s && !m.project) right2.push(c.yellow('이 폴더는 아직 프로젝트가 아닙니다. q로 나가서 `aco up`을 실행하세요.'));
-    const f = s ? feed(s, bodyH - 1) : [];
+    const f = s ? feed(s, bodyH - 1, m.projectId ?? null) : [];
     if (s && !f.length && m.project) right2.push(c.dim('아직 기록이 없습니다. 아래에서 리드에게 만들고 싶은 것을 말해 보세요.'));
     for (const x of f) right2.push(`${c.gray(hhmm(x.at))} ${x.text}`);
   }

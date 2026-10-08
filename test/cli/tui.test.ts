@@ -161,3 +161,26 @@ test('소속을 모르는 대표 할 일은 프로젝트가 아닌 폴더에서�
   assert.deepEqual(todoItems(orphan, null), []);
   assert.deepEqual(todoItems(orphan, 'P-1'), []);
 });
+
+test('업무 목록과 진행 기록도 지금 폴더의 프로젝트 것만: 다른 프로젝트 일은 개수만 보인다', () => {
+  const two = {
+    ...state,
+    projects: [...state.projects, { id: 'P-2', name: 'PUBG', originPath: 'C:/work/pubg' }],
+    tickets: [
+      ...state.tickets,
+      { id: 'T-28', projectId: 'P-2', title: '층별 문서 반영', status: 'assigned', hold: null, requirements: [] },
+    ],
+    events: [
+      ...state.events,
+      { seq: 2, ts: now, actor: 'orchestrator', type: 'ticket.in_progress', entityId: 'T-28', payload: {} },
+      { seq: 3, ts: now, actor: 'orchestrator', type: 'ticket.in_progress', entityId: 'T-1', payload: {} },
+    ],
+  } as unknown as CliState;
+  const text = render(model({ s: two }), 100, 30).join('\n');
+  assert.doesNotMatch(text, /T-28/);
+  assert.match(text, /다른 프로젝트에서 1개 진행 중/);
+  assert.match(text, /T-1 작업 시작/, '이 프로젝트의 기록은 보인다');
+  // 프로젝트가 아닌 폴더: 어떤 프로젝트의 업무도 목록에 없다
+  const none = render(model({ s: two, project: null, projectId: null }), 100, 30).join('\n');
+  assert.doesNotMatch(none, /T-28|T-1 작업 시작/);
+});
