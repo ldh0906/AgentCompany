@@ -31,14 +31,7 @@ import {
 } from '../agents/report.ts';
 import { Chat, ticketChannelId, type Channel, type ChatMessage } from './chat.ts';
 import { writeDecision } from '../approvals/file-queue.ts';
-import {
-  companyToolsDir,
-  openToolRequests,
-  writeToolPending,
-  writeToolResponse,
-  type ToolRequest,
-  type ToolResponse,
-} from '../approvals/company-tools.ts';
+import { companyToolsDir, openToolRequests, writeToolResponse, type ToolRequest, type ToolResponse } from '../approvals/company-tools.ts';
 import type { Actor } from '../core/ticket-machine.ts';
 import type {
   Claim,
@@ -113,7 +106,7 @@ import { Playtests } from './playtests.ts';
 import { ScreenQa } from './screen-qa.ts';
 import { Delegation } from './delegation.ts';
 import { Debates } from './debate.ts';
-import { Acceptance } from './acceptance.ts';
+import { Acceptance, acceptanceSummary } from './acceptance.ts';
 import { deliverableKindOf, isRunnablePath, projectDoc, projectDocList } from './deliverables.ts';
 import { checkLinks, extractLinks, linkSummary, type LinkResult } from './link-check.ts';
 
@@ -3134,28 +3127,6 @@ ${failure.detail.slice(0, 400)}`,
     return [requestId, h.baseSha, h.headSha, sha256(h.changedPaths.join('\n'))].join('|');
   }
 
-  /**
-   * 요청 승인 카드의 인수 시험 요약: 요청에 정한 시험 수를 기준으로 센다. 결과가 빠진 시험과 실패한 실행도 남은 것으로 보인다
-   * (빈 결과가 "0/0 통과"처럼 보이지 않게).
-   */
-  private acceptanceSummary(
-    req: CeoRequest,
-    last: NonNullable<CeoRequest['acceptanceRounds']>[number],
-  ): { round: number; passed: number; total: number; left: string[] } {
-    const defined = (req.acceptance ?? []).map((a) => a.id);
-    const ids = defined.length ? defined : last.results.map((r) => r.id);
-    const byId = new Map(last.results.map((r) => [r.id, r] as const));
-    const left = [
-      ...(last.state === 'failed' ? [tr('인수 시험 실행이 실패했습니다(결과 없음).', 'The acceptance run failed (no result).')] : []),
-      ...ids.flatMap((id) => {
-        const r = byId.get(id);
-        if (!r) return last.state === 'failed' ? [] : [tr(`${id} ❓ 결과 없음`, `${id} ❓ no result`)];
-        return r.mark === '✅' ? [] : [`${id} ${r.mark} ${r.why}`.slice(0, 300)];
-      }),
-    ];
-    return { round: last.round, passed: ids.filter((id) => byId.get(id)?.mark === '✅').length, total: ids.length, left };
-  }
-
   /** 요청 승인 카드로 미뤄 둔 대표 직접 확인(업무별) */
   private requestChecks(ticketId: string): { id: string; text: string; at: string }[] {
     return JSON.parse(this.company.store.getSetting(`request_checks:${ticketId}`) || '[]') as { id: string; text: string; at: string }[];
@@ -3217,6 +3188,8 @@ ${failure.detail.slice(0, 400)}`,
       const checks = tickets.flatMap((t) => this.requestChecks(t.id).map((x) => ({ ticketId: t.id, id: x.id, text: x.text })));
       const last = (req.acceptanceRounds ?? []).at(-1);
       const done = tickets.filter((t) => t.status === 'done').length;
+      const notDone = tickets.filter((t) => t.status !== 'done').map((t) => `${t.id} ${t.title} (${t.status})`);
+      const acceptance = last ? acceptanceSummary(req, last) : null;
       const a = this.records.createApproval({
         kind: 'integrate_request',
         ticketId: null,
@@ -3233,16 +3206,17 @@ ${failure.detail.slice(0, 400)}`,
           mode: project.integrationMode,
           tickets: tickets.map((t) => ({ id: t.id, title: t.title, status: t.status, belowRank: Boolean(t.reviewBelowRank) })),
           // 완료되지 않은 업무(취소·실패): 그 몫은 결과물에 없다. 카드에 크게 알린다.
-          notDone: tickets.filter((t) => t.status !== 'done').map((t) => `${t.id} ${t.title} (${t.status})`),
+          notDone,
           checks,
-          acceptance: last ? this.acceptanceSummary(req, last) : null,
+          acceptance,
         },
         requestedBy: 'orchestrator',
       });
       this.company.store.appendEvent('orchestrator', 'request.awaiting_approval', req.id, { approvalId: a.id, headSha: head.headSha });
       this.changed('approval', a.id);
       // 대표가 켠 "검수 통과하면 자동 반영": 대표 직접 확인·하위 직급 검수가 없을 때만
-      if (project.autoApprove && !checks.length && !tickets.some((t) => t.reviewBelowRank))
+      // 끝나지 않은 업무나 남은 인수 시험이 있으면 대표가 직접 본다(경고를 아무도 보지 않은 채 반영되지 않게).
+      if (project.autoApprove && !checks.length && !tickets.some((t) => t.reviewBelowRank) && !notDone.length && !acceptance?.left.length)
         await this.decideRequest(a.id, 'approved', { auto: true }).catch(() => {});
     }
   }
@@ -3730,19 +3704,27 @@ ${failure.detail.slice(0, 400)}`,
     for (const run of this.records.runsByStatus('running')) {
       if (run.kind !== 'work' && run.kind !== 'review') continue;
       const dir = companyToolsDir(run.runDir);
-      for (const { req, pending } of await openToolRequests(dir)) {
+      for (const { req } of await openToolRequests(dir)) {
         try {
-          if (pending) {
-            const answer = this.askAnswer(pending as AskPending);
-            if (answer) await this.answerTool(run, dir, req, answer);
+          // nonce부터: 이 실행의 요청이 아니면 아무것도 하지 않는다.
+          if (req.nonce !== run.nonce) {
+            await this.answerTool(run, dir, req, { ok: false, text: 'This request does not belong to this run (wrong nonce).' });
             continue;
           }
-          const out =
-            req.nonce === run.nonce
-              ? await this.companyTool(run, req)
-              : { ok: false, text: 'This request does not belong to this run (wrong nonce).' };
+          // 답을 기다리는 중인 요청: 기록은 데몬 DB에만 있다(실행 폴더의 파일은 직원이 쓸 수 있어 믿지 않는다).
+          const waitKey = `tool_pending:${run.id}:${req.id}`;
+          const waiting = this.company.store.getSetting(waitKey);
+          if (waiting) {
+            const answer = this.askAnswer(JSON.parse(waiting) as AskPending);
+            if (answer) {
+              this.company.store.setSetting(waitKey, '');
+              await this.answerTool(run, dir, req, answer);
+            }
+            continue;
+          }
+          const out = await this.companyTool(run, req);
           if ('pending' in out) {
-            await writeToolPending(dir, req.id, out.pending);
+            this.company.store.setSetting(waitKey, JSON.stringify(out.pending));
             this.logTool(run, req, { ok: true, text: `waiting for ${out.pending.name}` });
           } else await this.answerTool(run, dir, req, out);
         } catch (error) {

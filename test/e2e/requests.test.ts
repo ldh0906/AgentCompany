@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { gitOut, git } from '../../src/workspace/git.ts';
+import { Orchestrator } from '../../src/app/orchestrator.ts';
 import { driveUntil, setup, statusIs } from './helpers.ts';
 
 test(
@@ -241,16 +242,25 @@ test('요청 승인 직후 데몬이 꺼져 반영 기록이 없으면, 다시 �
     await new Promise((r) => setTimeout(r, 50));
   }
   const a = pendingRequest()!;
-  // 승인은 저장됐지만 반영을 시작하기 전에 꺼진 상태(반영 중인 작업 없음)
+  // 승인은 저장됐지만 반영을 시작하기 전에 꺼진 상태(반영 중인 작업 없음): 데몬을 멈추고 같은 DB로 새로 켠다
   env.orch.records.setApprovalState(a.id, 'approved', 'ceo', { mode: 'manual' });
-  while (!env.orch.records.request(req.id)!.integration) {
+  await env.orch.stop();
+  await env.orch.idle();
+  const again = new Orchestrator(env.company, { dataDir: env.dataDir, language: 'ko', screenCheck: false });
+  t.after(async () => {
+    await again.stop();
+    await again.idle();
+  });
+  await again.recover();
+  while (!again.records.request(req.id)!.integration) {
     if (Date.now() > deadline) throw new Error('이어서 반영하지 않음');
-    await env.orch.tick();
+    await again.tick();
     await new Promise((r) => setTimeout(r, 50));
   }
-  assert.equal(env.orch.records.approval(a.id)!.state, 'consumed');
+  await again.idle();
+  assert.equal(again.records.approval(a.id)!.state, 'consumed');
   assert.match(await gitOut(['ls-tree', '-r', '--name-only', `ac/${req.id}`], env.origin), /T-1\.md/);
-  assert.equal(env.orch.records.approvals().filter((x) => x.kind === 'integrate_request').length, 1, '새 승인을 또 만들지 않는다');
+  assert.equal(again.records.approvals().filter((x) => x.kind === 'integrate_request').length, 1, '새 승인을 또 만들지 않는다');
 });
 
 test('요청 승인 카드: 취소된 업무는 "끝나지 않은 업무"로, 인수 시험은 요청에 정한 수를 기준으로 센다', { timeout: 300_000 }, async (t) => {
@@ -258,6 +268,8 @@ test('요청 승인 카드: 취소된 업무는 "끝나지 않은 업무"로, �
   env.company.hireEmployee({ name: '비서실장', roles: ['chief-of-staff'], cli: 'fake', model: 'diligent' });
   const req = await env.orch.submitRequest(env.projectId, '파티 해산 기능');
   await env.orch.idle();
+  // 검수 통과하면 자동 반영인 프로젝트라도, 끝나지 않은 업무가 있으면 대표가 직접 본다
+  env.company.updateProject(env.projectId, { autoApprove: true });
   const [, doc] = env.orch.acceptRequest(req.id);
   env.orch.cancel(doc!.id, '이번에는 문서 생략');
   const pendingRequest = () => env.orch.records.approvals('pending').find((a) => a.kind === 'integrate_request');
@@ -277,4 +289,8 @@ test('요청 승인 카드: 취소된 업무는 "끝나지 않은 업무"로, �
   assert.equal(d.notDone.length, 1);
   assert.match(d.notDone[0]!, new RegExp(`${doc!.id} .*cancelled`));
   if (d.acceptance) assert.equal(d.acceptance.total, env.orch.records.request(req.id)!.acceptance!.length);
+  for (let i = 0; i < 5; i++) await env.orch.tick();
+  await env.orch.idle();
+  assert.ok(pendingRequest(), '자동으로 승인하지 않고 기다린다');
+  assert.equal(env.orch.records.request(req.id)!.integration ?? null, null);
 });

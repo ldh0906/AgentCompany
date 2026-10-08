@@ -16,6 +16,28 @@ import type { AcceptanceRound, CeoRequest, RunRecord } from './records.ts';
 
 export const MAX_FIX_ROUNDS = 2;
 
+/**
+ * 요청 승인 카드의 인수 시험 요약: 요청에 정한 시험 수를 기준으로 센다. 결과가 빠진 시험과 실패한 실행도 남은 것으로 보인다
+ * (빈 결과가 "0/0 통과"처럼 보이지 않게).
+ */
+export function acceptanceSummary(
+  req: Pick<CeoRequest, 'acceptance'>,
+  last: AcceptanceRound,
+): { round: number; passed: number; total: number; left: string[] } {
+  const defined = (req.acceptance ?? []).map((a) => a.id);
+  const ids = defined.length ? defined : last.results.map((r) => r.id);
+  const byId = new Map(last.results.map((r) => [r.id, r] as const));
+  const left = [
+    ...(last.state === 'failed' ? [tr('인수 시험 실행이 실패했습니다(결과 없음).', 'The acceptance run failed (no result).')] : []),
+    ...ids.flatMap((id) => {
+      const r = byId.get(id);
+      if (!r) return last.state === 'failed' ? [] : [tr(`${id} ❓ 결과 없음`, `${id} ❓ no result`)];
+      return r.mark === '✅' ? [] : [`${id} ${r.mark} ${r.why}`.slice(0, 300)];
+    }),
+  ];
+  return { round: last.round, passed: ids.filter((id) => byId.get(id)?.mark === '✅').length, total: ids.length, left };
+}
+
 export interface AcceptanceHost extends OrchHost {
   nameOf(id: string): string;
   /** 반영된 결과의 읽기 전용 사본(요청 브랜치가 있는 요청이면 요청 결과물) */

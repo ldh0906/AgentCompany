@@ -1,7 +1,8 @@
 // 회사 도구: 직원이 실행 중에 MCP 도구로 회사 시스템에 말을 건다(동료 질문, 후속 업무 제안, 업무판 읽기, 범위 요청).
 // LLM은 제안하고 코드가 결정한다: 도구는 티켓을 만들거나 배정·병합하지 않는다. 데몬이 요청을 받아 기존 흐름으로 처리한다.
 // MCP 서버(mcp-company.ts)는 DB에 접근하지 않는다. 승인 큐처럼 실행 폴더의 파일로 데몬과 주고받는다:
-//   <id>.request.json(서버) → <id>.pending.json(데몬, 답을 기다리는 중) → <id>.response.json(데몬)
+//   <id>.request.json(서버) → <id>.response.json(데몬). 답을 기다리는 중이라는 상태는 데몬 DB에만 둔다
+//   (실행 폴더는 직원이 쓸 수 있어 그 안의 파일은 믿지 않는다: QA 2차, 위조한 대기 기록으로 다른 방의 답을 읽을 수 있었다).
 // 요청은 그 실행의 폴더에만 쓰이고 nonce가 맞아야 처리되므로, 그 실행의 직원·업무로만 동작한다.
 
 import path from 'node:path';
@@ -121,24 +122,16 @@ export async function writeToolResponse(dir: string, id: string, res: ToolRespon
   await atomicJson(path.join(dir, `${id}.response.json`), res);
 }
 
-export async function writeToolPending(dir: string, id: string, data: unknown): Promise<void> {
-  validateId(id);
-  await atomicJson(path.join(dir, `${id}.pending.json`), data);
-}
-
-/** 아직 답하지 않은 요청(데몬이 받아 기다리는 중이면 pending에 그 기록). */
-export async function openToolRequests(dir: string): Promise<{ req: ToolRequest; pending: unknown }[]> {
+/** 아직 답하지 않은 요청 */
+export async function openToolRequests(dir: string): Promise<{ req: ToolRequest }[]> {
   const files = await readdir(dir).catch(() => [] as string[]);
-  const out: { req: ToolRequest; pending: unknown }[] = [];
+  const out: { req: ToolRequest }[] = [];
   for (const f of files.filter((x) => x.endsWith('.request.json')).sort()) {
     const id = f.slice(0, -'.request.json'.length);
     if (files.includes(`${id}.response.json`)) continue;
     try {
       const req = JSON.parse(await readFile(path.join(dir, f), 'utf8')) as ToolRequest;
-      const pending = files.includes(`${id}.pending.json`)
-        ? JSON.parse(await readFile(path.join(dir, `${id}.pending.json`), 'utf8'))
-        : null;
-      out.push({ req: { ...req, id }, pending });
+      out.push({ req: { ...req, id } });
     } catch {
       // 쓰는 중이거나 깨진 파일: 다음 주기에 다시
     }

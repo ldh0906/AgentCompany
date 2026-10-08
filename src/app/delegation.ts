@@ -267,7 +267,14 @@ export class Delegation {
    * 반영 뒤 "나중에 확인"으로 넘긴다(위임받은 직원이 보거나 들을 수 없는 것).
    */
   private approveRequest(a: Approval, d: Employee): void {
-    const detail = a.detail as { requestId: string; checks?: { ticketId: string; id: string }[] };
+    const detail = a.detail as {
+      requestId: string;
+      checks?: { ticketId: string; id: string }[];
+      notDone?: string[];
+      acceptance?: { left: string[] } | null;
+    };
+    // 끝나지 않은 업무나 남은 인수 시험이 있는 결과물은 대표가 직접 본다(일상적인 결정이 아니다).
+    if (detail.notDone?.length || detail.acceptance?.left.length) return;
     const deferred = (detail.checks ?? []).map((c) => `${c.ticketId}:${c.id}`);
     void this.h
       .decideRequest(a.id, 'approved', { deferred, by: `delegate:${d.id}` })

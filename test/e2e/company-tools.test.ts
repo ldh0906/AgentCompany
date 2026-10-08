@@ -25,6 +25,8 @@ test('직원이 실행 중에 회사 도구로 업무판·후속 제안·동료 
   assert.match(summary, /\[tool 3\] Allowed: tests\/extra\.test\.js/);
   // 남의 nonce로 쓴 요청은 처리하지 않는다
   assert.match(summary, /\[forged\] This request does not belong to this run/);
+  // 실행 폴더에 위조한 "답 기다리는 중" 기록은 무시하고 새 요청으로 처리한다(QA 2차: 다른 방의 답을 읽을 수 있었다)
+  assert.match(summary, new RegExp(`\\[forged-pending\\] ${tk.id} \\[`));
 
   const room = env.orch.chat.messages(ticketChannelId(tk.id), 200);
   const qa = env.company.employees().find((e) => e.name === 'QA 직원')!;

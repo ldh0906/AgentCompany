@@ -11,7 +11,7 @@ export interface TodoItem {
   label: string;
   why: string;
   act:
-    | { kind: 'approval'; id: string; checks: string[]; request: boolean; text: string[] }
+    | { kind: 'approval'; id: string; checks: string[]; warn: string[]; request: boolean; text: string[] }
     | { kind: 'draft'; id: string; text: string[] }
     | { kind: 'scope'; ticketId: string }
     | { kind: 'release'; ticketId: string }
@@ -29,7 +29,7 @@ export interface Model {
   msg: string;
   error: string;
   /** 확인·사유 입력 중인 승인: 누른 순간의 항목을 붙잡아 둔다(그사이 목록이 바뀌어도 다른 승인에 적용하지 않게). */
-  target?: { approvalId: string; label: string; checks: string[]; request: boolean } | null;
+  target?: { approvalId: string; label: string; checks: string[]; warn: string[]; request: boolean } | null;
 }
 
 export function todoItems(s: CliState): TodoItem[] {
@@ -61,10 +61,18 @@ export function todoItems(s: CliState): TodoItem[] {
         ? (s.tickets.find((t) => t.id === a.ticketId)?.requirements ?? []).filter((r) => r.evidenceType === 'human_attest').map((r) => r.id)
         : [];
     const acc = d.acceptance as { passed: number; total: number; left: string[] } | null | undefined;
+    // 끝나지 않은 업무·남은 인수 시험: 줄에도 보이고, 승인 전에 한 번 더 확인한다(자세히를 열지 않아도)
+    const notDone = (d.notDone as string[] | undefined) ?? [];
+    const warn = [
+      ...(notDone.length ? [`끝나지 않은 업무 ${notDone.length}개`] : []),
+      ...(acc?.left.length ? [`남은 인수 시험 ${acc.left.length}개`] : []),
+    ];
     out.push({
-      label: a.summary,
+      label: warn.length ? `⚠ ${a.summary}` : a.summary,
       why: req
-        ? '요청 결과물 완성 · 승인하면 한 번에 반영'
+        ? warn.length
+          ? `${warn.join(' · ')} — Enter로 확인`
+          : '요청 결과물 완성 · 승인하면 한 번에 반영'
         : a.kind === 'tool_permission'
           ? `권한 요청: ${String(d.tool ?? '')}`
           : '검수 통과 · 승인하면 반영',
@@ -72,6 +80,7 @@ export function todoItems(s: CliState): TodoItem[] {
         kind: 'approval',
         id: a.id,
         checks,
+        warn,
         request: req,
         text: req
           ? [
@@ -188,7 +197,16 @@ export function render(m: Model, W: number, H: number): string[] {
   else if (m.mode === 'reason')
     lines.push(pad(`${c.yellow(`반려(${m.target?.label ?? ''}) — 무엇을 고쳐야 하나요? >`)} ${m.input}${c.inverse(' ')}`, W));
   else if (m.mode === 'confirm-checks')
-    lines.push(pad(c.yellow(`승인(${m.target?.label ?? ''}) — 직접 확인: [y] 모두 확인했음  [l] 나중에 확인  [Esc] 취소`), W));
+    lines.push(
+      pad(
+        c.yellow(
+          m.target?.checks.length
+            ? `승인 — ${m.target.warn.length ? `⚠ ${m.target.warn.join(', ')} · ` : ''}직접 확인: [y] 모두 확인했음  [l] 나중에 확인  [Esc] 취소`
+            : `승인 — ⚠ ${m.target?.warn.join(', ') ?? ''}. 그래도 승인할까요? [y] 승인  [Esc] 취소`,
+        ),
+        W,
+      ),
+    );
   else lines.push(pad(m.error ? c.red(`✖ ${m.error}`) : m.msg ? c.green(m.msg) : c.dim('[i] 리드에게 말하기'), W));
   lines.push(pad(c.dim(' ↑↓ 고르기 · i 말하기 · a 승인 · r 반려 · Enter 자세히 · o 웹 · q 종료'), W));
   return lines.slice(0, H);
@@ -324,7 +342,8 @@ export async function runTui(
     }
     if (m.mode === 'confirm-checks') {
       m.mode = 'normal';
-      if (key === 'y' || key === 'l' || key === 'ㅛ' || key === 'ㅣ') {
+      const later = (key === 'l' || key === 'ㅣ') && Boolean(m.target?.checks.length);
+      if (key === 'y' || key === 'ㅛ' || later) {
         const t = takeTarget();
         if (!t) return;
         const all = key === 'l' || key === 'ㅣ' ? { deferred: t.checks } : { attested: t.checks };
@@ -369,8 +388,8 @@ export async function runTui(
         if (!item) return;
         if (item.act.kind === 'approval') {
           const a = item.act;
-          if (a.checks.length) {
-            m.target = { approvalId: a.id, label: item.label, checks: a.checks, request: a.request };
+          if (a.checks.length || a.warn.length) {
+            m.target = { approvalId: a.id, label: item.label, checks: a.checks, warn: a.warn, request: a.request };
             m.mode = 'confirm-checks';
             return draw();
           }
@@ -397,7 +416,13 @@ export async function runTui(
       case 'ㄱ':
         if (!item) return;
         if (item.act.kind === 'approval') {
-          m.target = { approvalId: item.act.id, label: item.label, checks: item.act.checks, request: item.act.request };
+          m.target = {
+            approvalId: item.act.id,
+            label: item.label,
+            checks: item.act.checks,
+            warn: item.act.warn,
+            request: item.act.request,
+          };
           m.mode = 'reason';
           return draw();
         }

@@ -161,13 +161,28 @@ async function work(h: TaskHeader, prompt: string): Promise<string> {
     const spec = JSON.parse(process.env.FAKE_COMPANY_MCP) as { env: Record<string, string> };
     const forged = await writeToolRequest(spec.env.AC_TOOL_DIR!, { tool: 'board_status', args: {}, nonce: 'not-this-run' });
     const forgedAnswer = await waitToolResponse(spec.env.AC_TOOL_DIR!, forged, 30_000);
+    // 자기 nonce로 쓴 요청에 "답을 기다리는 중" 기록을 위조해 붙인다(다른 방의 답을 읽으려는 시도).
+    // 데몬은 실행 폴더의 대기 기록을 믿지 않고 새 요청으로 처리해야 한다.
+    const fakeId = randomUUID();
+    const toolDir = spec.env.AC_TOOL_DIR!;
+    writeFileSync(
+      path.join(toolDir, `${fakeId}.pending.json`),
+      JSON.stringify({ roomId: 'general', to: 'someone-else', name: 'X', since: '2000-01-01T00:00:00.000Z' }),
+    );
+    writeFileSync(
+      path.join(toolDir, `${fakeId}.request.json`),
+      JSON.stringify({ tool: 'board_status', args: {}, nonce: h.nonce, id: fakeId, createdAt: new Date().toISOString() }),
+    );
+    const forgedPending = await waitToolResponse(toolDir, fakeId, 30_000);
     if (r[3]?.text.startsWith('Allowed')) {
       mkdirSync('tests', { recursive: true });
       writeFileSync('tests/extra.test.js', '// extra\n');
     }
-    toolNotes = [...r.map((x, i) => `[tool ${i}] ${x.isError ? 'ERROR ' : ''}${x.text}`), `[forged] ${forgedAnswer?.text ?? 'none'}`].join(
-      '\n',
-    );
+    toolNotes = [
+      ...r.map((x, i) => `[tool ${i}] ${x.isError ? 'ERROR ' : ''}${x.text}`),
+      `[forged] ${forgedAnswer?.text ?? 'none'}`,
+      `[forged-pending] ${forgedPending?.text ?? 'none'}`,
+    ].join('\n');
   }
   const lazyNow = behavior === 'lazy' && h.round === 1;
   const rebut = behavior === 'stubborn' && h.round > 1;
