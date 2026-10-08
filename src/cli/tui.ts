@@ -100,7 +100,9 @@ export function todoItems(s: CliState, projectId: string | null): TodoItem[] {
   }
   // 그 밖의 대표 차례(멈춘 업무 등): 허락·재개·다시 검사는 여기서, 나머지는 웹에서
   for (const t of s.ceoTodos.filter(
-    (x: CeoTodo) => x.kind !== 'approval' && x.kind !== 'draft' && (!x.ticketId || projectOfItem(s, x) === projectId),
+    // 업무에 딸린 일은 이 프로젝트 것만. 소속을 모르면(null) 여기서는 처리하지 않는다(웹에서)
+    (x: CeoTodo) =>
+      x.kind !== 'approval' && x.kind !== 'draft' && (!x.ticketId || (projectId !== null && projectOfItem(s, x) === projectId)),
   )) {
     const tid = t.ticketId ?? '';
     const act: TodoItem['act'] =

@@ -98,6 +98,10 @@ test('aco up --fake → aco ask --yes → aco approve: 요청 결과물이 원�
   assert.equal(process.exitCode, 1);
   assert.ok(logs.length && orch.records.approvals('pending').some((a) => a.kind === 'integrate_request'));
   await ac('approve', '--path', origin);
+  assert.ok(
+    logs.some((l) => l.includes(`프로젝트: ${project.name} (${project.originPath})`)),
+    '처리 전에 프로젝트와 원본 경로를 보인다',
+  );
   while (!orch.records.request(req.id)!.integration) {
     if (Date.now() > deadline) throw new Error('반영 시간 초과');
     await new Promise((r) => setTimeout(r, 200));

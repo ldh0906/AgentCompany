@@ -266,7 +266,8 @@ interface Pending {
 export function pendingOf(s: CliState, scope: string | 'all'): Pending[] {
   const order = (a: Approval) => (a.kind === 'integrate_request' ? 0 : a.kind === 'integrate' ? 1 : 2);
   const mine = (projectId: string | null) => scope === 'all' || (projectId !== null && projectId === scope);
-  const tag = (projectId: string | null) => (scope === 'all' ? `[${s.projects.find((p) => p.id === projectId)?.name ?? '회사'}] ` : '');
+  const tag = (projectId: string | null) =>
+    scope === 'all' ? `[${s.projects.find((p) => p.id === projectId)?.name ?? '소속 미확인'}] ` : '';
   return [
     ...[...s.approvals]
       .filter((a) => mine(projectOfItem(s, a)))
@@ -291,23 +292,29 @@ async function pick(
   const s = await client.get<CliState>('state');
   const project = projectFor(s, opts.path ?? process.cwd());
   if (!opts.all && !project) fail('이 폴더의 프로젝트가 없습니다. 프로젝트 폴더에서 실행하거나, 회사 전체를 보려면 --all을 붙이세요.');
-  if (project && !opts.all) say(c.dim(`프로젝트: ${project.name} (${project.originPath})`));
   const list = pendingOf(s, opts.all ? 'all' : project!.id);
   if (!list.length) {
     say(c.dim('대표가 결정할 것이 없습니다.'));
     return null;
   }
+  // 무엇을 고르든 처리하기 전에 어느 프로젝트(어느 원본 저장소)의 것인지 보인다
+  const chosen = (p: Pending | undefined) => {
+    if (!p) return null;
+    const pid = p.request?.projectId ?? (p.approval ? projectOfItem(s, p.approval) : null);
+    const pr = s.projects.find((x) => x.id === pid);
+    say(c.dim(pr ? `프로젝트: ${pr.name} (${pr.originPath})` : '프로젝트: 소속 미확인 (웹 화면에서 확인하세요)'));
+    return { s, p };
+  };
   if (which) {
     const n = Number(which);
     const p =
       Number.isInteger(n) && n >= 1 && n <= list.length ? list[n - 1] : list.find((x) => x.id === which || x.approval?.ticketId === which);
-    return p ? { s, p } : fail(`없는 항목: ${which}`);
+    return p ? chosen(p) : fail(`없는 항목: ${which}`);
   }
-  if (list.length === 1) return { s, p: list[0]! };
+  if (list.length === 1) return chosen(list[0]);
   for (const [i, x] of list.entries()) say(`  ${c.bold(`${i + 1}.`)} ${x.label}`);
   const a = await ask('번호: ');
-  const p = list[Number(a) - 1];
-  return p ? { s, p } : null;
+  return chosen(list[Number(a) - 1]);
 }
 
 async function approve(argv: string[], dataDir: string): Promise<void> {

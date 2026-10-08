@@ -142,3 +142,22 @@ test('대표 차례는 지금 폴더의 프로젝트 것만: 다른 프로젝트
     [],
   );
 });
+
+test('소속을 모르는 대표 할 일은 프로젝트가 아닌 폴더에서도 실행 대상이 되지 않는다(웹에서)', () => {
+  const orphan = {
+    ...state,
+    approvals: [],
+    ceoTodos: [
+      {
+        key: 'hold:T-9',
+        kind: 'permission',
+        title: 'T-9 어디 것인지 모름',
+        link: '/tickets/T-9',
+        ticketId: 'T-9',
+        action: { kind: 'allow', paths: ['x'] },
+      },
+    ],
+  } as unknown as CliState;
+  assert.deepEqual(todoItems(orphan, null), []);
+  assert.deepEqual(todoItems(orphan, 'P-1'), []);
+});
