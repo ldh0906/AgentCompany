@@ -4510,7 +4510,7 @@ ${failure.detail.slice(0, 400)}`,
   }
 
   /** 대표가 초안을 확정한다(고친 초안을 넘길 수 있음). 티켓은 대표 명의로 만들어진다. */
-  acceptRequest(requestId: string, drafts?: TicketDraft[]): Ticket[] {
+  acceptRequest(requestId: string, drafts?: TicketDraft[], answers: { index: number; answer: string | null }[] = []): Ticket[] {
     const req = this.records.request(requestId);
     if (!req || req.status !== 'drafted') throw new DomainError(tr('확정할 수 있는 초안이 없습니다.', 'No draft available to confirm.'));
     // 작업 흐름은 확정할 때 다시 검사한다(확정 화면에서 단계를 빼거나 API로 step을 지워 우회하지 못하게, QA).
@@ -4539,7 +4539,11 @@ ${failure.detail.slice(0, 400)}`,
     }
     // 답하지 않은 질문은 비서실장 제안대로 간다(실측: "기록이 없으면 0을 보여 줄까요?"처럼 뻔한 질문에 대표가 매번 멈췄다).
     // 확정을 막는 검사(작업 흐름)를 모두 통과한 뒤에 기록한다: 거부됐는데 결정만 남지 않게(QA).
-    const pending = req.questions.map((_, i) => i).filter((i) => !req.answers?.[i] && req.proposals?.[i]?.trim());
+    // 확정 화면에서 직접 적은 답, 그다음 답하지 않은 질문은 제안대로
+    const typed = answers.filter((a) => a.answer?.trim());
+    if (typed.length) this.answerQuestions(requestId, typed);
+    const answered = this.records.request(requestId)!;
+    const pending = answered.questions.map((_, i) => i).filter((i) => !answered.answers?.[i] && answered.proposals?.[i]?.trim());
     if (pending.length)
       this.answerQuestions(
         requestId,

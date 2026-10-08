@@ -355,10 +355,17 @@ test('작업 흐름은 확정할 때 다시 검사한다: 단계를 빼거나 �
   const decisionsBefore = env.orch.records.decisions(env.projectId).length;
   assert.throws(() => env.orch.acceptRequest(req.id), /검사 명령이 없습니다/);
   assert.equal(env.orch.records.decisions(env.projectId).length, decisionsBefore, '거부되면 질문 답(결정)도 남기지 않는다');
+  // 확정 화면에서 직접 적은 답도 같다: 거부되면 남지 않는다
+  assert.throws(() => env.orch.acceptRequest(req.id, undefined, [{ index: 0, answer: '이름을 바꾼다' }]), /검사 명령이 없습니다/);
+  assert.equal(env.orch.records.decisions(env.projectId).length, decisionsBefore);
   env.company.updateProject(env.projectId, { verifyCommands: project.verifyCommands });
   // 요구사항 증거를 약하게 고쳐 보내도 흐름의 증거로 돌아간다
   const weak = drafts.map((d) => ({ ...d, requirements: d.requirements.map((r) => ({ ...r, evidenceType: 'inspection' })) }));
-  const [pin, reshape] = env.orch.acceptRequest(req.id, weak);
+  const [pin, reshape] = env.orch.acceptRequest(req.id, weak, [{ index: 0, answer: '이름을 바꾼다' }]);
+  assert.ok(
+    env.orch.records.decisions(env.projectId).some((d) => d.text.includes('이름을 바꾼다')),
+    '확정되면 직접 적은 답이 결정으로 남는다',
+  );
   assert.deepEqual(reshape!.dependsOn, [pin!.id]);
   assert.ok(pin!.requirements.some((r) => r.text.includes('지금 동작을 확인하는 테스트') && r.evidenceType === 'unit_test'));
 });

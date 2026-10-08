@@ -77,7 +77,13 @@ export class Debates {
   private save(d: Debate): void {
     this.h.company.store.setSetting(`debate:${d.id}`, JSON.stringify(d));
     const ids = this.ids();
-    if (!ids.includes(d.id)) this.h.company.store.setSetting('debate_index', JSON.stringify([d.id, ...ids].slice(0, 50)));
+    if (!ids.includes(d.id)) {
+      // 최근 50개만 남기되 끝나지 않은 토론은 빼지 않는다(색인에서 빠지면 다시 이어지지 않고 업무가 멈춘 채 남았다, QA)
+      const all = [d.id, ...ids];
+      const open = (id: string) => id === d.id || (this.get(id)?.phase ?? 'done') !== 'done';
+      const keep = all.filter((id, i) => i < 50 || open(id));
+      this.h.company.store.setSetting('debate_index', JSON.stringify(keep));
+    }
     this.h.changed('chat', d.channelId);
   }
 

@@ -436,8 +436,8 @@ function DraftReview({ r }: { r: CeoRequest }) {
               ],
             },
           });
-        if (typed.length) await api(`requests/${r.id}/answer`, { body: { items: typed } });
-        return api(`requests/${r.id}/accept`, { body: { drafts } });
+        // 적어 둔 답은 확정 요청에 함께: 서버가 확정 검사를 통과한 뒤에만 기록한다(거부되면 결정이 남지 않게)
+        return api(`requests/${r.id}/accept`, { body: { drafts, answers: typed } });
       },
       ko ? '업무를 만들었습니다.' : 'Tickets created.',
     ).then(reload);

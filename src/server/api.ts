@@ -458,7 +458,14 @@ export class Api {
           str(b, 'formula', { optional: true, max: 40 }) || null,
         );
       case 'POST requests/:id/accept':
-        return this.orch.acceptRequest(id!, Array.isArray(b.drafts) ? (b.drafts as never) : undefined);
+        return this.orch.acceptRequest(
+          id!,
+          Array.isArray(b.drafts) ? (b.drafts as never) : undefined,
+          (Array.isArray(b.answers) ? (b.answers as Record<string, unknown>[]) : []).map((x) => ({
+            index: Number(x?.index),
+            answer: typeof x?.answer === 'string' && x.answer.trim() ? x.answer.slice(0, 2000) : null,
+          })),
+        );
       case 'POST requests/:id/answer': {
         const items = Array.isArray(b.items) ? (b.items as Record<string, unknown>[]) : [];
         return this.orch.answerQuestions(

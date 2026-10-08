@@ -116,3 +116,17 @@ test('토론 잇기는 끝나지 않은 토론을 먼저 고른다: 끝난 최�
   await env.orch.debates.sweep();
   assert.deepEqual(advanced, ['D-old']);
 });
+
+test('토론 색인을 최근 50개로 자를 때도 끝나지 않은 토론은 남는다(새 토론 60개가 생겨도 이어진다)', async (t) => {
+  const env = await setup(t);
+  const save = (env.orch.debates as unknown as { save: (d: unknown) => void }).save.bind(env.orch.debates);
+  save({ id: 'D-old', channelId: 'g:old', phase: 'opening', topic: 'old' });
+  for (let i = 0; i < 60; i++) save({ id: `D-done-${i}`, channelId: `g:${i}`, phase: 'done', topic: String(i) });
+  const index = JSON.parse(env.store.getSetting('debate_index') ?? '[]') as string[];
+  assert.ok(index.includes('D-old'), '진행 중인 토론은 색인에 남는다');
+  assert.ok(index.length <= 51);
+  const advanced: string[] = [];
+  (env.orch.debates as unknown as { advance: (id: string) => Promise<void> }).advance = async (id) => void advanced.push(id);
+  await env.orch.debates.sweep();
+  assert.deepEqual(advanced, ['D-old']);
+});
