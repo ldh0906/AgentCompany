@@ -43,7 +43,13 @@ test('aco up --fake → aco ask --yes → aco approve: 요청 결과물이 원�
     assert.equal(process.exitCode, 0, logs.slice(-5).join('\n'));
   };
 
+  // 처음 등록하는 폴더는 신뢰를 묻는다: 대화형이 아니면 --trust 없이는 등록하지 않는다
   await ac('up', '--fake', '--path', origin);
+  assert.equal(company.projects().length, 0);
+  assert.equal(company.employees().length, 0, '등록을 거절하면 팀도 고용하지 않는다');
+  assert.ok(logs.some((l) => l.includes('이 폴더를 신뢰하나요?')));
+  assert.ok(logs.some((l) => l.includes('--trust')));
+  await ac('up', '--fake', '--trust', '--path', origin);
   const project = company.projects()[0]!;
   assert.equal(project.originPath.toLowerCase(), origin.toLowerCase());
   assert.deepEqual(

@@ -61,7 +61,7 @@ async function up(argv: string[], dataDir: string): Promise<void> {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
-    options: { path: { type: 'string' }, fake: { type: 'boolean' } },
+    options: { path: { type: 'string' }, fake: { type: 'boolean' }, trust: { type: 'boolean' } },
   });
   const cwd = values.path ?? process.cwd();
   const client = await connect(dataDir);
@@ -74,6 +74,19 @@ async function up(argv: string[], dataDir: string): Promise<void> {
       fail(
         `여기는 git 저장소의 맨 위 폴더가 아닙니다: ${cwd}\n  새로 시작하려면: git init && git commit --allow-empty -m init   그다음 aco up`,
       );
+    // 처음 등록하는 폴더는 신뢰하는지 먼저 묻는다: AI가 이 저장소를 읽고 고치며, 저장소의 검사 명령을 실행한다.
+    // 대표 요청(2026-10-08): "이 폴더를 신뢰하는지 부터 물어봐야지"
+    say(c.bold('이 폴더를 신뢰하나요?'));
+    say(`  ${cwd}`);
+    say(c.dim('  등록하면 AI 직원들이 이 저장소의 작업 사본을 읽고 고치며, 아래 검사 명령을 실행합니다.'));
+    say(c.dim('  저장소의 스크립트가 실행되므로, 직접 만들었거나 믿을 수 있는 저장소에서만 등록하세요.'));
+    for (const v of repo.verify) say(`    $ ${v.argv.join(' ')}`);
+    if (!repo.verify.length) say(c.dim('    (검사 명령 없음)'));
+    say(c.dim('  원본 폴더는 대표가 결과물을 승인하기 전까지 바뀌지 않습니다.'));
+    if (!values.trust && !(await yes('신뢰하고 등록할까요?', false))) {
+      say(c.dim(process.stdin.isTTY ? '등록하지 않았습니다.' : '등록하지 않았습니다. 확인 없이 등록하려면 --trust를 붙이세요.'));
+      return;
+    }
     project = await client.post<CliState['projects'][number]>('projects', {
       name: repo.name,
       originPath: cwd,
@@ -82,7 +95,7 @@ async function up(argv: string[], dataDir: string): Promise<void> {
       protectedPaths: repo.protectedSuggestions,
     });
     say(`${c.green('✔')} 프로젝트 등록: ${c.bold(project.name)} ${c.dim(`(${repo.baseBranch})`)}`);
-    say(c.dim(`  검사 명령: ${repo.verify.map((v) => v.argv.join(' ')).join(', ') || '없음(웹의 프로젝트 화면에서 추가할 수 있습니다)'}`));
+    if (!repo.verify.length) say(c.dim('  검사 명령은 웹의 프로젝트 화면에서 추가할 수 있습니다.'));
   } else say(`${c.green('✔')} 프로젝트: ${c.bold(project.name)}`);
 
   const active = state.employees.filter((e) => e.active && !e.removedAt);
