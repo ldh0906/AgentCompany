@@ -172,6 +172,19 @@ export class Company {
     });
   }
 
+  /** 직원의 한 달 토큰 한도(0이면 없음). 대표만. */
+  setEmployeeMonthlyLimit(id: string, tokens: number, actor: Actor = { kind: 'ceo' }): Employee {
+    if (actor.kind !== 'ceo') throw new DomainError(tr('예산은 대표만 정할 수 있습니다.', 'Only the CEO can set budgets.'));
+    const v = Math.max(0, Math.round(Number(tokens) || 0));
+    return this.store.transact(() => {
+      const e = this.requireEmployee(id);
+      const updated = { ...e, monthlyTokenLimit: v || null };
+      this.saveEmployee(updated);
+      this.store.appendEvent('ceo', 'employee.budget_changed', id, { from: e.monthlyTokenLimit ?? null, to: v || null }, this.clock());
+      return updated;
+    });
+  }
+
   setEmployeeRank(id: string, rank: Rank, actor: Actor = { kind: 'ceo' }): Employee {
     if (actor.kind !== 'ceo') throw new DomainError(tr('직급은 대표만 바꿀 수 있습니다.', 'Only the CEO can change ranks.'));
     if (!RANKS.includes(rank)) throw new DomainError(tr('알 수 없는 직급입니다.', 'Unknown rank.'));

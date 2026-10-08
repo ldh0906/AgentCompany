@@ -38,6 +38,8 @@ export interface Employee {
   effort?: string | null; // 추론 강도(없으면 CLI 기본값)
   accessLevel: AccessLevel;
   allowedCommands: string[][]; // write-allowlist 등급에서 자동 허용할 argv 접두사
+  /** 한 달 토큰 한도(없거나 0이면 무제한). 넘으면 하던 실행만 마치고 새 실행을 시작하지 않는다. */
+  monthlyTokenLimit?: number | null;
   active: boolean;
   removedAt?: string | null; // 퇴사(삭제). 기록의 이름 표시용으로 남고 다시 활성화할 수 없다.
   createdAt: string;

@@ -144,6 +144,18 @@ export class Records {
     return this.store.list<RunRecord>('runs', 'ORDER BY started_at DESC LIMIT ?', limit);
   }
   /** 토큰 사용량 합계(실행 기록의 usage 칸만 읽는다). 날짜는 이 컴퓨터의 현지 시간 기준. */
+  /** 이 직원이 이번 달(현지 시각 1일부터) 쓴 토큰 */
+  employeeMonthTokens(employeeId: string, now = new Date()): number {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const row = this.store.db
+      .prepare(
+        `SELECT COALESCE(SUM(json_extract(data, '$.usage.total')), 0) AS n FROM runs
+          WHERE json_extract(data, '$.employeeId') = ? AND started_at >= ?`,
+      )
+      .get(employeeId, start) as { n: number };
+    return Number(row.n) || 0;
+  }
+
   usageSummary(now = new Date()): UsageSummary {
     const localDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const today = localDay(now);

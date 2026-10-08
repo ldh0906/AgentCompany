@@ -16,6 +16,7 @@ export interface CliState {
   events: DomainEvent[];
   paused: boolean;
   delegation: { on: boolean };
+  employeeBudgets?: Record<string, { used: number; limit: number }>;
 }
 
 const CLI_LABEL: Record<string, string> = { claude: 'Claude', codex: 'Codex', agy: 'Antigravity', fake: 'Fake' };
@@ -75,7 +76,9 @@ export function teamRows(s: CliState): TeamRow[] {
       const t = run ? s.tickets.find((x) => x.id === run.ticketId) : null;
       const doing = run
         ? `${RUN_LABEL[run.kind] ?? run.kind} ${t ? `${t.id} ${t.title}` : run.ticketId.startsWith('Q-') ? '요청 초안' : ''}`.trim()
-        : '쉬는 중';
+        : (s.employeeBudgets?.[e.id]?.used ?? 0) >= (s.employeeBudgets?.[e.id]?.limit ?? Infinity)
+          ? '멈춤 — 이번 달 예산 소진'
+          : '쉬는 중';
       return {
         id: e.id,
         name: e.name,

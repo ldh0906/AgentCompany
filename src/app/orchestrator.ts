@@ -772,7 +772,12 @@ export class Orchestrator {
     const active = this.company.activeEmployees();
     const load = (e: Employee) =>
       this.company.tickets().filter((x) => x.assigneeId === e.id && !TERMINAL_STATUSES.includes(x.status)).length;
-    const pick = pickStaff(t, active, load);
+    // 이번 달 예산을 다 쓴 직원에게는 새 업무를 주지 않는다(멈춘 직원)
+    const pick = pickStaff(
+      t,
+      active.filter((e) => !this.overBudget(e)),
+      load,
+    );
     if (!pick.ok) {
       const need = DIFFICULTY_RANK[difficultyOf(t)];
       const note =
@@ -811,6 +816,7 @@ export class Orchestrator {
       });
       return;
     }
+    if (this.holdIfOverBudget(t, employee)) return;
     if (this.liveCountFor(employee.cli) >= (this.opts.concurrency[employee.cli] ?? 1)) return;
     const deps = t.dependsOn.every((d) => this.company.requireTicket(d).status === 'done');
     const locks = deps
@@ -992,6 +998,65 @@ export class Orchestrator {
       left -= body.length;
     }
     return out.join('\n');
+  }
+
+  // ======================= 직원별 월 예산 =======================
+
+  /** 이번 달 사용량과 한도(한도가 없으면 null) */
+  monthBudget(e: Pick<Employee, 'id' | 'monthlyTokenLimit'>): { used: number; limit: number } | null {
+    const limit = e.monthlyTokenLimit ?? 0;
+    return limit > 0 ? { used: this.records.employeeMonthTokens(e.id), limit } : null;
+  }
+
+  private overBudget(e: Pick<Employee, 'id' | 'monthlyTokenLimit'>): { used: number; limit: number } | null {
+    const b = this.monthBudget(e);
+    return b && b.used >= b.limit ? b : null;
+  }
+
+  /**
+   * 예산을 다 쓴 직원의 다음 실행은 시작하지 않고 업무를 멈춘다(하던 실행은 끝까지 한다). 대표에게 한 번 알린다.
+   * 사용량 한도 보류라 30분마다 다시 보고, 한도를 올리거나 다음 달이 되면 저절로 이어진다.
+   */
+  private holdIfOverBudget(t: Ticket, e: Employee): boolean {
+    const b = this.overBudget(e);
+    if (!b) return false;
+    const fmt = (n: number) => `${Math.round(n / 1e4).toLocaleString()}${tr('만', '0k')}`;
+    this.company.store.setSetting(`budget_hold:${t.id}`, e.id);
+    this.apply(t.id, {
+      type: 'hold',
+      reason: 'usage_limit',
+      note: tr(
+        `${e.name}이(가) 이번 달 토큰 예산(${fmt(b.limit)})을 다 써서 멈췄습니다. 직원 화면에서 한도를 올리면 이어서 합니다(다음 달 1일에도 다시 시작).`,
+        `${e.name} used up this month's token budget (${fmt(b.limit)}). Raise it on the Team page to continue (it also resumes on the 1st).`,
+      ),
+    });
+    const d = new Date();
+    const key = `budget_notice:${e.id}:${d.getFullYear()}-${d.getMonth() + 1}`;
+    if (!this.company.store.getSetting(key)) {
+      this.company.store.setSetting(key, '1');
+      this.desk.notice(
+        tr(`${e.name}의 이번 달 예산을 다 썼습니다`, `${e.name} used up this month's budget`),
+        tr(
+          `토큰 ${fmt(b.used)} / 한도 ${fmt(b.limit)}. 하던 실행은 마쳤고, 새 실행은 멈췄습니다(${t.id} 등). 직원 화면에서 한도를 올리거나 다른 직원에게 맡기세요.`,
+          `${fmt(b.used)} of ${fmt(b.limit)} tokens. Running work finished; new runs are stopped (${t.id} and others). Raise the limit or reassign.`,
+        ),
+        '/org',
+      );
+    }
+    return true;
+  }
+
+  /** 대표가 직원 예산을 바꾸면: 예산 때문에 멈춘 그 직원의 업무를 바로 다시 본다. */
+  setEmployeeMonthlyLimit(employeeId: string, tokens: number): Employee {
+    const e = this.company.setEmployeeMonthlyLimit(employeeId, tokens);
+    if (!this.overBudget(e))
+      for (const t of this.company.tickets())
+        if (t.hold?.reason === 'usage_limit' && this.company.store.getSetting(`budget_hold:${t.id}`) === e.id) {
+          this.company.store.setSetting(`budget_hold:${t.id}`, '');
+          this.apply(t.id, { type: 'release_hold' });
+        }
+    this.changed('employee', employeeId);
+    return e;
   }
 
   private lastFeedback(t: Ticket): string | null {
@@ -1548,6 +1613,18 @@ export class Orchestrator {
         channelId,
         'system',
         tr(`${employee.name}은(는) 지금 비활성 상태라 답할 수 없습니다.`, `${employee.name} is inactive.`),
+        'event',
+      );
+      return;
+    }
+    if (this.overBudget(employee)) {
+      this.chat.post(
+        channelId,
+        'system',
+        tr(
+          `${employee.name}은(는) 이번 달 토큰 예산을 다 써서 답하지 않습니다. 직원 화면에서 한도를 올리세요.`,
+          `${employee.name} used up this month's token budget and will not reply. Raise it on the Team page.`,
+        ),
         'event',
       );
       return;
@@ -2745,6 +2822,7 @@ ${failure.detail.slice(0, 400)}`,
       });
       return;
     }
+    if (this.holdIfOverBudget(t, reviewer)) return;
     if (this.liveCountFor(reviewer.cli) >= (this.opts.concurrency[reviewer.cli] ?? 1)) return;
     this.runBusy(t.id, async () => {
       const project = this.company.requireProject(t.projectId);
@@ -4114,7 +4192,9 @@ ${failure.detail.slice(0, 400)}`,
    * 대표 요청(2026-10-03): 업무를 비서실장에게 모두 몰면 병목이 된다. 실측(4777): 최근 초안 14개를 모두 팀장 한 명이 썼다.
    */
   drafter(): Employee | null {
-    const pool = this.company.activeEmployees().filter((e) => e.roles.includes('chief-of-staff') || e.roles.includes('planner'));
+    const pool = this.company
+      .activeEmployees()
+      .filter((e) => (e.roles.includes('chief-of-staff') || e.roles.includes('planner')) && !this.overBudget(e));
     return (
       pool.sort(
         (a, b) =>
@@ -4142,6 +4222,16 @@ ${failure.detail.slice(0, 400)}`,
   async submitRequest(projectId: string, text: string): Promise<CeoRequest> {
     const project = this.company.requireProject(projectId);
     const chief = this.drafter();
+    const spent = this.company
+      .activeEmployees()
+      .filter((e) => (e.roles.includes('chief-of-staff') || e.roles.includes('planner')) && this.overBudget(e));
+    if (!chief && spent.length)
+      throw new DomainError(
+        tr(
+          `초안을 쓸 직원(${spent.map((e) => e.name).join(', ')})이 이번 달 토큰 예산을 다 썼습니다. 직원 화면에서 한도를 올리세요.`,
+          `The drafting employees (${spent.map((e) => e.name).join(', ')}) used up this month's token budget. Raise it on the Team page.`,
+        ),
+      );
     if (!chief)
       throw new DomainError(
         tr(

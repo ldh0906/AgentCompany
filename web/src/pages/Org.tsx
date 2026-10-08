@@ -103,6 +103,42 @@ export function Org() {
                 {(state.usage?.byEmployee[e.id]?.total ?? 0) > 0 &&
                   ` · ${ko ? '토큰' : 'tokens'} ${fmtTokens(state.usage!.byEmployee[e.id]!.total, lang)}`}
               </div>
+              {/* 한 달 예산: 넘으면 하던 실행만 마치고 멈춘다(Paperclip처럼 직원 단위 한도) */}
+              {(() => {
+                const b = state.employeeBudgets?.[e.id];
+                const over = b && b.used >= b.limit;
+                return (
+                  <div className="row" style={{ marginTop: 6 }}>
+                    <span className={`chip ${over ? 'bad' : ''}`}>
+                      {b
+                        ? `${ko ? '이번 달' : 'This month'} ${fmtTokens(b.used, lang)} / ${fmtTokens(b.limit, lang)}${over ? (ko ? ' · 멈춤' : ' · stopped') : ''}`
+                        : ko
+                          ? '월 예산 없음'
+                          : 'No monthly budget'}
+                    </span>
+                    <button
+                      className="btn small"
+                      disabled={busy}
+                      onClick={() => {
+                        const cur = b ? String(Math.round(b.limit / 10_000)) : '';
+                        const v = window.prompt(
+                          ko
+                            ? `${e.name}의 한 달 토큰 한도(만 단위, 0이면 없음). 넘으면 하던 실행만 마치고 멈춥니다.`
+                            : `${e.name}'s monthly token limit in units of 10k (0 = none). When reached, running work finishes and new work stops.`,
+                          cur,
+                        );
+                        if (v === null) return;
+                        void run(
+                          () => api(`employees/${e.id}/budget`, { body: { monthlyTokenLimit: Math.max(0, Number(v) || 0) * 10_000 } }),
+                          ko ? '예산을 바꿨습니다.' : 'Budget updated.',
+                        ).then(reload);
+                      }}
+                    >
+                      {ko ? '월 예산' : 'Budget'}
+                    </button>
+                  </div>
+                );
+              })()}
               <div className="row" style={{ marginTop: 12 }}>
                 <button
                   className="btn small primary"

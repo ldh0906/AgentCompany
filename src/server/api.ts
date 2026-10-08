@@ -282,6 +282,8 @@ export class Api {
               }
             : {}),
         });
+      case 'POST employees/:id/budget':
+        return this.orch.setEmployeeMonthlyLimit(id!, Number(b.monthlyTokenLimit ?? 0));
       case 'POST employees/:id/rank':
         return this.company.setEmployeeRank(id!, oneOf(b, 'rank', RANKS));
       case 'POST employees/:id/remove':
@@ -557,6 +559,13 @@ export class Api {
           }),
       ),
       chiefOfStaff: this.orch.chiefOfStaff()?.id ?? null,
+      // 직원별 이번 달 토큰과 한도(한도가 있는 직원만)
+      employeeBudgets: Object.fromEntries(
+        this.company
+          .employees()
+          .map((e) => [e.id, this.orch.monthBudget(e)] as const)
+          .filter(([, v]) => v),
+      ),
       permissionDelegate: this.orch.permissionDelegate()?.id ?? null,
       usage: r.usageSummary(),
       previews: this.orch.previewList(),

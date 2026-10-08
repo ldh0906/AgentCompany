@@ -91,6 +91,8 @@ export interface State {
   /** 권한 요청을 대표 대신 처리하는 전체 자동 직원(없으면 null → 대표가 처리). */
   permissionDelegate?: string | null;
   usage?: UsageSummary;
+  /** 직원별 이번 달 토큰과 한도(한도가 있는 직원만) */
+  employeeBudgets?: Record<string, { used: number; limit: number }>;
   previews?: PreviewInfo[];
   /** 회사 전체 일시정지 */
   paused?: boolean;
