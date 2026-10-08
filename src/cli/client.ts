@@ -1,5 +1,5 @@
 // CLI ↔ 회사 데몬: daemon.lock에 적힌 주소·토큰으로 대시보드와 같은 REST API를 부른다.
-// 데몬이 없으면 창 없이 띄운다(`ac`만 쳐도 회사가 켜진다).
+// 데몬이 없으면 창 없이 띄운다(`aco`만 쳐도 회사가 켜진다).
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';

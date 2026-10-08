@@ -12,7 +12,7 @@
   "type": "module",
   "bin": {
     "agent-company": "dist/cli/main.js",
-    "ac": "dist/cli/main.js"
+    "aco": "dist/cli/main.js"
   },
   "files": [
     "dist",

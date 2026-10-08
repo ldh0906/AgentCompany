@@ -24,14 +24,14 @@ const HELP = () =>
     `Agent Company — 로컬 AI 개발 조직
 
 빠르게 (저장소 폴더에서):
-  ac up [starter|workshop|factory|팀.yaml] [--fake]  이 폴더를 프로젝트로 등록하고 팀 고용(회사가 꺼져 있으면 켬)
-  ac ask "만들고 싶은 것"                          리드에게 요청 → 업무 초안 확인 → 시작
-  ac                                              터미널 화면(팀 · 진행 · 대표 차례 · 리드에게 말하기)
-  ac ps                                           누가 무엇을 하는지
-  ac approve [번호] [--branch] / ac reject [번호] "이유"   결과물 승인·반려, 초안 확정·버리기
-  ac team [export 파일]                            내장 팀 보기 · 지금 팀을 YAML로
-  ac open / ac down                               웹 화면 열기 · 회사 끄기
-  (모든 ac 명령: --demo 데모 회사, --data-dir DIR, --port N)
+  aco up [starter|workshop|factory|팀.yaml] [--fake]  이 폴더를 프로젝트로 등록하고 팀 고용(회사가 꺼져 있으면 켬)
+  aco ask "만들고 싶은 것"                        리드에게 요청 → 업무 초안 확인 → 시작
+  aco                                             터미널 화면(팀 · 진행 · 대표 차례 · 리드에게 말하기)
+  aco ps                                          누가 무엇을 하는지
+  aco approve [번호] [--branch] / aco reject [번호] "이유"  결과물 승인·반려, 초안 확정·버리기
+  aco team [export 파일]                          내장 팀 보기 · 지금 팀을 YAML로
+  aco open / aco down                             웹 화면 열기 · 회사 끄기
+  (모든 aco 명령: --demo 데모 회사, --data-dir DIR, --port N)
 
 사용법:
   agent-company start [--port 4777] [--data-dir DIR] [--no-open] [--browser] [--user-profiles] [--language ko|en]
@@ -47,14 +47,14 @@ const HELP = () =>
     `Agent Company — Local AI development team
 
 Quick (in a repository folder):
-  ac up [starter|workshop|factory|team.yaml] [--fake]  Register this folder and hire a team (starts the company if needed)
-  ac ask "what to build"                           Ask the lead → review the draft tickets → start
-  ac                                              Terminal screen (team · progress · your turn · talk to the lead)
-  ac ps                                           Who is doing what
-  ac approve [n] [--branch] / ac reject [n] "why"  Approve or reject results, confirm or drop drafts
-  ac team [export FILE]                            Built-in teams · save the current team as YAML
-  ac open / ac down                               Open the web dashboard · stop the company
-  (every ac command: --demo for the demo company, --data-dir DIR, --port N)
+  aco up [starter|workshop|factory|team.yaml] [--fake]  Register this folder and hire a team (starts the company if needed)
+  aco ask "what to build"                         Ask the lead → review the draft tickets → start
+  aco                                             Terminal screen (team · progress · your turn · talk to the lead)
+  aco ps                                          Who is doing what
+  aco approve [n] [--branch] / aco reject [n] "why"  Approve or reject results, confirm or drop drafts
+  aco team [export FILE]                          Built-in teams · save the current team as YAML
+  aco open / aco down                             Open the web dashboard · stop the company
+  (every aco command: --demo for the demo company, --data-dir DIR, --port N)
 
 Usage:
   agent-company start [--port 4777] [--data-dir DIR] [--no-open] [--browser] [--user-profiles] [--language ko|en]
@@ -417,7 +417,7 @@ async function screenCheckCmd(args: string[]): Promise<void> {
   for (const e of cap.errors) console.log(`  ${e}`);
 }
 
-/** ac 명령·TUI 공통: --data-dir, --demo(데모 회사)를 떼어 내고 데이터 폴더를 정한다. */
+/** aco 명령·TUI 공통: --data-dir, --demo(데모 회사)를 떼어 내고 데이터 폴더를 정한다. */
 function acArgs(argv: string[]): { dataDir: string; rest: string[]; daemonArgs: string[] } {
   const rest = [...argv];
   let dataDir: string | null = null;

@@ -1,4 +1,4 @@
-// 회사 상태 → 터미널에 보일 것(ac ps와 TUI가 같이 쓴다). 순수 함수: 상태만 받아 글자를 만든다.
+// 회사 상태 → 터미널에 보일 것(aco ps와 TUI가 같이 쓴다). 순수 함수: 상태만 받아 글자를 만든다.
 import type { Approval, DomainEvent, Employee, Project, Ticket } from '../core/types.ts';
 import type { CeoTodo } from '../app/notify.ts';
 import type { CeoRequest } from '../app/records.ts';

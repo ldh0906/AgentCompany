@@ -1,4 +1,4 @@
-// 팀 파일(YAML): 팀을 한 장으로 적고 `ac up <팀>` 한 번으로 고용한다. 내장 팀은 teams/*.yaml.
+// 팀 파일(YAML): 팀을 한 장으로 적고 `aco up <팀>` 한 번으로 고용한다. 내장 팀은 teams/*.yaml.
 // cli: primary(로그인된 첫 AI), secondary(다른 AI가 있으면 그것, 없으면 primary), 또는 claude/codex/agy를 직접.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';

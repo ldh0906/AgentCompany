@@ -1,4 +1,4 @@
-// `ac` 터미널 화면: 팀 · 진행 · 대표 차례 · 리드에게 말하기를 한 화면에.
+// `aco` 터미널 화면: 팀 · 진행 · 대표 차례 · 리드에게 말하기를 한 화면에.
 // 그리기(render)는 상태만 받아 줄을 만드는 순수 함수이고, 키 입력·새로 고침은 runTui가 한다. 의존성 없음(ANSI).
 import type { CeoTodo } from '../app/notify.ts';
 import { Client, ensureDaemon } from './client.ts';
@@ -128,7 +128,7 @@ export function render(m: Model, W: number, H: number): string[] {
   // 왼쪽: 팀
   const team = s ? teamRows(s) : [];
   const left: string[] = [c.bold('팀')];
-  if (s && !team.length) left.push(c.dim('직원 없음 — q로 나가서 ac up'));
+  if (s && !team.length) left.push(c.dim('직원 없음 — q로 나가서 aco up'));
   for (const r of team) {
     left.push(`${r.busy ? c.green('●') : c.gray('○')} ${r.name} ${c.dim(r.cli)}`);
     left.push(`  ${r.busy ? c.cyan(r.doing) : c.dim(r.doing)}`);
@@ -152,7 +152,7 @@ export function render(m: Model, W: number, H: number): string[] {
     for (const t of text) for (const part of wrap(t, rightW)) right2.push(part);
   } else {
     right2.push(c.bold('진행'));
-    if (s && !m.project) right2.push(c.yellow('이 폴더는 아직 프로젝트가 아닙니다. q로 나가서 `ac up`을 실행하세요.'));
+    if (s && !m.project) right2.push(c.yellow('이 폴더는 아직 프로젝트가 아닙니다. q로 나가서 `aco up`을 실행하세요.'));
     const f = s ? feed(s, bodyH - 1) : [];
     if (s && !f.length && m.project) right2.push(c.dim('아직 기록이 없습니다. 아래에서 리드에게 만들고 싶은 것을 말해 보세요.'));
     for (const x of f) right2.push(`${c.gray(hhmm(x.at))} ${x.text}`);
@@ -206,7 +206,7 @@ export function wrap(text: string, w: number): string[] {
 
 export async function runTui(dataDir: string, daemonArgs: string[] = []): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    console.log('터미널 화면은 대화형 터미널에서만 열립니다. `ac ps`를 쓰세요.');
+    console.log('터미널 화면은 대화형 터미널에서만 열립니다. `aco ps`를 쓰세요.');
     return;
   }
   const { daemon } = await ensureDaemon(dataDir, daemonArgs);
@@ -272,7 +272,7 @@ export async function runTui(dataDir: string, daemonArgs: string[] = []): Promis
         if (!text) return draw();
         if (mode === 'input') {
           const project = m.s ? projectFor(m.s, process.cwd()) : null;
-          if (!project) return flash('이 폴더의 프로젝트가 없습니다. `ac up` 먼저.', true);
+          if (!project) return flash('이 폴더의 프로젝트가 없습니다. `aco up` 먼저.', true);
           void act(
             () => client.post('requests', { projectId: project.id, text }),
             '리드에게 보냈습니다. 초안이 나오면 대표 차례에 뜹니다.',

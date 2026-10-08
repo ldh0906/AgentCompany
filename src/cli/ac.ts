@@ -1,5 +1,5 @@
-// 짧은 명령으로 회사 쓰기: ac up · ac ask · ac ps · ac approve · ac reject · ac down · ac open · ac team
-// 대시보드와 같은 API를 부른다(데몬이 없으면 창 없이 띄운다). 인자 없이 `ac`만 치면 TUI.
+// 짧은 명령으로 회사 쓰기: aco up · aco ask · aco ps · aco approve · aco reject · aco down · aco open · aco team
+// 대시보드와 같은 API를 부른다(데몬이 없으면 창 없이 띄운다). 인자 없이 `aco`만 치면 TUI.
 import { execFile } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
@@ -72,7 +72,7 @@ async function up(argv: string[], dataDir: string): Promise<void> {
     const repo = await client.get<RepoInspection>(`inspect?path=${encodeURIComponent(cwd)}`);
     if (!repo.isGit)
       fail(
-        `여기는 git 저장소의 맨 위 폴더가 아닙니다: ${cwd}\n  새로 시작하려면: git init && git commit --allow-empty -m init   그다음 ac up`,
+        `여기는 git 저장소의 맨 위 폴더가 아닙니다: ${cwd}\n  새로 시작하려면: git init && git commit --allow-empty -m init   그다음 aco up`,
       );
     project = await client.post<CliState['projects'][number]>('projects', {
       name: repo.name,
@@ -101,7 +101,7 @@ async function up(argv: string[], dataDir: string): Promise<void> {
       });
       if (!available.length)
         fail(
-          '로그인된 AI CLI가 없습니다. `agent-company doctor`로 로그인 방법을 확인하거나, 구독 없이 체험하려면 `ac up --fake`를 쓰세요.',
+          '로그인된 AI CLI가 없습니다. `agent-company doctor`로 로그인 방법을 확인하거나, 구독 없이 체험하려면 `aco up --fake`를 쓰세요.',
         );
     }
     for (const s of resolveSeats(team, available)) {
@@ -113,7 +113,7 @@ async function up(argv: string[], dataDir: string): Promise<void> {
   say();
   printTeam(state);
   say();
-  say(`다음: ${c.cyan('ac ask "만들고 싶은 것"')}  ·  화면: ${c.cyan('ac')}  ·  웹: ${c.cyan('ac open')}`);
+  say(`다음: ${c.cyan('aco ask "만들고 싶은 것"')}  ·  화면: ${c.cyan('aco')}  ·  웹: ${c.cyan('aco open')}`);
 }
 
 function sameDir(a: string, b: string): boolean {
@@ -126,25 +126,25 @@ function sameDir(a: string, b: string): boolean {
 async function askLead(argv: string[], dataDir: string): Promise<void> {
   const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: { yes: { type: 'boolean', short: 'y' } } });
   const text = positionals.join(' ').trim() || (process.stdin.isTTY ? await ask('무엇을 만들까요? ') : '');
-  if (!text) fail('요청 내용을 적어 주세요: ac ask "로그인 화면 만들어줘"');
+  if (!text) fail('요청 내용을 적어 주세요: aco ask "로그인 화면 만들어줘"');
   const client = await connect(dataDir);
   const state = await client.get<CliState>('state');
-  const project = projectFor(state, process.cwd()) ?? fail('이 폴더의 프로젝트가 없습니다. 먼저 `ac up`을 실행하세요.');
+  const project = projectFor(state, process.cwd()) ?? fail('이 폴더의 프로젝트가 없습니다. 먼저 `aco up`을 실행하세요.');
   const req = await client.post<CeoRequest>('requests', { projectId: project.id, text });
   const lead = state.employees.find((e) => e.id === req.employeeId);
   say(`${c.dim('→')} ${lead?.name ?? '리드'}에게 보냈습니다. 업무로 나누는 중…`);
   const done = await waitDrafted(client, req.id);
   if (done.status === 'failed') fail(`초안을 만들지 못했습니다: ${done.error ?? ''}`);
   if (done.status === 'accepted') {
-    say(`${c.green('✔')} 위임 모드라 리드가 바로 확정했습니다. 진행은 ${c.cyan('ac')}로 보세요.`);
+    say(`${c.green('✔')} 위임 모드라 리드가 바로 확정했습니다. 진행은 ${c.cyan('aco')}로 보세요.`);
     return;
   }
   if (done.status !== 'drafted') fail(`요청 상태: ${done.status}`);
   printDrafts(done);
   if (values.yes || (await yes('이대로 시작할까요?'))) {
     await client.post(`requests/${done.id}/accept`, {});
-    say(`${c.green('✔')} 시작했습니다. 진행은 ${c.cyan('ac')}(화면) 또는 ${c.cyan('ac ps')}로 보세요.`);
-  } else say(c.dim('확정하지 않았습니다. 나중에 `ac approve`나 웹에서 확정할 수 있습니다.'));
+    say(`${c.green('✔')} 시작했습니다. 진행은 ${c.cyan('aco')}(화면) 또는 ${c.cyan('aco ps')}로 보세요.`);
+  } else say(c.dim('확정하지 않았습니다. 나중에 `aco approve`나 웹에서 확정할 수 있습니다.'));
 }
 
 async function waitDrafted(client: Client, id: string): Promise<CeoRequest> {
@@ -192,7 +192,7 @@ function printDrafts(r: CeoRequest): void {
 function printTeam(s: CliState): void {
   const rows = teamRows(s);
   if (!rows.length) {
-    say(c.dim('직원이 없습니다. `ac up`으로 팀을 고용하세요.'));
+    say(c.dim('직원이 없습니다. `aco up`으로 팀을 고용하세요.'));
     return;
   }
   say(
@@ -229,7 +229,7 @@ async function ps(dataDir: string): Promise<void> {
   else say(c.dim('진행 중인 업무가 없습니다.'));
   const todos = s.ceoTodos.length;
   say();
-  say(todos ? c.yellow(`⚑ 대표 차례 ${todos}개 — ac approve 또는 ac`) : c.dim('대표가 할 일은 없습니다.'));
+  say(todos ? c.yellow(`⚑ 대표 차례 ${todos}개 — aco approve 또는 aco`) : c.dim('대표가 할 일은 없습니다.'));
 }
 
 // ---------------- approve / reject ----------------
@@ -347,14 +347,14 @@ async function team(argv: string[], dataDir: string): Promise<void> {
     const yaml = exportTeam('my-team', s.employees);
     if (file) {
       writeFileSync(file, yaml, 'utf8');
-      say(`${c.green('✔')} ${file}에 저장했습니다. 다른 곳에서: ac up ${file}`);
+      say(`${c.green('✔')} ${file}에 저장했습니다. 다른 곳에서: aco up ${file}`);
     } else process.stdout.write(yaml);
     return;
   }
-  say(c.bold('내장 팀') + c.dim('  (ac up <이름> 또는 ac up 내팀.yaml)'));
+  say(c.bold('내장 팀') + c.dim('  (aco up <이름> 또는 aco up 내팀.yaml)'));
   for (const t of builtInTeams())
     say(`  ${c.cyan(t.name.padEnd(9))} ${t.description} ${c.dim(`— ${t.seats.map((x) => x.name).join(', ')}`)}`);
-  say(c.dim('\n지금 팀을 파일로: ac team export 내팀.yaml'));
+  say(c.dim('\n지금 팀을 파일로: aco team export 내팀.yaml'));
 }
 
 async function down(dataDir: string): Promise<void> {

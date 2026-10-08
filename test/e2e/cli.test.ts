@@ -1,4 +1,4 @@
-// ac 명령: 데몬(같은 API)에 붙어 up → ask → approve 한 바퀴. 대표 요청(2026-10-08): CLI로 쉽게쉽게.
+// aco 명령: 데몬(같은 API)에 붙어 up → ask → approve 한 바퀴. 대표 요청(2026-10-08): CLI로 쉽게쉽게.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -14,7 +14,7 @@ import { parseTeam } from '../../src/cli/teams.ts';
 import { gitOut } from '../../src/workspace/git.ts';
 import { makeOrigin } from './helpers.ts';
 
-test('ac up --fake → ac ask --yes → ac approve: 요청 결과물이 원본에 하나로 들어간다', { timeout: 300_000 }, async (t) => {
+test('aco up --fake → aco ask --yes → aco approve: 요청 결과물이 원본에 하나로 들어간다', { timeout: 300_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'ac-cli-'));
   const dataDir = join(root, 'data');
   mkdirSync(dataDir, { recursive: true });
