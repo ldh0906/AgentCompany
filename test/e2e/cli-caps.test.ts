@@ -20,9 +20,14 @@ test('업데이트로 쓰는 하위 명령이 없어진 CLI는 실행 전에 멈
   assert.ok(env.store.events('fake', 50).some((e) => e.type === 'cli.incompatible'));
 
   // CLI가 고쳐졌다: 다시 점검하고 보류를 풀면 끝까지 간다
-  fakeAdapter.helpChecks = [{ args: ['-e', 'process.stdout.write("  app-server   Run")'], tokens: ['app-server'] }];
+  // 고쳐진 CLI: 정상 도움말(Usage·Commands)에 app-server가 있다 — 도움말로 인식한 뒤 통과해야 한다
+  fakeAdapter.helpChecks = [
+    { args: ['-e', 'process.stdout.write("Usage: fake [OPTIONS]\\nCommands:\\n  app-server   Run")'], tokens: ['app-server'] },
+  ];
   env.orch.forgetCliCaps();
   env.orch.releaseHold(tk.id);
   const done = await driveUntil(env, tk.id, statusIs('awaiting_approval'), 120_000);
   assert.equal(done.hold, null);
+  const caps = JSON.parse(env.store.getSetting('cli_caps:fake')!) as { missing: string[]; error?: string };
+  assert.deepEqual([caps.missing, caps.error], [[], undefined], '도움말로 인식해 확인한 결과다(근거 없음으로 통과한 것이 아니다)');
 });

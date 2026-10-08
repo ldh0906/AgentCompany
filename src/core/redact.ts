@@ -20,20 +20,55 @@ const PATTERNS: RegExp[] = [
 const NAMED =
   /(?<![A-Za-z0-9])((?:_?[A-Za-z0-9]+_)*_?(?:api[_-]?key|secret(?:[_-]?key)?|access[_-]?token|auth[_-]?token|token|password|passwd|client[_-]?secret)\b["']?\s*[:=]\s*["']?)(?=[^\s"',;]*[A-Za-z])[^\s"',;]{8,}/gi;
 const BEARER = /\b(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}/g;
-// Authorization 헤더 값: 방식 이름(Basic·ApiKey·Negotiate 등 아무거나)은 두고 자격 증명만. 문장("Authorization: successful")은
-// 두도록, 자격 증명은 숫자·기호가 섞였거나 16자 이상일 때만(QA 2026-10-08). URL에 넣은 비밀번호(postgres://user:비밀번호@host)
-const AUTH_HEADER =
-  /\b(Authorization["']?\s*[:=]\s*["']?(?:[A-Za-z][A-Za-z0-9-]*\s+)?)(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-]|[A-Za-z0-9._~+/=-]{16,})[A-Za-z0-9._~+/=-]{8,}/gi;
+// URL에 넣은 비밀번호(postgres://user:비밀번호@host)
 const URL_PASSWORD = /(\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@"']+:)[^\s@/"']+(@)/gi;
+const AUTH_KEY = /\bAuthorization(["']?\s*[:=]\s*)/gi;
+
+/** 따옴표 q로 끝나는 곳(역슬래시로 감싼 것은 건너뜀). 없으면 줄 끝. */
+function valueEnd(text: string, from: number, q: string | null): number {
+  for (let i = from; i < text.length; i++) {
+    const ch = text[i]!;
+    if (ch === '\n' || ch === '\r') return i;
+    if (ch === '\\') i++;
+    else if (q && ch === q) return i;
+  }
+  return text.length;
+}
+
+/**
+ * Authorization 헤더 값: 방식 이름(Basic·ApiKey·Digest·AWS4-HMAC-SHA256 등 아무거나)만 두고 나머지 값 전체를 가린다.
+ * 값은 따옴표 안이면 닫는 따옴표까지, 아니면 줄 끝까지(헤더가 따옴표 안에서 시작했으면 그 따옴표까지). Digest·Signature처럼
+ * 여러 항목(키="값", …)으로 된 자격 증명도 통째로 가린다(QA 2026-10-08). 문장("Authorization: successful", "not-required")은
+ * 두도록, 숫자·=·+·/가 있거나 첫 낱말이 16자 이상일 때만 자격 증명으로 본다.
+ */
+function redactAuthorization(text: string): string {
+  let out = '';
+  let last = 0;
+  for (const m of text.matchAll(AUTH_KEY)) {
+    const start = m.index! + m[0].length;
+    if (start < last) continue;
+    const open = text[start] === '"' || text[start] === "'" ? text[start]! : null;
+    const before = text[m.index! - 1];
+    const q = open ?? (before === '"' || before === "'" ? before : null);
+    const from = open ? start + 1 : start;
+    const end = valueEnd(text, from, q);
+    const value = text.slice(from, end);
+    const scheme = /^([A-Za-z][A-Za-z0-9-]*\s+)(?=\S)/.exec(value)?.[1] ?? '';
+    const cred = value.slice(scheme.length);
+    const first = cred.trim().split(/[\s,]/)[0] ?? '';
+    if (!cred.trim() || !(/[0-9=+/]/.test(cred) || first.length >= 16)) continue;
+    out += `${text.slice(last, from)}${scheme}${REDACTED}`;
+    last = end;
+  }
+  return out + text.slice(last);
+}
 
 /** 문자열에서 비밀값을 가린다. known: 정확히 아는 비밀값(이 데몬의 접속 토큰 등) */
 export function redact(text: string, known: string[] = []): string {
   let out = text;
   for (const k of known) if (k.length >= 8) out = out.split(k).join(REDACTED);
   for (const p of PATTERNS) out = out.replace(p, REDACTED);
-  return out
-    .replace(NAMED, `$1${REDACTED}`)
-    .replace(AUTH_HEADER, `$1${REDACTED}`)
+  return redactAuthorization(out.replace(NAMED, `$1${REDACTED}`))
     .replace(BEARER, `$1${REDACTED}`)
     .replace(URL_PASSWORD, `$1${REDACTED}$2`);
 }

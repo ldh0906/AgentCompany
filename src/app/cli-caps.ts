@@ -16,6 +16,8 @@ export interface CliCaps {
 }
 
 export const CAPS_TTL_MS = 6 * 3600_000;
+/** 판정 규칙의 판: 규칙을 바꾸면 올린다(저장된 예전 판정을 버리게) */
+export const CAPS_RULES = 2;
 
 function run(file: string, args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number; out: string; killed: boolean }> {
   return new Promise((resolve) => {

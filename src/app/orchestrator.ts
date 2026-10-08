@@ -60,7 +60,7 @@ import { commandOf, judgeToolRequest } from '../core/guard.ts';
 import { readAllJsonl, readJsonlFrom } from '../runner/jsonl.ts';
 import { activityFrom } from './activity.ts';
 import { classifyRun, openCall, STUCK_KINDS, type RunState } from './run-state.ts';
-import { CAPS_TTL_MS, lacksFor, probeCli, type CliCaps } from './cli-caps.ts';
+import { CAPS_RULES, CAPS_TTL_MS, lacksFor, probeCli, type CliCaps } from './cli-caps.ts';
 import type { RecoveredRun, RecoveryReport } from './recovery.ts';
 export type { RecoveredRun, RecoveryReport } from './recovery.ts';
 import { PROGRESS_MS, progressLine } from './progress.ts';
@@ -626,7 +626,8 @@ export class Orchestrator {
       // npm으로 설치한 CLI는 .cmd가 아니라 실제 스크립트가 업데이트로 바뀐다
       const target = located.kind === 'node-script' ? (located.launch.argsPrefix.at(-1) ?? located.path) : located.path;
       const st = await stat(target).catch(() => null);
-      const key = `${target}|${st?.mtimeMs ?? 0}|${st?.size ?? 0}`;
+      // 판정 규칙이 바뀌면(CAPS_RULES) 예전 결과를 다시 쓰지 않는다
+      const key = `${CAPS_RULES}|${target}|${st?.mtimeMs ?? 0}|${st?.size ?? 0}`;
       const settingKey = `cli_caps:${adapter.kind}`;
       const saved = JSON.parse(this.company.store.getSetting(settingKey) || 'null') as CliCaps | null;
       if (saved?.key === key && Date.now() - Date.parse(saved.checkedAt) < CAPS_TTL_MS) return saved;

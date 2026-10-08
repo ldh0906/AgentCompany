@@ -36,8 +36,36 @@ test('Node 프로젝트에서 흔한 형태(QA): .npmrc 토큰, Basic 인증, UR
   assert.equal(redact('Authorization: ApiKey supersecretvalue'), `Authorization: ApiKey ${REDACTED}`);
   assert.equal(redact('Authorization: Negotiate abcdefghijklmnop'), `Authorization: Negotiate ${REDACTED}`);
   assert.equal(redact('Authorization: k3y-abcdef12'), `Authorization: ${REDACTED}`);
-  for (const s of ['Authorization: successful', 'Authorization: successful for the admin user', 'Authorization: Bearer token'])
+  for (const s of [
+    'Authorization: successful',
+    'Authorization: successful for the admin user',
+    'Authorization: Bearer token',
+    'Authorization: not-required',
+    'Authorization: read_only',
+  ])
     assert.equal(redact(s), s, s);
+  // 여러 항목으로 된 자격 증명(Digest·Signature·AWS SigV4)은 방식 이름만 두고 통째로(QA 확인 회차)
+  assert.equal(
+    redact('Authorization: Digest username="Mufasa", realm="x", nonce="dcd98b", response="6629fae49393a05397450978507c4ef1"'),
+    `Authorization: Digest ${REDACTED}`,
+  );
+  assert.equal(
+    redact('Authorization: Signature keyId="rsa-key-1",algorithm="hs2019",signature="YWJjZGVmZ2hpams="\nnext line'),
+    `Authorization: Signature ${REDACTED}\nnext line`,
+  );
+  assert.equal(
+    redact('Authorization: AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20261008/us-east-1/s3/aws4_request, Signature=0123456789abcdef'),
+    `Authorization: AWS4-HMAC-SHA256 ${REDACTED}`,
+  );
+  // 따옴표 안의 헤더는 그 따옴표까지만(뒤의 명령은 그대로), JSON 문자열 안의 이스케이프도
+  assert.equal(
+    redact('curl -H "Authorization: Digest username=\\"a\\", response=\\"66\\"" https://api.example.com/x'),
+    `curl -H "Authorization: Digest ${REDACTED}" https://api.example.com/x`,
+  );
+  assert.equal(
+    redact('{"authorization":"Digest response=\\"6629fae4\\"","url":"/x"}'),
+    `{"authorization":"Digest ${REDACTED}","url":"/x"}`,
+  );
   assert.equal(
     redact('DATABASE_URL=postgres://app:pa55w0rd@db.local:5432/main'),
     `DATABASE_URL=postgres://app:${REDACTED}@db.local:5432/main`,
