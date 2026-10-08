@@ -51,6 +51,8 @@ export interface CeoRequest {
     writeScope: string[];
     dependsOn: number[];
     difficulty?: 'easy' | 'normal' | 'hard';
+    /** 공유 계약 업무(첫 초안만) */
+    contract?: boolean;
   }[];
   questions: string[];
   proposals?: (string | null)[];

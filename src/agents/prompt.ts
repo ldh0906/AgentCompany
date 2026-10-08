@@ -88,6 +88,22 @@ export interface WorkPromptInput {
   knownIssues?: string[];
   /** 이 실행이 이어가는 지난 회차(대화 이어가기). 없으면 새 대화. */
   resumedRound?: number | null;
+  /** 요청의 공유 계약 파일 내용("--- 경로 ---" 다음 내용). 없으면 계약 없음. */
+  contract?: string | null;
+}
+
+/** 공유 계약 블록: 같은 요청의 업무들이 같은 이름·타입·값을 쓰게 한다(파일은 시스템이 고정한다). */
+function contractBlock(contract: string | null | undefined, who: 'work' | 'review'): string {
+  if (!contract) return '';
+  const rule =
+    who === 'work'
+      ? 'The first ticket of this request fixed these shared definitions so every part fits together. Use these names, types, values and APIs exactly as written. Do not edit these files: an edit is quarantined and needs the CEO. If the contract is wrong or missing something you need, do what you can without changing it and explain in "questions" (status "needs_decision").'
+      : 'This request fixed these shared definitions first. The work must use them exactly (names, types, values, APIs). A mismatch with the contract, or a second definition of the same thing, is a reason to request changes.';
+  return `## Shared contract (frozen for this request)
+${rule}
+
+${dataBlock('Shared contract files', contract)}
+`;
 }
 
 /**
@@ -226,6 +242,8 @@ ${dataBlock('Project document rules', i.project.docRules)}
 
 ${dataBlock('Current decisions (only status=current are binding)', i.decisions.map((d) => `- [${d.id}] ${d.text}`).join('\n'))}
 
+${contractBlock(i.contract, 'work')}
+
 ${i.feedback ? dataBlock('Feedback and notes (reviewer feedback, CEO notes, agreed plans) — address every point, or explain why not', i.feedback) : ''}
 
 ## Final answer format (required)
@@ -250,6 +268,8 @@ export interface ReviewPromptInput {
   /** 이 업무를 만든 대표 요청 원문 */
   request?: string | null;
   language: string;
+  /** 요청의 공유 계약 파일 내용 */
+  contract?: string | null;
 }
 
 export function buildReviewPrompt(i: ReviewPromptInput): string {
@@ -324,6 +344,8 @@ ${dataBlock('Project document rules', i.project.docRules)}
 ${dataBlock('Current CEO decisions (binding)', (i.decisions ?? []).map((d) => `- [${d.id}] ${d.text}`).join('\n'))}
 
 ${requestBlock(i.request, 'review')}
+
+${contractBlock(i.contract, 'review')}
 
 ## Final answer format (required)
 Write reasons in language "${i.language}". End with exactly one JSON code block:
@@ -408,6 +430,7 @@ ${
     : `- V-model: before splitting, write 2-6 "acceptance" tests for the WHOLE request from the CEO's point of view: what the CEO would check at the end to say "this is what I asked for", each with how to check it (a test to run, a file to read, a demo to run, a page to open and what to do). After all tickets are done, a QA colleague checks the merged result against them and the system creates fix tickets for what fails. Keep them about the CEO's goals, not implementation details.`
 }
 - If the request hides a big fork with real trade-offs that the team should argue before building (for example which storage or framework, a pricing model, a product direction), add "debate": {"topic":"the question in one line","why":"what is at stake"}. The team debates it and the CEO decides before the tickets start. Use it rarely: not for small choices, which go in "questions".
+- Shared contract: when two or more tickets must agree on the same names, data shapes, function signatures, API routes, constants or visual values (colors, sizes, wording), make the FIRST ticket a contract ticket with "contract": true. It writes only those shared definitions (types, interfaces, constants, a data or API schema, design tokens), as code where possible so type checks and tests catch mismatches, each with a one-line comment of what it means. Give it a narrow write scope for just those files (for example "src/contract/**"). Every other ticket builds on it; after it is done its files are frozen for the rest of the request and changing them needs the CEO. Leave "contract" false for a single ticket or tickets that share nothing.
 - Prefer 1-5 tickets. Fewer is better, but do not bundle unrelated work: independent parts should be separate tickets so different employees can work at the same time.
 - Give each ticket a "difficulty": "easy" (small, local, low risk), "normal" (a typical feature or fix), or "hard" (cross-cutting, risky, or design-heavy). Difficulty decides the minimum rank: easy = junior+, normal = senior+, hard = lead.
 - Plan for parallel work with the team below: only leads can take "hard", and a dependsOn chain runs one ticket after another. Measured: three chained hard tickets went to the single implementer lead and took 1.5 hours while two seniors sat idle. Prefer "normal" tickets with disjoint write scopes (for example data/logic, UI, and each feature separately) and use dependsOn only where files really overlap or one part truly needs the other's code. Keep "hard" for work that really needs it.
@@ -436,7 +459,7 @@ ${dataBlock('Project document rules', i.project.docRules)}
 ## Final answer format (required)
 Write titles and text in language "${i.language}". End with exactly one JSON code block:
 ${fence}json
-{"nonce":"${i.nonce}","kind":"drafts","summary":"...","tickets":[{"type":"impl|doc|review|research","difficulty":"easy|normal|hard","title":"...","purpose":"...","requirements":[{"text":"...","evidenceType":"unit_test"}],"doneCriteria":"...","writeScope":["src/feature/**"],"dependsOn":[]}],"questions":[{"question":"...","proposal":"..."}],"verifySuggestions":[{"label":"typecheck","command":"npx tsc --noEmit","evidenceType":"static_check"}],"debate":null,"acceptance":[{"check":"what the CEO gets, in their words","how":"how to check it"}]}
+{"nonce":"${i.nonce}","kind":"drafts","summary":"...","tickets":[{"type":"impl|doc|review|research","difficulty":"easy|normal|hard","title":"...","purpose":"...","requirements":[{"text":"...","evidenceType":"unit_test"}],"doneCriteria":"...","writeScope":["src/feature/**"],"dependsOn":[],"contract":false}],"questions":[{"question":"...","proposal":"..."}],"verifySuggestions":[{"label":"typecheck","command":"npx tsc --noEmit","evidenceType":"static_check"}],"debate":null,"acceptance":[{"check":"what the CEO gets, in their words","how":"how to check it"}]}
 ${fence}
 `;
 }

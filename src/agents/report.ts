@@ -233,6 +233,8 @@ export interface TicketDraft {
   writeScope: string[];
   dependsOn: number[]; // 같은 초안 목록 안의 앞선 인덱스
   difficulty: Difficulty; // 비서실장 제안. 모르는 값은 보통
+  /** 공유 계약 업무(첫 초안만): 여러 업무가 함께 쓸 이름·타입·값을 먼저 고정한다 */
+  contract?: boolean;
 }
 
 /** 비서실장이 제안하는 검증 명령: 요구사항에 필요한 검사를 프로젝트가 아직 못 돌릴 때(예: 타입 검사). */
@@ -325,6 +327,7 @@ export function parseDrafts(
       doneCriteria: isStr(d.doneCriteria) && d.doneCriteria ? d.doneCriteria : '요구사항 충족',
       writeScope,
       difficulty: (DIFFICULTIES as readonly string[]).includes(String(d.difficulty)) ? (d.difficulty as Difficulty) : 'normal',
+      ...(i === 0 && d.contract === true && (type === 'impl' || type === 'doc') ? { contract: true } : {}),
       dependsOn: Array.isArray(d.dependsOn)
         ? (d.dependsOn as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n < i)
         : [],

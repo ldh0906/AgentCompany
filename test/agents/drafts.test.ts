@@ -21,3 +21,17 @@ test('초안 난이도: easy/normal/hard를 읽고, 없거나 모르는 값은 n
   assert.ok(r.ok);
   assert.deepEqual(r.ok && r.report.tickets.map((x) => x.difficulty), ['hard', 'easy', 'normal', 'normal']);
 });
+
+test('공유 계약: 첫 초안의 contract만 받는다(뒤 초안·조사 업무의 contract는 무시)', () => {
+  const r = parseDrafts(
+    text([
+      { ...draft(), contract: true },
+      { ...draft(), contract: true },
+    ]),
+    'n',
+  );
+  assert.ok(r.ok);
+  assert.deepEqual(r.ok && r.report.tickets.map((x) => Boolean(x.contract)), [true, false]);
+  const research = parseDrafts(text([{ ...draft(), type: 'research', contract: true }]), 'n');
+  assert.equal(research.ok && research.report.tickets[0]!.contract, undefined);
+});

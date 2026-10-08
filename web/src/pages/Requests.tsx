@@ -476,7 +476,19 @@ function DraftReview({ r }: { r: CeoRequest }) {
                       <b>
                         {i + 1}. {ed.title}
                       </b>{' '}
-                      <span className="chip">{d.type}</span>
+                      <span className="chip">{d.type}</span>{' '}
+                      {d.contract && i === 0 && (
+                        <span
+                          className="chip warn"
+                          title={
+                            ko
+                              ? '여러 업무가 함께 쓸 이름·값을 먼저 정합니다. 끝나면 이 파일들은 고정되고, 바꾸려면 대표 허락이 필요합니다.'
+                              : 'Fixes the names and values the other tickets share. Its files are frozen afterwards; changing them needs you.'
+                          }
+                        >
+                          {ko ? '공유 계약' : 'Shared contract'}
+                        </span>
+                      )}
                       {d.dependsOn.length > 0 && <span className="sub"> ← {d.dependsOn.map((x) => x + 1).join(', ')}</span>}{' '}
                       <button className="btn small" onClick={() => setEditing(i)}>
                         {ko ? '수정' : 'Edit'}

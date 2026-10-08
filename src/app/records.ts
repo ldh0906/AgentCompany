@@ -97,6 +97,8 @@ export interface CeoRequest {
    * 원본 저장소에는 대표가 요청 전체를 한 번 승인할 때 들어간다. 없으면 옛 방식(업무마다 대표 승인).
    */
   branch?: string | null;
+  /** 공유 계약 업무: 끝나면 그 업무가 만든 파일은 이 요청의 다른 업무에게 고정된다(바꾸려면 대표 허락). */
+  contractTicketId?: string | null;
   /** 요청 전체를 원본에 반영한 결과(반영했으면 다시 승인을 만들지 않는다). */
   integration?: { at: string; result: unknown } | null;
   error: string | null;

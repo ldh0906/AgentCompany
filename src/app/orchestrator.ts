@@ -228,7 +228,7 @@ export class Orchestrator {
       answerTicket: (id, answer, remember) => this.answerTicket(id, answer, remember),
       raiseTokenBudget: (id) => this.raiseTokenBudget(id),
       addWriteScope: (id, paths) => this.addWriteScope(id, paths),
-      resolveScopeHold: (id, allow) => this.resolveScopeHold(id, allow),
+      resolveScopeHold: (id, allow) => this.resolveScopeHold(id, allow, 'delegate'),
       decideIntegration: (approvalId, decision, o) => this.decideIntegration(approvalId, decision, o),
       decideRequest: (approvalId, decision, o) => this.decideRequest(approvalId, decision, o),
       scopeRequestOf: (id) => this.scopeRequestOf(id),
@@ -850,8 +850,10 @@ export class Orchestrator {
       const nonce = randomBytes(6).toString('hex');
       const feedback = this.lastFeedback(next);
       const resumeFrom = this.resumeSource(next, employee, wt.path);
+      const contract = this.contractOf(next);
       const prompt = buildWorkPrompt({
         resumedRound: resumeFrom?.round ?? null,
+        contract: contract ? await this.contractText(contract, paths) : null,
         employee,
         owner: next.ownerId ? this.company.employees().find((e) => e.id === next.ownerId) : null,
         project,
@@ -940,6 +942,43 @@ export class Orchestrator {
       this.company.store.appendEvent('orchestrator', 'request.branch_created', req.id, { branch: req.branch, sha: created });
     }
     return req.branch;
+  }
+
+  /**
+   * 요청의 공유 계약: 계약 업무가 끝나(요청 브랜치에 들어가) 고정된 파일. 계약 업무 자신과 계약이 없는 요청은 null.
+   * 대표 요청(2026-10-08): 여러 AI가 작업해도 하나의 결과물, 고정된 값이 나와야 한다.
+   */
+  private contractOf(t: Pick<Ticket, 'id' | 'projectId'>): { ticketId: string; branch: string; paths: string[] } | null {
+    const req = this.requestOf(t);
+    const id = req?.contractTicketId;
+    if (!req || !id || id === t.id) return null;
+    const ct = this.company.store.get<Ticket>('tickets', id);
+    if (ct?.status !== 'done') return null;
+    const paths = this.records.latestSubmission(ct)?.changedPaths ?? [];
+    return paths.length ? { ticketId: id, branch: req.branch, paths } : null;
+  }
+
+  /** 바뀐 파일 중 공유 계약 파일 */
+  private contractHits(t: Pick<Ticket, 'id' | 'projectId'>, changed: string[]): string[] {
+    const c = this.contractOf(t);
+    return c ? changed.filter((p) => c.paths.includes(p)) : [];
+  }
+
+  /** 계약 파일의 지금 내용(요청 브랜치에서, 지시에 넣을 만큼만) */
+  private async contractText(c: { branch: string; paths: string[] }, paths: ReturnType<typeof projectPaths>): Promise<string> {
+    const out: string[] = [];
+    let left = 12_000;
+    for (const p of c.paths) {
+      if (left <= 0) {
+        out.push(tr('… (길어서 생략: 파일을 직접 읽으세요)', '… (truncated: read the files directly)'));
+        break;
+      }
+      const r = await git(['show', `refs/heads/${c.branch}:${p}`], paths.mirror, { allowFail: true });
+      const body = r.code === 0 ? r.stdout.slice(0, left) : '(deleted)';
+      out.push(`--- ${p} ---\n${body}`);
+      left -= body.length;
+    }
+    return out.join('\n');
   }
 
   private lastFeedback(t: Ticket): string | null {
@@ -2399,6 +2438,12 @@ ${failure.detail.slice(0, 400)}`,
         });
         return;
       }
+      // 공유 계약은 쓰기 범위 안이어도 고정: 고치면 격리하고 대표 허락을 기다린다(대표가 이 제출물에 허락했으면 통과).
+      const contractHit = this.contractHits(ticket, sub.changedPaths);
+      if (contractHit.length && this.company.store.getSetting(`contract_ok:${ticketId}`) !== sub.headSha) {
+        this.apply(ticketId, { type: 'scope_violation', paths: contractHit.map((p) => tr(`계약:${p}`, `Contract:${p}`)) });
+        return;
+      }
     }
 
     const head = sub.headSha ?? sub.baseSha ?? '';
@@ -2704,6 +2749,10 @@ ${failure.detail.slice(0, 400)}`,
         decisions: this.records.decisions(project.id, 'current'),
         request: this.records.requestOfTicket(t)?.text ?? null,
         language: this.opts.language,
+        contract: await (async () => {
+          const c = this.contractOf(t);
+          return c ? this.contractText(c, paths) : null;
+        })(),
       });
       // 검수자는 항상 읽기 전용으로 실행한다.
       await this.launch({
@@ -4056,8 +4105,11 @@ ${failure.detail.slice(0, 400)}`,
     const list = drafts ?? req.drafts;
     const created: Ticket[] = [];
     this.company.store.transact(() => {
+      // 공유 계약(첫 초안): 다른 업무는 모두 계약이 끝난 뒤 시작한다(비서실장이 빠뜨려도 코드가 건다).
+      const contract = Boolean(list[0]?.contract) && (list[0]!.type === 'impl' || list[0]!.type === 'doc');
       for (const d of list) {
         const deps = d.dependsOn.map((i) => created[i]?.id).filter((x): x is string => Boolean(x));
+        if (contract && created[0] && !deps.includes(created[0].id)) deps.push(created[0].id);
         created.push(
           this.company.createTicket(
             {
@@ -4083,6 +4135,7 @@ ${failure.detail.slice(0, 400)}`,
         status: 'accepted',
         ticketIds: created.map((t) => t.id),
         ...(makes ? { branch: ticketBranch(req.id) } : {}),
+        ...(makes && contract ? { contractTicketId: created[0]!.id } : {}),
       });
       this.company.store.appendEvent('ceo', 'request.accepted', req.id, { tickets: created.map((t) => t.id) });
     });
@@ -4332,13 +4385,14 @@ ${failure.detail.slice(0, 400)}`,
    * allow: 그 파일들을 쓰기 범위에 더하고 검증을 이어간다(보호 경로·git 조작은 허용할 수 없다).
    * revert: 직원에게 그 변경을 되돌리라고 수정 요청한다.
    */
-  resolveScopeHold(ticketId: string, allow: boolean): Ticket {
+  resolveScopeHold(ticketId: string, allow: boolean, by: 'ceo' | 'delegate' = 'ceo'): Ticket {
     const t = this.company.requireTicket(ticketId);
     if (t.hold?.reason !== 'needs_permission' || t.status !== 'verifying')
       throw new DomainError(tr('범위 밖 수정으로 멈춘 업무가 아닙니다.', 'This ticket is not held for out-of-scope changes.'));
     const sub = this.records.latestSubmission(t);
     const project = this.company.requireProject(t.projectId);
     const scope = checkScope(sub?.changedPaths ?? [], t.writeScope, project.protectedPaths);
+    const contractHit = this.contractHits(t, sub?.changedPaths ?? []);
     if (allow) {
       if (sub?.refViolations.length || sub?.originChanged || scope.protectedTouched.length)
         throw new DomainError(
@@ -4347,10 +4401,17 @@ ${failure.detail.slice(0, 400)}`,
             'Changes to protected paths, the original repo or git refs cannot be allowed. Ask for a revert.',
           ),
         );
+      // 공유 계약 변경은 대표만: 이 제출물에 한해 허락한다(다음 제출물에서 또 바꾸면 다시 묻는다).
+      if (contractHit.length && by !== 'ceo')
+        throw new DomainError(tr('공유 계약 변경은 대표만 허락할 수 있습니다.', 'Only the CEO can allow changes to the shared contract.'));
+      if (contractHit.length && sub?.headSha) {
+        this.company.store.setSetting(`contract_ok:${t.id}`, sub.headSha);
+        this.company.store.appendEvent('ceo', 'contract.change_allowed', t.id, { paths: contractHit, headSha: sub.headSha });
+      }
       if (scope.outOfScope.length) this.company.extendWriteScope(t.id, scope.outOfScope);
       return this.releaseHold(t.id);
     }
-    const files = [...scope.outOfScope, ...scope.protectedTouched];
+    const files = [...scope.outOfScope, ...scope.protectedTouched, ...contractHit];
     this.releaseHold(t.id);
     return this.apply(t.id, {
       type: 'verification_failed',
